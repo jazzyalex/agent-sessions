@@ -21,6 +21,7 @@ enum ClaudeBase64ImageScanner {
                                         maxMatches: Int = 200,
                                         shouldCancel: () -> Bool = { false }) throws -> [Base64ImageDataURLScanner.LocatedSpan] {
         let chunkSize = 64 * 1024
+        let cancellationStride = 32 * 1024
         let fh = try FileHandle(forReadingFrom: url)
         defer { try? fh.close() }
 
@@ -333,14 +334,17 @@ enum ClaudeBase64ImageScanner {
             let chunk = try fh.read(upToCount: chunkSize) ?? Data()
             if chunk.isEmpty { break }
 
-            for (i, byte) in chunk.enumerated() {
+            var index = 0
+            while index < chunk.count {
+                let byte = chunk[chunk.startIndex + index]
+                let pos = fileOffset + UInt64(index)
+                index += 1
                 cancelCheckCounter += 1
-                if cancelCheckCounter >= 32_768 {
+                if cancelCheckCounter >= cancellationStride {
                     cancelCheckCounter = 0
                     if shouldCancel() { return results }
                 }
 
-                let pos = fileOffset + UInt64(i)
                 if byte != 0x0A && byte != 0x0D { lineHasContent = true }
 
                 if inString {
@@ -402,13 +406,17 @@ enum ClaudeBase64ImageScanner {
                         if smallStringBytes.count < 512 {
                             smallStringBytes.append(byte)
                         }
-                    case .valueLarge:
-                        // Base64 string length only.
-                        if !largeStringInvalid {
-                            largeStringLength += 1
+                    case .valueLarge, .ignored:
+                        // These values only need the next quote or escape. A
+                        // megabyte of base64 or tool output needs no byte-by-byte
+                        // token handling. Stop at the next cancellation check.
+                        let skipped = unescapedRunLength(
+                            in: chunk, offset: index, limit: cancellationStride - cancelCheckCounter)
+                        if case .valueLarge = stringMode, !largeStringInvalid {
+                            largeStringLength += 1 + skipped
                         }
-                    case .ignored:
-                        break
+                        index += skipped
+                        cancelCheckCounter += skipped
                     }
                     continue
                 }
@@ -434,5 +442,18 @@ enum ClaudeBase64ImageScanner {
         }
 
         return Array(results.prefix(maxMatches))
+    }
+
+    private static func unescapedRunLength(in chunk: Data, offset: Int, limit: Int) -> Int {
+        let count = min(chunk.count - offset, limit)
+        guard count > 0 else { return 0 }
+        return chunk.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return 0 }
+            let start = base.advanced(by: offset)
+            let quote = memchr(start, 0x22, count)
+            let beforeQuote = quote.map { start.distance(to: UnsafeRawPointer($0)) } ?? count
+            let escape = memchr(start, 0x5C, beforeQuote)
+            return escape.map { start.distance(to: UnsafeRawPointer($0)) } ?? beforeQuote
+        }
     }
 }

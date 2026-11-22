@@ -97,5 +97,26 @@ final class ClaudeBase64ImageScannerLineIndexTests: XCTestCase {
         let located = try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: 20)
         XCTAssertEqual(located.count, 0)
     }
+
+    func testLongStringsPreserveEscapesAndImageOffsetsAcrossReadChunks() throws {
+        let toolPrefix = #"{"type":"tool_result","output":""#
+        // Place the backslash at the end of the 64 KB read.
+        let toolRecord = toolPrefix + String(repeating: "x", count: 65_535 - toolPrefix.utf8.count)
+            + #"\" still tool output"}"# + "\n"
+        let imagePrefix = #"{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":""#
+        let imageSuffix = #""}}]}}"# + "\n"
+        let base64 = String(repeating: "QUJD", count: 40_000)
+        let invalidRecord = imagePrefix + base64 + #"\/"# + imageSuffix
+        let prefix = toolRecord + invalidRecord + imagePrefix
+        let url = try writeTempJSONL(prefix + base64 + imageSuffix)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let images = try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url)
+        XCTAssertEqual(images.map(\.lineIndex), [2])
+        let span = try XCTUnwrap(images.first?.span)
+        XCTAssertEqual(span.base64PayloadOffset, UInt64(prefix.utf8.count))
+        XCTAssertEqual(span.base64PayloadLength, base64.utf8.count)
+        XCTAssertEqual(span.endOffset, UInt64(prefix.utf8.count + base64.utf8.count))
+    }
 }
 

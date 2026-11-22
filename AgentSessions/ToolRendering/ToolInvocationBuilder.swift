@@ -51,6 +51,14 @@ enum ToolInvocationBuilder {
         let call = ref.callBlockIndex.flatMap { block(at: $0, in: blocks) }
         let outputs = ref.outputBlockIndices.compactMap { block(at: $0, in: blocks) }
         let toolName = call?.toolName ?? outputs.first?.toolName
+        let provenResult: Block? = {
+            guard let id = call?.toolCallID, outputs.count == 1, let result = outputs.first,
+                  result.kind == .toolOut, result.toolCallID == id, !result.isErrorOutput,
+                  result.toolSidecar?.isError != true, result.toolSidecar?.interrupted != true,
+                  result.toolSidecar?.exitCode.map({ $0 == 0 }) != false,
+                  result.toolDisposition != .rejected, result.toolDisposition != .runtimeError else { return nil }
+            return result
+        }()
 
         var actions: [ToolAction] = []
         var scriptOutput: DecodedText?
@@ -60,7 +68,7 @@ enum ToolInvocationBuilder {
             invocationDuration = duration ?? exec.wallTimeSeconds
             let statuses = actionStatuses(plan, ref: ref, blocks: blocks)
             (actions, scriptOutput) = codeModeActions(plan, exec: exec, statuses: statuses, status: ref.status,
-                                                      duration: invocationDuration)
+                                                      duration: invocationDuration, exactPair: provenResult != nil)
         } else if let draft = plan.drafts.first {
             let decoded = decodeOutputs(outputs, source: source, toolName: toolName)
             let exitCode = decoded.facts.lazy.compactMap(exitCodeFact).first
@@ -69,8 +77,11 @@ enum ToolInvocationBuilder {
                 ?? failedExitCode(ref.status)
             let wallTime = decoded.facts.lazy.compactMap(wallTimeFact).first
             if invocationDuration == nil { invocationDuration = wallTime }
+            let syntax = outputSyntax(call: call, result: provenResult, source: source,
+                                      decoded: decoded, status: ref.status)
             actions = [finish(draft, output: decoded.text, facts: decoded.facts, hiddenNotes: decoded.hiddenNotes,
-                              status: ref.status, exitCode: exitCode, duration: wallTime ?? duration)]
+                              status: ref.status, exitCode: exitCode, duration: wallTime ?? duration,
+                              outputSyntax: syntax)]
         }
         return ToolInvocation(ref: ref, displayToolName: plan.displayToolName, actions: actions,
                               scriptSource: plan.scriptSource, scriptOutput: scriptOutput,
@@ -461,7 +472,7 @@ enum ToolInvocationBuilder {
     /// A heredoc (`<<WORD`, `<<'WORD'`, `<<"WORD"`, `<<-WORD`) opened on the first line, whose
     /// terminator is the last non-blank line. Anything else (a here-string, two heredocs, text after
     /// the terminator) is not split, so no command text is lost.
-    private static func splitHeredoc(_ command: String) -> (command: String, body: String)? {
+    static func splitHeredoc(_ command: String) -> (command: String, body: String)? {
         guard let newline = command.firstIndex(of: "\n") else { return nil }
         let first = command[..<newline]
         var openers: [Range<Substring.Index>] = []
@@ -604,6 +615,42 @@ enum ToolInvocationBuilder {
 
     // MARK: - Output
 
+    private static func outputSyntax(call: Block?, result: Block?, source: SessionSource,
+                                     decoded: DecodedOutput, status: ToolStatus) -> ToolOutputSyntax? {
+        guard let call, let result, let text = decoded.text, status == .success,
+              !decoded.facts.contains(where: ToolOutputSyntax.isIncomplete),
+              (call.toolNamespace ?? "").isEmpty else { return nil }
+        switch (source, call.toolName) {
+        case (.claude, "Read"), (.opencode, "read"):
+            let args = parseInput(call.toolInput, source: source).object
+            let key = source == .claude ? "file_path" : "filePath"
+            guard let path = args[key]?.stringValue else { return nil }
+            if source == .claude, case .lineNumbered = text.shape {
+                return ToolOutputSyntax.file(path: path)
+            }
+            if source == .opencode {
+                return ToolOutputSyntax.file(path: path, wrappedByOpenCode: true)
+            }
+            return nil
+        case (.claude, "WebFetch"):
+            guard case .markdown = text.shape else { return nil }
+            return ToolOutputSyntax(language: nil)
+        case (.claude, "Bash"):
+            guard decoded.facts.compactMap(exitCodeFact).allSatisfy({ $0 == 0 }) else { return nil }
+            let args = parseInput(call.toolInput, source: source).object
+            return ToolOutputSyntax.blameRead(args["command"])
+        case (.codex, "exec_command"), (.codex, "shell"), (.codex, "local_shell_call"):
+            let recorded = decoded.facts.compactMap(exitCodeFact) + [result.toolSidecar?.exitCode].compactMap { $0 }
+            guard !recorded.isEmpty, recorded.allSatisfy({ $0 == 0 }) else { return nil }
+            let args = parseInput(call.toolInput, source: source).object
+            guard args["cmd"] == nil || args["command"] == nil else { return nil }
+            let input = args["cmd"] ?? args["command"]
+            return ToolOutputSyntax.shellRead(input, output: text) ?? ToolOutputSyntax.blameRead(input)
+        default:
+            return nil
+        }
+    }
+
     private struct DecodedOutput {
         var text: DecodedText?
         var facts: [AgentFact] = []
@@ -672,7 +719,7 @@ enum ToolInvocationBuilder {
     /// The actions of a code-mode call and the script output that no command owns. `statuses` comes
     /// from `actionStatuses` (one per draft), so the statuses match `rowSummary`.
     private static func codeModeActions(_ plan: InputPlan, exec: CodexExecOutput, statuses: [ToolStatus],
-                                        status: ToolStatus, duration: Double?) -> ([ToolAction], DecodedText?) {
+                                        status: ToolStatus, duration: Double?, exactPair: Bool) -> ([ToolAction], DecodedText?) {
         // No readable call: the one "Ran script" action is the script, so the whole output is its own.
         guard let script = plan.script else {
             guard let draft = plan.drafts.first else { return ([], nil) }
@@ -682,13 +729,24 @@ enum ToolInvocationBuilder {
         }
         let assigned = CodexExecOutput.assign(exec, to: script)
         let single = plan.drafts.count == 1
+        let literalRead = exactPair && single && exec.status == .completed && exec.looseText == nil
+            && exec.facts.compactMap(exitCodeFact).allSatisfy({ $0 == 0 })
+            && !exec.facts.contains(where: ToolOutputSyntax.isIncomplete)
+            ? plan.scriptSource.flatMap { ToolOutputSyntax.literalSingleton($0, script: script) } : nil
         var actions: [ToolAction] = []
         for (offset, draft) in plan.drafts.enumerated() {
             let actionStatus = offset < statuses.count ? statuses[offset] : status
             if let chunk = assigned[offset] {
-                actions.append(finish(draft, output: redactedCiphertext(chunk.output), facts: chunk.facts, hiddenNotes: [],
+                let output = redactedCiphertext(chunk.output)
+                let syntax = chunk.exitCode == 0 && actionStatus == .success
+                    && chunk.facts.compactMap(exitCodeFact).allSatisfy({ $0 == 0 })
+                    && !chunk.facts.contains(where: ToolOutputSyntax.isIncomplete)
+                    ? literalRead.flatMap {
+                        ToolOutputSyntax.shellRead($0, output: output) ?? ToolOutputSyntax.blameRead($0)
+                    } : nil
+                actions.append(finish(draft, output: output, facts: chunk.facts, hiddenNotes: [],
                                       status: actionStatus, exitCode: chunk.exitCode ?? failedExitCode(actionStatus),
-                                      duration: chunk.wallTimeSeconds ?? (single ? duration : nil)))
+                                      duration: chunk.wallTimeSeconds ?? (single ? duration : nil), outputSyntax: syntax))
             } else {
                 actions.append(finish(draft, output: nil, facts: [], hiddenNotes: [], status: actionStatus,
                                       exitCode: single || actionStatus != status ? failedExitCode(actionStatus) : nil,
@@ -717,7 +775,8 @@ enum ToolInvocationBuilder {
     // MARK: - Finishing
 
     private static func finish(_ draft: Draft, output: DecodedText?, facts: [AgentFact], hiddenNotes: [String],
-                               status: ToolStatus, exitCode: Int?, duration: Double?) -> ToolAction {
+                               status: ToolStatus, exitCode: Int?, duration: Double?,
+                               outputSyntax: ToolOutputSyntax? = nil) -> ToolAction {
         var bracket: [String] = []
         if let exitCode {
             bracket.append(ToolChip.exit(exitCode))
@@ -746,7 +805,7 @@ enum ToolInvocationBuilder {
                           context: draft.context, command: draft.command, exactCommand: draft.exactCommand,
                           heredoc: draft.heredoc, inputFields: draft.inputFields, output: output, facts: facts,
                           hiddenNotes: hiddenNotes, status: status,
-                          plainText: redactedCiphertext(lines.joined(separator: "\n")))
+                          plainText: redactedCiphertext(lines.joined(separator: "\n")), outputSyntax: outputSyntax)
     }
 
     /// An input field's value in plain text: a string as is (unescaped, newlines kept), a scalar

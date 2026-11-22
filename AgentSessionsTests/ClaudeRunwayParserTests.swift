@@ -822,6 +822,52 @@ final class ClaudeRunwayParserTests: XCTestCase {
 
     // MARK: - Per-file parse cache (perf)
 
+    func testOverlappingScansShareTheSameRevisionAndAllowANewRevision() {
+        let cache = RunwayFileParseCache<String>(coalescesConcurrentParses: true)
+        let firstRevision = RunwayFileSignature(mtime: 10, size: 100)
+        let secondRevision = RunwayFileSignature(mtime: 11, size: 101)
+        let firstParsing = DispatchSemaphore(value: 0)
+        let secondReading = DispatchSemaphore(value: 0)
+        let allowFirstToFinish = DispatchSemaphore(value: 0)
+        let firstDone = expectation(description: "first scan")
+        let secondDone = expectation(description: "overlapping scan")
+        let changedDone = expectation(description: "changed revision")
+
+        DispatchQueue.global().async {
+            let value = cache.value(path: "session.jsonl", signature: firstRevision) {
+                firstParsing.signal()
+                _ = allowFirstToFinish.wait(timeout: .now() + 3)
+                return "first revision"
+            }
+            XCTAssertEqual(value, "first revision")
+            firstDone.fulfill()
+        }
+        XCTAssertEqual(firstParsing.wait(timeout: .now() + 2), .success)
+        DispatchQueue.global().async {
+            secondReading.signal()
+            let value = cache.value(path: "session.jsonl", signature: firstRevision) {
+                XCTFail("An identical revision should share the in-flight parse")
+                return "duplicate parse"
+            }
+            XCTAssertEqual(value, "first revision")
+            secondDone.fulfill()
+        }
+        XCTAssertEqual(secondReading.wait(timeout: .now() + 2), .success)
+        DispatchQueue.global().async {
+            let value = cache.value(path: "session.jsonl", signature: secondRevision) { "second revision" }
+            XCTAssertEqual(value, "second revision")
+            changedDone.fulfill()
+        }
+        wait(for: [changedDone], timeout: 2)
+        allowFirstToFinish.signal()
+        wait(for: [firstDone, secondDone], timeout: 2)
+        XCTAssertEqual(cache.value(path: "session.jsonl", signature: secondRevision) {
+            XCTFail("Finishing an older parse should not evict the newer revision")
+            return "unexpected parse"
+        }, "second revision")
+        XCTAssertEqual(cache.missCount, 2)
+    }
+
     /// (a) A second scan of unchanged files (same mtime+size) reuses the cached
     /// head/tail parse and does NOT re-read: the cache miss count stays flat.
     func testScannerCacheReusesParseForUnchangedFiles() throws {
@@ -842,13 +888,35 @@ final class ClaudeRunwayParserTests: XCTestCase {
 
         ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
         _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
-        let afterFirst = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting
+        let afterFirst = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root)
         XCTAssertEqual(afterFirst, 2, "first scan parses each of the two files exactly once")
 
         _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
-        let afterSecond = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting
+        let afterSecond = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root)
         XCTAssertEqual(afterSecond, afterFirst,
                        "a second scan of unchanged files must not re-read or re-parse")
+    }
+
+    func testEmptyDesktopRootDoesNotEvictRecentCLIParses() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-separate-roots-\(UUID().uuidString)")
+        let cli = base.appendingPathComponent("cli")
+        let desktop = base.appendingPathComponent("empty-desktop")
+        try FileManager.default.createDirectory(at: cli, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: desktop, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let now = Date()
+        let log = cli.appendingPathComponent("session.jsonl")
+        try assistantLine(id: "turn", at: now.addingTimeInterval(-5), inputTokens: 1000,
+                          sessionID: "cli", cwd: "/tmp/project", stopReason: "tool_use")
+            .write(to: log, atomically: true, encoding: .utf8)
+
+        ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
+        for _ in 0..<3 {
+            XCTAssertEqual(ClaudeRunwayRecentSessionScanner.identities(root: cli, now: now).map(\.id), ["cli"])
+            XCTAssertTrue(ClaudeRunwayRecentSessionScanner.identities(root: desktop, now: now, options: .presence).isEmpty)
+        }
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: cli), 1)
     }
 
     /// (b) A changed mtime (or size) invalidates only that file's cache entry.
@@ -869,14 +937,14 @@ final class ClaudeRunwayParserTests: XCTestCase {
         ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
         _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
         _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
-        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 1,
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root), 1,
                        "unchanged file parsed once across two scans")
 
         // Touch the mtime: the (mtime,size) key changes → re-parse.
         try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)],
                                               ofItemAtPath: log.path)
         _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
-        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 2,
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root), 2,
                        "a changed mtime forces exactly one re-parse of that file")
     }
 
@@ -900,7 +968,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
 
         ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
         _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
-        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 1)
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root), 1)
 
         // Rewrite with longer content, then restore the SAME mtime so only size
         // differs.
@@ -911,7 +979,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: fixedMtime], ofItemAtPath: log.path)
 
         _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
-        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 2,
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root), 2,
                        "a changed size with the same mtime must still invalidate the cache")
     }
 
@@ -937,14 +1005,14 @@ final class ClaudeRunwayParserTests: XCTestCase {
         // 10s after the last line: within the 75s working window → present.
         let live = ClaudeRunwayRecentSessionScanner.identities(root: root, now: base.addingTimeInterval(10))
         XCTAssertTrue(live.contains { $0.id == "sess-x" }, "session is active within its window")
-        let missAfterLive = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting
+        let missAfterLive = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root)
         XCTAssertEqual(missAfterLive, 1)
 
         // 200s after the last line: past the 75s window → gone, from cached bytes.
         let stale = ClaudeRunwayRecentSessionScanner.identities(root: root, now: base.addingTimeInterval(200))
         XCTAssertFalse(stale.contains { $0.id == "sess-x" },
                        "the active window must advance with now, dropping the stale session")
-        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, missAfterLive,
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting(root: root), missAfterLive,
                        "the verdict changed without re-reading the unchanged file")
     }
 

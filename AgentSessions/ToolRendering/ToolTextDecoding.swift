@@ -342,7 +342,7 @@ enum ToolTextDecoding {
         stripLineNumbersMapped(s).map { ($0.text, $0.gutter) }
     }
 
-    private static func stripLineNumbersMapped(_ s: String) -> (text: String, gutter: [Int?], map: [SourceMapEntry])? {
+    static func stripLineNumbersMapped(_ s: String) -> (text: String, gutter: [Int?], map: [SourceMapEntry])? {
         let u = Array(s.utf16)
         var form: GutterForm?
         var gutter: [Int?] = []

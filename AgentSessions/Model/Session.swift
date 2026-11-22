@@ -205,6 +205,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let fileSizeBytes: Int?
     public let eventCount: Int
     public let events: [SessionEvent]
+    /// Immutable event storage gets a new process-local revision at construction/decode.
+    /// Copies preserve it; it is deliberately excluded from CodingKeys.
+    public let contentRevision = UUID()
     // True when a session is effectively "housekeeping": no assistant output and no meaningful prompt content
     // (for example Codex rollouts that only captured preamble, or Claude local-command-only transcripts).
     public var isHousekeeping: Bool = false
@@ -281,6 +284,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // that gate "already hydrated" on `!events.isEmpty` must also check this
     // so a partial publish never short-circuits the follow-up full parse.
     public var isPartiallyHydrated: Bool = false
+    /// Typed runtime evidence from projections which intentionally skip source regions.
+    public var sourceSearchHasOmissions: Bool = false
 
     // Soft-deletion support (OpenClaw auto-deletes after 30 days)
     public var isDeleted: Bool { deletedAt != nil }
@@ -447,6 +452,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             lhs.fileSizeBytes == rhs.fileSizeBytes &&
             lhs.eventCount == rhs.eventCount &&
             lhs.events.count == rhs.events.count &&
+            (lhs.events.isEmpty || lhs.contentRevision == rhs.contentRevision) &&
+            lhs.isPartiallyHydrated == rhs.isPartiallyHydrated &&
             sameEventEdge(lhs.events.first, rhs.events.first) &&
             sameEventEdge(lhs.events.last, rhs.events.last) &&
             lhs.isHousekeeping == rhs.isHousekeeping &&
@@ -1005,10 +1012,6 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     /// context preamble rather than a real prompt — so once events loaded, title
     /// derivation fell through to the transcript and produced literal
     /// `<user_query> hi </user_query>`, or the opening line of an assistant reply.
-    ///
-    /// Every other provider stays `false`, preserving the previous behaviour exactly.
-    /// That is a deliberate no-change rather than a judgement that their sidecars are
-    /// not authoritative — several were never examined for this.
     private var storesAuthoritativeLightweightTitle: Bool {
         switch source {
         case .grok, .devin, .fx, .cline:
@@ -1016,7 +1019,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             // user prompt is only the fallback when display metadata is absent.
             // Cline's metadata.title is likewise the CLI/Desktop session name.
             return true
-        case .codex, .claude, .antigravity, .opencode, .hermes,
+        case .claude:
+            return isSubagent
+        case .codex, .antigravity, .opencode, .hermes,
              .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .qwen, .deepseekHarness:
             return false
         }

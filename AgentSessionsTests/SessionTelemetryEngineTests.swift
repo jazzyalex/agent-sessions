@@ -1579,6 +1579,32 @@ final class SessionTelemetryEngineTests: XCTestCase {
                        0.0175, accuracy: 0.000001)
     }
 
+    func testClaudeChildTranscriptUsesItsOwnSidechainConfigurationAndUsage() async throws {
+        let childDir = directory.appendingPathComponent("11111111-2222-4333-8444-555555555555/subagents")
+        try FileManager.default.createDirectory(at: childDir, withIntermediateDirectories: true)
+        let url = childDir.appendingPathComponent("agent-child.jsonl")
+        let lines = [
+            #"{"type":"assistant","agentId":"child","isSidechain":true,"effort":"high","perTurnEffort":"medium","message":{"model":"claude-fable-5-2","id":"m1","usage":{"input_tokens":100,"output_tokens":50}}}"#,
+            #"{"type":"assistant","agentId":"grandchild","isSidechain":true,"effort":"low","message":{"model":"claude-haiku-4-5","id":"m2","usage":{"input_tokens":20,"output_tokens":10}}}"#,
+            #"{"type":"assistant","isSidechain":true,"effort":"medium","message":{"model":"claude-fable-5-2","id":"m3","usage":{"input_tokens":30,"output_tokens":10}}}"#
+        ]
+        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+
+        let child = session(url, source: .claude)
+        let engine = SessionTelemetryEngine(priceTable: RunwayPriceTable.makeForTesting())
+        let result = await engine.telemetry(for: child)
+        let telemetry = try XCTUnwrap(result)
+        XCTAssertEqual(telemetry.initialConfiguration?.model, "claude-fable-5-2")
+        XCTAssertEqual(telemetry.currentConfiguration?.reasoningEffort, "medium")
+        XCTAssertTrue(telemetry.configurationChanges.isEmpty)
+        XCTAssertEqual(telemetry.usageEvents.map(\.ownership), [.session, .descendant, .session])
+        XCTAssertEqual(telemetry.descendantTopLineTokens, 30)
+        let facts = SessionInfoQuickFacts(session: child)
+        XCTAssertNil(facts.reasoningEffort.value)
+        XCTAssertEqual(TranscriptTelemetryPresentation.quickThinkingValue(facts.reasoningEffort,
+                                                                          telemetry: telemetry).text, "medium")
+    }
+
     func testClaudeWeeklyQuotaFailsClosedWithoutStableAccountIdentity() async throws {
         let url = try write(claudeLines())
         let prices = RunwayPriceTable.makeForTesting()

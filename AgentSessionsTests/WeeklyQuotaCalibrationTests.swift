@@ -2010,6 +2010,35 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
 
     // MARK: - Failed scans stay retryable
 
+    func testClaudeBootstrapReusesCompletedScanAcrossResetJitter() {
+        let anchor = t0.addingTimeInterval(604_800)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: t0,
+            scanRunner: { _, _, resetsAt, _, used, _, now, _, _ in
+                WeeklyQuotaBootstrapResult(
+                    usedPercentPoints: used, dollars: 100, unpricedVolumeShare: 0,
+                    windowStart: resetsAt.addingTimeInterval(-604_800),
+                    resetsAt: resetsAt, scannedAt: now)
+            })
+
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: anchor.addingTimeInterval(-0.25),
+                              windowMinutes: 10080, usedPercentPoints: 7, sourceFamily: "oauth",
+                              now: t0, defaults: suite)
+        waitForScanToFinish(store, provider: "claude")
+        XCTAssertTrue(store.scanSucceededForTesting(provider: "claude"))
+
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: anchor.addingTimeInterval(0.25),
+                              windowMinutes: 10080, usedPercentPoints: 7, sourceFamily: "oauth",
+                              now: t0.addingTimeInterval(60), defaults: suite)
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "claude"), 1)
+
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: anchor.addingTimeInterval(0.25),
+                              windowMinutes: 10080, usedPercentPoints: 10, sourceFamily: "oauth",
+                              now: t0.addingTimeInterval(120), defaults: suite)
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "claude"), 2)
+        waitForScanToFinish(store, provider: "claude")
+    }
+
     /// A scan that fails must not retire its own retry. Marking the anchor on
     /// dispatch rather than on success meant one unreadable root permanently
     /// pinned the stale ratio the rescan existed to replace.

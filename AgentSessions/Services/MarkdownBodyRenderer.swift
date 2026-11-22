@@ -79,6 +79,8 @@ enum MarkdownBodyRenderer {
         /// `RenderedBody.renderedRange` (it consults this list FIRST, before the
         /// segment lookup). Populated only by the `Table` handler.
         var unmappable: [NSRange] = []
+        var syntaxSnippets: [TranscriptSyntaxSnippet] = []
+        var syntaxBytes = 0
 
         init(source: String, baseFont: NSFont) {
             self.sourceNS = source as NSString
@@ -128,9 +130,7 @@ enum MarkdownBodyRenderer {
                 // single most common assistant payload. The `.code` body appears
                 // verbatim in `block.text` (minus the ``` fences), so
                 // `appendMappedRun` forward-scans it and records a segment. The
-                // fence's info-string (language) is captured on `codeBlock` but
-                // intentionally NOT rendered/highlighted here (syntax
-                // highlighting is tier-2, out of scope for T13).
+                // fence's language tag selects a tokenizer for the visible body.
                 //
                 // Trailing-newline decision: cmark's `code_block` literal (what
                 // swift-markdown surfaces verbatim as `.code`, straight from
@@ -195,6 +195,18 @@ enum MarkdownBodyRenderer {
                     .markdownCodeBlockBg: codeCardFill
                 ])
                 applyCodeCardParagraphStyle(over: NSRange(location: codeStart, length: out.length - codeStart))
+                if let tag = codeBlock.language?.split(whereSeparator: \.isWhitespace).first,
+                   let language = TranscriptSyntaxLanguage(tag: String(tag)), !code.isEmpty {
+                    let bytes = code.utf8.count
+                    if syntaxSnippets.count < TranscriptSyntaxSnippet.snippetsPerBody,
+                       bytes <= TranscriptSyntaxSnippet.snippetLimit,
+                       syntaxBytes + bytes <= TranscriptSyntaxSnippet.bodyLimit {
+                        syntaxBytes += bytes
+                        syntaxSnippets.append(TranscriptSyntaxSnippet(key: .init(language: language, text: code),
+                            spans: [TranscriptSyntaxSpan(source: NSRange(location: 0, length: out.length - codeStart),
+                                                         renderedLocation: codeStart)]))
+                    }
+                }
 
             case let list as UnorderedList:
                 // Task 14: bullet list. `listItems` (from `ListItemContainer`)
@@ -860,7 +872,7 @@ enum MarkdownBodyRenderer {
             RenderedBody(attributed: NSAttributedString(attributedString: out),
                          segments: segments,
                          renderedLength: out.length,
-                         unmappableSourceRanges: unmappable)
+                         unmappableSourceRanges: unmappable, syntaxSnippets: syntaxSnippets)
         }
     }
 }

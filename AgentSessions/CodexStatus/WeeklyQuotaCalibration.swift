@@ -893,9 +893,12 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// Best-conditioned bootstrap ever seen for a provider (largest numerator),
     /// retained across weekly resets. See `bestConditionedBootstrap`.
     private var bestBootstraps: [String: WeeklyQuotaBootstrapResult] = [:]
-    /// Anchors already scanned (or being scanned), so the week is walked once per
-    /// window rather than once per 5s runway cycle.
-    private var scannedAnchors: Set<String> = []
+    private struct CompletedBootstrapScan {
+        let resetsAt: Date
+        let growthBucket: Int
+    }
+    /// Successful scans within each provider's active calibration scope.
+    private var scannedAnchors: [String: [CompletedBootstrapScan]] = [:]
     /// Providers with a bootstrap scan currently running. The waiting clock must
     /// not flip to "n/a" mid-scan and then flip back to a number when it lands.
     private var scansInFlight: Set<String> = []
@@ -935,6 +938,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 usedPercentPoints: usedPercentPoints,
                 priceTable: priceTable,
                 now: now,
+                shouldCancel: shouldCancel,
                 fileManager: FileManager.default)
         }
         guard let accountHash else { return nil }
@@ -1660,7 +1664,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             migratedProviders.remove(provider)
             scanCooldownUntil[provider] = nil
             dispatchedScans[provider] = nil
-            scannedAnchors = scannedAnchors.filter { !$0.hasPrefix("\(provider)|") }
+            scannedAnchors[provider] = nil
             // Any scan still walking belongs to the previous account.
             scopeGenerations[provider] = (scopeGenerations[provider] ?? 0) + 1
         }
@@ -1739,7 +1743,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
 
         // Re-scan when the window has moved on enough that the stored ratio is
         // materially less accurate than a fresh one would be.
-        let anchorKey = "\(provider)|\(Int(resetsAt.timeIntervalSince1970))|\(Int(usedPercentPoints / Self.bootstrapRefreshGrowthPercentPoints))"
+        let growthBucket = Int(usedPercentPoints / Self.bootstrapRefreshGrowthPercentPoints)
         // Two independent triggers, because either alone leaves a stale ratio.
         //
         // Growth: the window has consumed enough more that a fresh scan is better
@@ -1773,7 +1777,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         // share a bucket, so the burnt attempt blocked any retry until 3pp.
         // Failures back off on a cooldown instead.
         lock.lock()
-        let blocked = scannedAnchors.contains(anchorKey)
+        let alreadyScanned = scannedAnchors[provider]?.contains {
+            $0.growthBucket == growthBucket
+                && abs($0.resetsAt.timeIntervalSince(resetsAt)) < CodexWeeklyQuotaBootstrapScanner.anchorTolerance
+        } ?? false
+        let blocked = alreadyScanned
             || scansInFlight.contains(provider)
             || (scanCooldownUntil[provider].map { now < $0 } ?? false)
         if !blocked {
@@ -1832,7 +1840,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                     "BOOTSTRAP DISCARDED provider=\(provider) reason=scope-changed-during-scan")
                 return
             }
-            self.scannedAnchors.insert(anchorKey)
+            self.scannedAnchors[provider, default: []].append(
+                .init(resetsAt: resetsAt, growthBucket: growthBucket))
             self.scanCooldownUntil[provider] = nil
             self.bootstraps[provider] = stamped
             let isBest = canPersistBootstrap
@@ -1913,7 +1922,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// Whether a scan for this provider completed with a usable result.
     func scanSucceededForTesting(provider: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return scannedAnchors.contains { $0.hasPrefix("\(provider)|") }
+        return scannedAnchors[provider]?.isEmpty == false
     }
 
     /// True while a failed scan is backing off. A blocked retry here is a bug when

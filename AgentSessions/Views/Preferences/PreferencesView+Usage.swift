@@ -592,6 +592,8 @@ private struct ClaudeWebSessionCookieCallout: View {
     @State private var pasteText: String = ""
     @State private var hasCookie: Bool = false
     @State private var showHelp: Bool = false
+    @State private var credentialMutationPending = false
+    @State private var testGeneration: UInt64 = 0
 
     /// Live Quota Meter rows for Claude cloud sessions. Off by default and offered
     /// only once a cookie is saved, since the fetch depends on it — a switch that
@@ -616,7 +618,7 @@ private struct ClaudeWebSessionCookieCallout: View {
         claudeAgentEnabledForCloud && claudeUsageEnabledForCloud
     }
 
-    private let store = ClaudeManualWebCookieStore.shared
+    private let credentials = ClaudeCredentialService.shared
 
     var body: some View {
         PreferenceCallout(iconName: "key.fill", tint: .blue) {
@@ -634,6 +636,7 @@ private struct ClaudeWebSessionCookieCallout: View {
                         Button("Remove") { removeCookie() }
                             .buttonStyle(.link)
                             .font(.caption)
+                            .disabled(credentialMutationPending)
                     }
 
                     Divider()
@@ -663,7 +666,7 @@ private struct ClaudeWebSessionCookieCallout: View {
                         .frame(maxWidth: 320)
                     Button("Save") { saveCookie() }
                         .font(.caption)
-                        .disabled(pasteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(credentialMutationPending || pasteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
                 HStack(spacing: 12) {
@@ -673,7 +676,7 @@ private struct ClaudeWebSessionCookieCallout: View {
                     Button(testState == .running ? "Testing…" : "Test now") { runTest() }
                         .buttonStyle(.link)
                         .font(.caption)
-                        .disabled(testState == .running)
+                        .disabled(testState == .running || credentialMutationPending)
                 }
 
                 if showHelp {
@@ -711,30 +714,72 @@ private struct ClaudeWebSessionCookieCallout: View {
                 }
             }
         }
-        .onAppear { hasCookie = store.hasStoredCookie }
+        .task {
+            let owner = credentials.currentOwner
+            let generation = testGeneration
+            do {
+                let credential = try await credentials.read()
+                guard generation == testGeneration, credentials.isCurrent(credential.owner) else { return }
+                hasCookie = credential.value != nil
+            }
+            catch is CancellationError { }
+            catch ClaudeCredentialService.Failure.superseded { }
+            catch {
+                guard generation == testGeneration, credentials.isCurrent(owner) else { return }
+                testState = .result("The saved cookie could not be read from Keychain.", ok: false)
+            }
+        }
     }
 
     private func saveCookie() {
-        if store.save(pasted: pasteText) {
-            pasteText = ""
-            hasCookie = true
-            runTest()
-        } else {
-            testState = .result("That didn’t contain a claude.ai “sessionKey”. Paste the sessionKey cookie value.", ok: false)
+        guard !credentialMutationPending else { return }
+        credentialMutationPending = true
+        testGeneration &+= 1
+        let pasted = pasteText
+        Task { @MainActor in
+            defer { credentialMutationPending = false }
+            do {
+                try await credentials.save(pasted: pasted)
+                pasteText = ""
+                hasCookie = true
+                runTest()
+            } catch ClaudeCredentialService.Failure.invalidPaste {
+                testState = .result("That didn’t contain a claude.ai “sessionKey”. Paste the sessionKey cookie value.", ok: false)
+            } catch {
+                hasCookie = (try? await credentials.read().value) != nil
+                testState = .result("The cookie could not be saved to Keychain.", ok: false)
+            }
         }
     }
 
     private func removeCookie() {
-        store.clear()
-        hasCookie = false
-        testState = .idle
+        guard !credentialMutationPending else { return }
+        credentialMutationPending = true
+        testGeneration &+= 1
+        Task { @MainActor in
+            defer { credentialMutationPending = false }
+            do {
+                try await credentials.remove()
+                hasCookie = false
+                testState = .idle
+            } catch {
+                hasCookie = (try? await credentials.read().value) != nil
+                testState = .result("The cookie could not be removed from Keychain.", ok: false)
+            }
+        }
     }
 
     private func runTest() {
+        testGeneration &+= 1
+        let generation = testGeneration
+        let owner = credentials.currentOwner
         testState = .running
         Task {
             let outcome = await ClaudeWebSessionCookieCallout.performTest()
-            await MainActor.run { testState = .result(outcome.message, ok: outcome.ok) }
+            await MainActor.run {
+                guard generation == testGeneration, credentials.isCurrent(owner) else { return }
+                testState = .result(outcome.message, ok: outcome.ok)
+            }
         }
     }
 
@@ -743,7 +788,10 @@ private struct ClaudeWebSessionCookieCallout: View {
     /// cause-aware messaging. User-initiated only — never called on a timer.
     static func performTest() async -> (message: String, ok: Bool) {
         let sessionKey: String
-        if let manual = ClaudeManualWebCookieStore.shared.currentSessionKey() {
+        let credential: ClaudeCredentialService.Credential
+        do { credential = try await ClaudeCredentialService.shared.read() }
+        catch { return ("The saved cookie could not be read from Keychain.", false) }
+        if let manual = credential.value {
             sessionKey = manual
         } else {
             let resolver = ClaudeWebCookieResolver()
@@ -763,9 +811,18 @@ private struct ClaudeWebSessionCookieCallout: View {
         }
 
         do {
+            guard ClaudeCredentialService.shared.isCurrent(credential.owner), !Task.isCancelled else {
+                return ("The saved cookie changed. Run the test again.", false)
+            }
             // bypassCache: the self-test must validate THIS cookie live, not return
             // a recent cached response that may have been fetched with a different one.
-            let result = try await ClaudeWebUsageClient().fetch(sessionKey: sessionKey, bypassCache: true)
+            let owner = credential.value != nil ? credential.owner
+                : try ClaudeCredentialService.shared.registerLegacyCredential(sessionKey, after: credential.owner)
+            let lease = ClaudeCredentialRequestLease(owner: owner)
+            let result = try await ClaudeWebUsageClient().fetch(sessionKey: sessionKey, bypassCache: true, owner: owner, lease: lease)
+            guard ClaudeCredentialService.shared.isCurrent(credential.owner), !Task.isCancelled else {
+                return ("The saved cookie changed. Run the test again.", false)
+            }
             return result.fromCache
                 ? ("Working — served from a recent cached response.", true)
                 : ("Working — usage fetched live from claude.ai.", true)

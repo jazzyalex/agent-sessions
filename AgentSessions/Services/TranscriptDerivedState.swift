@@ -19,6 +19,8 @@ final class TranscriptDerivedState {
 
     struct Key: Hashable, Sendable {
         var sessionID: String
+        var contentRevision: UUID
+        var isPartiallyHydrated: Bool
         var eventCount: Int
         var fileSizeBytes: Int
         var skipAgentsPreamble: Bool
@@ -35,6 +37,8 @@ final class TranscriptDerivedState {
             parentSessionID = session.parentSessionID
             subagentType = session.subagentType
             sessionID = session.id
+            contentRevision = session.contentRevision
+            isPartiallyHydrated = session.isPartiallyHydrated
             eventCount = session.events.count
             fileSizeBytes = session.fileSizeBytes ?? -1
             skipAgentsPreamble = settings.skipAgentsPreamble
@@ -70,6 +74,8 @@ final class TranscriptDerivedState {
         var errorJumpIDs: [Int] = []
         /// Turn segmentation of `blocks` (answer and note blocks per turn), built off the main thread.
         var turnIndex: TranscriptTurnIndex = .empty
+        var turnTiming: [Int: TurnTiming] = [:]
+        var toolTiming: [Int: ToolTiming] = [:]
         /// L1 summaries of the invocations in the tail window (the window the Session view opens
         /// at), by invocation id, built off the main thread (`tailRowSummaries`). The Session
         /// view seeds its summary cache from them, so its first rows need no input parse on main.
@@ -216,6 +222,7 @@ final class TranscriptDerivedState {
                 // A newer update (or a return to the published snapshot) replaced this one.
                 guard let self, self.computeGeneration == generation else { return }
                 self.snapshot = snap
+                self.schedulePresentation()
                 self.isComputing = false
                 self.pendingKey = nil
                 self.findMatchesCache.removeAll()   // block content changed
@@ -400,10 +407,17 @@ final class TranscriptDerivedState {
     nonisolated static func computeSnapshot(session: Session,
                                             settings: DerivedSettings,
                                             previousRowSummaries: [Int: RowSummaryEntry] = [:]) -> Snapshot {
-        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: settings.includeMessageContext)
+        let metrics = SearchResponsivenessMetrics.shared
+        let operation = metrics.operation(source: session.source.rawValue, sessionID: session.id)
+        let context = SearchResponsivenessMetricContext.session(session)
+        let span = metrics.beginSpan(.snapshot, operationID: operation, context: context)
+        defer { if let span { Task.isCancelled ? metrics.cancel(span) : metrics.end(span) } }
+        let blocks = metrics.measured(.snapshotCoalescing, operationID: operation, context: context) {
+            SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: settings.includeMessageContext)
+        }
         var snap = Snapshot()
         snap.blocks = blocks
-        snap.blockDigests = blockDigests(blocks)
+        snap.blockDigests = metrics.measured(.snapshotDigests, operationID: operation, context: context) { blockDigests(blocks) }
         snap.totalBlockCount = blocks.count
         snap.source = session.source
         snap.key = Key(session: session, settings: settings)
@@ -425,7 +439,7 @@ final class TranscriptDerivedState {
 
         // Tool pairing + cheap status (spec §6.2 pass 1), once per snapshot, off main.
         // Errors stay block-based in `errorBlockIndices`; failed invocations are separate.
-        let invocationIndex = ToolInvocationIndex.build(blocks: blocks, source: session.source)
+        let invocationIndex = metrics.measured(.invocationIndex, operationID: operation, context: context) { ToolInvocationIndex.build(blocks: blocks, source: session.source) }
         snap.invocationIndex = invocationIndex
         var failedInvocationIDs: Set<Int> = []
         for invocation in invocationIndex.invocations {
@@ -435,7 +449,11 @@ final class TranscriptDerivedState {
         let jumps = jumpIDs(blocks: blocks, index: invocationIndex, failedInvocationIDs: failedInvocationIDs)
         snap.toolJumpIDs = jumps.tools
         snap.errorJumpIDs = jumps.errors
-        snap.turnIndex = TranscriptTurns.index(blocks: blocks, source: session.source)
+        snap.turnIndex = metrics.measured(.turnIndex, operationID: operation, context: context) { TranscriptTurns.index(blocks: blocks, source: session.source) }
+        let timing = TranscriptTurnTiming.compute(blocks: blocks, index: invocationIndex,
+                                                  source: session.source, turnIndex: snap.turnIndex)
+        snap.turnTiming = timing.turns
+        snap.toolTiming = timing.tools
         // The tail's L1 summaries are built on a second thread while this one derives the
         // preamble and the anchors, so the snapshot takes about as long as without them.
         let summaries = RowSummaryBox()
@@ -462,6 +480,7 @@ final class TranscriptDerivedState {
         // Same anchor derivation buildRebuildResult uses (full-session scope),
         // copied verbatim from SessionTerminalView.buildRebuildResult's
         // eventIDToAnchorBlockIndex construction so the two stay byte-identical.
+        let anchorSpan = metrics.beginSpan(.anchorIndexes, operationID: operation, context: context)
         var eventIDToAnchorBlockIndex: [String: Int] = [:]
         if settings.includeMessageContext {
             let fallbackPrompts = blocks.filter {
@@ -492,73 +511,160 @@ final class TranscriptDerivedState {
             }
         }
         snap.eventIDToAnchorBlockIndex = eventIDToAnchorBlockIndex
+        if let anchorSpan { metrics.end(anchorSpan) }
         summariesDone.wait()
         snap.rowSummaries = summaries.value
         return snap
     }
 
-    private struct MessageGroupKey: Equatable {
-        var snapshot: Key?
+    struct PresentationInputs: Equatable, Sendable {
+        var snapshotKey: Key
         var showsContext: Bool
-        var markers: [Int: [String]]
+        var configurationChanges: [ConfigurationChange]
         var imageBlocks: Set<Int>
-    }
-    @ObservationIgnored private var messageGroupKey: MessageGroupKey?
-    @ObservationIgnored private var cachedMessageGroups = TranscriptMessageGroupIndex()
-    /// The blocks and running digests the cached index was built from. An extension proves its
-    /// prefix unchanged by digest (constant time on the main actor), not by comparing blocks.
-    @ObservationIgnored private var messageGroupBlocks: [SessionTranscriptBuilder.LogicalBlock] = []
-    @ObservationIgnored private var messageGroupDigests: [Int] = []
-    @ObservationIgnored private var messageGroupRevision = 0
-
-    /// True when `new` is the same stream as `old` after a live append: every key field but the
-    /// event count and file size, and every non-snapshot input, are equal.
-    private static func isAppend(_ old: MessageGroupKey, _ new: MessageGroupKey) -> Bool {
-        guard var oldSnapshot = old.snapshot, let newSnapshot = new.snapshot,
-              old.showsContext == new.showsContext, old.markers == new.markers,
-              old.imageBlocks == new.imageBlocks else { return false }
-        oldSnapshot.eventCount = newSnapshot.eventCount
-        oldSnapshot.fileSizeBytes = newSnapshot.fileSizeBytes
-        return oldSnapshot == newSnapshot
+        var localeIdentifier: String = Locale.current.identifier
+        var activeRoles: Set<TranscriptRoleFilter> = []
+        var diagnosticContext: SearchResponsivenessMetricContext = .none
     }
 
-    /// One full-stream ownership index shared by the table and toolbar counts. A live append
-    /// extends the cached index from its last group instead of rebuilding the whole stream on the
-    /// main actor (integrated review 2026-11-09).
-    func messageGroups(showsContext: Bool, markers: [Int: [String]], imageBlocks: Set<Int>) -> TranscriptMessageGroupIndex {
-        let key = MessageGroupKey(snapshot: snapshot.key, showsContext: showsContext, markers: markers, imageBlocks: imageBlocks)
-        guard key != messageGroupKey else { return cachedMessageGroups }
-        let blocks = snapshot.blocks
-        let digests = snapshot.blockDigests
+    struct PresentationBundle: Sendable {
+        var inputs: PresentationInputs
+        var snapshot: Snapshot
+        var markers: [Int: [String]]
         var groups: TranscriptMessageGroupIndex
-        let oldBlocks = messageGroupBlocks, oldDigests = messageGroupDigests
-        // The latest restart point whose prefix (the blocks before it) is unchanged: equal running
-        // digests over every block field (built off main), confirmed by comparing the last prefix
-        // block. Live appends restart at the last few blocks, so this costs O(1) plus the tail.
+        var userStops: Int
+        var agentStopIDs: [Int]
+        var errorStopIDs: [Int]
+        var hiddenNotes: Set<Int>
+        var chipAnchors: [Int: TurnTiming]
+        var revision: Int
+    }
+    private(set) var presentationBundle: PresentationBundle?
+    @ObservationIgnored private var presentationInputs: PresentationInputs?
+    @ObservationIgnored private var presentationTask: Task<Void, Never>?
+    @ObservationIgnored private var presentationGeneration = 0
+
+    /// UI input only. Derivation starts when the exact snapshot is available.
+    func preparePresentation(_ inputs: PresentationInputs) {
+        guard inputs != presentationInputs else { return }
+        presentationInputs = inputs
+        schedulePresentation()
+    }
+
+    func presentation(matching inputs: PresentationInputs) -> PresentationBundle? {
+        guard presentationInputs == inputs, presentationBundle?.inputs == inputs else { return nil }
+        return presentationBundle
+    }
+
+    var selectedPresentationContext: SearchResponsivenessMetricContext? {
+        presentationInputs?.diagnosticContext
+    }
+
+    private func schedulePresentation() {
+        presentationTask?.cancel()
+        presentationGeneration &+= 1
+        guard let inputs = presentationInputs, inputs.snapshotKey == snapshot.key else { return }
+        if presentationBundle?.inputs == inputs { return }
+        let generation = presentationGeneration
+        let snap = snapshot, previous = presentationBundle
+        presentationTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let bundle = Self.computePresentation(snapshot: snap, inputs: inputs, previous: previous,
+                                                  revision: generation)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.presentationGeneration == generation,
+                      self.presentationInputs == inputs, self.snapshot.key == inputs.snapshotKey else { return }
+                self.presentationBundle = bundle
+                SearchResponsivenessMetrics.shared.record(.presentationPublished,
+                    operationID: SearchResponsivenessMetrics.shared.operation(source: inputs.snapshotKey.source.rawValue,
+                                                                            sessionID: inputs.snapshotKey.sessionID),
+                    context: .init(session: .init(source: inputs.snapshotKey.source.rawValue, sessionID: inputs.snapshotKey.sessionID),
+                        contentRevision: .init(inputs.snapshotKey.contentRevision.uuidString),
+                        hydration: inputs.snapshotKey.isPartiallyHydrated ? .provisional : .full,
+                        presentationGeneration: Int64(generation)), status: .published)
+            }
+        }
+    }
+
+    nonisolated static func computePresentation(snapshot: Snapshot, inputs: PresentationInputs,
+                                               previous: PresentationBundle? = nil,
+                                               revision: Int = 1) -> PresentationBundle {
+        let metrics = SearchResponsivenessMetrics.shared
+        let operation = metrics.operation(source: inputs.snapshotKey.source.rawValue, sessionID: inputs.snapshotKey.sessionID)
+        let context = SearchResponsivenessMetricContext(session: .init(source: inputs.snapshotKey.source.rawValue,
+            sessionID: inputs.snapshotKey.sessionID), contentRevision: .init(inputs.snapshotKey.contentRevision.uuidString),
+            hydration: inputs.snapshotKey.isPartiallyHydrated ? .provisional : .full, presentationGeneration: Int64(revision))
+        let markerSpan = metrics.beginSpan(.markerDerivation, operationID: operation, context: context)
+        let markers: [Int: [String]]
+        if let previous, previous.inputs.snapshotKey == inputs.snapshotKey,
+           previous.inputs.configurationChanges == inputs.configurationChanges,
+           previous.inputs.localeIdentifier == inputs.localeIdentifier {
+            markers = previous.markers
+        } else {
+            markers = TranscriptTelemetryPresentation.markers(changes: inputs.configurationChanges,
+                blocks: snapshot.blocks, locale: Locale(identifier: inputs.localeIdentifier))
+        }
+        if let markerSpan { metrics.end(markerSpan) }
+        let groupSpan = metrics.beginSpan(.groupDerivation, operationID: operation, context: context)
+        let blocks = snapshot.blocks
+        var groups: TranscriptMessageGroupIndex
         let restart: Int? = {
-            guard let old = messageGroupKey, Self.isAppend(old, key), blocks.count >= oldBlocks.count,
-                  digests.count == blocks.count, oldDigests.count == oldBlocks.count else { return nil }
-            return cachedMessageGroups.restartPoints.reversed().map(\.id).first { point in
-                guard point < oldBlocks.count else { return false }
-                guard point > 0 else { return true }
-                return digests[point - 1] == oldDigests[point - 1] && blocks[point - 1] == oldBlocks[point - 1]
+            guard let previous, var oldKey = previous.snapshot.key,
+                  let newKey = snapshot.key, previous.inputs.showsContext == inputs.showsContext,
+                  previous.inputs.imageBlocks == inputs.imageBlocks,
+                  previous.markers == markers, previous.inputs.localeIdentifier == inputs.localeIdentifier,
+                  blocks.count >= previous.snapshot.blocks.count else { return nil }
+            oldKey.eventCount = newKey.eventCount
+            oldKey.fileSizeBytes = newKey.fileSizeBytes
+            oldKey.contentRevision = newKey.contentRevision
+            oldKey.isPartiallyHydrated = newKey.isPartiallyHydrated
+            guard oldKey == newKey else { return nil }
+            let old = previous.snapshot
+            return previous.groups.restartPoints.reversed().map(\.id).first { point in
+                guard point < old.blocks.count else { return false }
+                if point == 0 { return true }
+                return snapshot.blockDigests[point - 1] == old.blockDigests[point - 1]
+                    && blocks[point - 1] == old.blocks[point - 1]
             }
         }()
-        if let restart {
-            groups = .extending(cachedMessageGroups, from: restart, previousBlockCount: oldBlocks.count,
-                                blocks: blocks[...], source: snapshot.source, showsContext: showsContext,
-                                markers: markers, noncollapsibleBlockIndices: imageBlocks)
+        let sameGroupInputs = previous.map {
+            $0.inputs.snapshotKey == inputs.snapshotKey && $0.inputs.showsContext == inputs.showsContext
+                && $0.inputs.configurationChanges == inputs.configurationChanges
+                && $0.inputs.imageBlocks == inputs.imageBlocks && $0.inputs.localeIdentifier == inputs.localeIdentifier
+        } ?? false
+        if sameGroupInputs, let previous {
+            groups = previous.groups
+        } else if let restart, let previous {
+            groups = .extending(previous.groups, from: restart, previousBlockCount: previous.snapshot.blocks.count,
+                blocks: blocks[...], source: snapshot.source, showsContext: inputs.showsContext,
+                markers: markers, noncollapsibleBlockIndices: inputs.imageBlocks)
         } else {
-            groups = .build(blocks: blocks[...], source: snapshot.source, showsContext: showsContext, markers: markers,
-                            noncollapsibleBlockIndices: imageBlocks)
+            groups = .build(blocks: blocks[...], source: snapshot.source, showsContext: inputs.showsContext,
+                markers: markers, noncollapsibleBlockIndices: inputs.imageBlocks)
         }
-        messageGroupRevision &+= 1
-        groups.revision = messageGroupRevision
-        cachedMessageGroups = groups
-        messageGroupKey = key
-        messageGroupBlocks = blocks
-        messageGroupDigests = digests
-        return cachedMessageGroups
+        if !sameGroupInputs { groups.revision = revision }
+        if let groupSpan { metrics.end(groupSpan) }
+        let countSpan = metrics.beginSpan(.countDerivation, operationID: operation, context: context)
+        let roles = inputs.activeRoles
+        let userShown = roles.isEmpty || roles.contains(.user)
+        let agentShown = roles.isEmpty || roles.contains(.assistant)
+        let toolsShown = roles.isEmpty || roles.contains(.tools)
+        let hiddenNotes = toolsShown ? Set<Int>() : snapshot.turnIndex.noteBlockIndices
+        let userStops = userShown ? groups.groupsByID.values.filter {
+            TranscriptRoleFilter.governing($0.block, source: snapshot.source) == .user
+        }.count : 0
+        let agentStops = agentShown ? groups.groupsByID.compactMap { id, group in
+            TranscriptRoleFilter.governing(group.block, source: snapshot.source) == .assistant
+                && !group.isHidden(by: hiddenNotes) ? id : nil
+        }.sorted() : []
+        let errors = SessionRoleFilters.shownErrorStops(snapshot.errorJumpIDs,
+            failedInvocationIDs: snapshot.failedInvocationIDs, activeRoles: roles)
+        let anchors = TranscriptTurns.chipAnchors(timing: snapshot.turnTiming, turnIndex: snapshot.turnIndex,
+            rowIDByBlock: groups.groupIDByBlock, visibleRowIDs: Set(agentStops))
+        if let countSpan { metrics.end(countSpan) }
+        return .init(inputs: inputs, snapshot: snapshot, markers: markers, groups: groups, userStops: userStops,
+                     agentStopIDs: agentStops, errorStopIDs: errors, hiddenNotes: hiddenNotes,
+                     chipAnchors: anchors, revision: revision)
     }
 
     func findMatches(query: String, showsContext: Bool = false) -> [BlockMatch] {

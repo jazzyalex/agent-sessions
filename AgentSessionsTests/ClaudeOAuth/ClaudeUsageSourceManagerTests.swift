@@ -24,8 +24,12 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
     }
 
     /// Build a manager backed by the per-test temp store (never the real path).
-    private func makeManager() -> ClaudeUsageSourceManager {
-        ClaudeUsageSourceManager(store: ClaudeUsageSnapshotStore(fileURL: tempStoreURL))
+    private func makeManager(store: ClaudeUsageSnapshotStore? = nil) -> ClaudeUsageSourceManager {
+        ClaudeUsageSourceManager(
+            store: store ?? ClaudeUsageSnapshotStore(fileURL: tempStoreURL),
+            oauthOwnerResolver: { "oauth:test-account" },
+            refreshScheduler: { _, _ in nil }
+        )
     }
 
     // MARK: - Mode switching
@@ -266,12 +270,13 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
             weeklyResetText: "",
             weekOpusUsedRatio: nil,
             weekOpusResetText: nil,
-            rawPayloadHash: nil
+            rawPayloadHash: nil,
+            ownership: "oauth:test-account"
         )
         await store.save(seed)
 
         var delivered: [ClaudeLimitSnapshot] = []
-        let mgr = ClaudeUsageSourceManager(store: store)
+        let mgr = makeManager(store: store)
         await mgr.start(
             mode: .auto,
             handler: { snap in delivered.append(snap) },
@@ -288,7 +293,7 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertEqual(restored?.fiveHourUsedRatio ?? 0, 0.4, accuracy: 0.001)
     }
 
-    func testColdStart_preservesPersistedTmuxSource() async throws {
+    func testColdStart_rejectsUnownedTmuxSnapshot() async throws {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("test_claude_usage_\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: tempURL) }
@@ -309,7 +314,7 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         await store.save(seed)
 
         var delivered: [ClaudeLimitSnapshot] = []
-        let mgr = ClaudeUsageSourceManager(store: store)
+        let mgr = makeManager(store: store)
         await mgr.start(
             mode: .auto,
             handler: { snap in delivered.append(snap) },
@@ -318,38 +323,71 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 100_000_000)
         await mgr.stop()
 
-        let restored = delivered.first
-        XCTAssertEqual(restored?.source, .tmuxUsage)
-        XCTAssertEqual(restored?.health, .live)
-        XCTAssertEqual(restored?.fiveHourUsedRatio ?? 0, 0.22, accuracy: 0.001)
+        XCTAssertTrue(delivered.isEmpty, "A legacy tmux snapshot without ownership must not be restored.")
     }
 
-    func testMergeMissingFiveHourWindowPreservesRecentTmuxSessionLimit() {
-        let now = ISO8601DateFormatter().date(from: "2026-06-23T01:31:00Z")!
-        let incoming = ClaudeLimitSnapshot(
-            fetchedAt: now,
+    func testColdStart_rejectsUnownedOAuthSnapshot() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_claude_usage_\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: tempURL) }
+
+        let store = ClaudeUsageSnapshotStore(fileURL: tempURL)
+        let seed = ClaudeLimitSnapshot(
+            fetchedAt: Date().addingTimeInterval(-30),
             source: .oauthEndpoint,
             health: .live,
-            fiveHourUsedRatio: 0.0,
+            fiveHourUsedRatio: 0.4,
             fiveHourResetText: "",
-            weeklyUsedRatio: 0.03,
-            weeklyResetText: "2027-01-19T09:00:00Z",
-            weekOpusUsedRatio: nil,
-            weekOpusResetText: nil,
-            rawPayloadHash: "oauth-weekly-only"
-        )
-        let previous = ClaudeLimitSnapshot(
-            fetchedAt: now.addingTimeInterval(-60),
-            source: .tmuxUsage,
-            health: .live,
-            fiveHourUsedRatio: 0.24,
-            fiveHourResetText: "11:20pm (America/Los_Angeles)",
-            weeklyUsedRatio: 0.05,
-            weeklyResetText: "Jun 28 at 5am (America/Los_Angeles)",
+            weeklyUsedRatio: 0.2,
+            weeklyResetText: "",
             weekOpusUsedRatio: nil,
             weekOpusResetText: nil,
             rawPayloadHash: nil
         )
+        await store.save(seed)
+
+        var delivered: [ClaudeLimitSnapshot] = []
+        let mgr = makeManager(store: store)
+        await mgr.start(mode: .auto, handler: { snap in delivered.append(snap) }, availabilityHandler: { _ in })
+        await mgr.stop()
+
+        XCTAssertTrue(delivered.isEmpty, "A legacy OAuth snapshot without ownership must not be restored.")
+    }
+
+    func testColdStart_rejectsWrongOAuthOwnerSnapshot() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_claude_usage_\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: tempURL) }
+
+        let store = ClaudeUsageSnapshotStore(fileURL: tempURL)
+        let seed = ClaudeLimitSnapshot(
+            fetchedAt: Date().addingTimeInterval(-30),
+            source: .oauthEndpoint,
+            health: .live,
+            fiveHourUsedRatio: 0.4,
+            fiveHourResetText: "",
+            weeklyUsedRatio: 0.2,
+            weeklyResetText: "",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: nil,
+            ownership: "oauth:other-account"
+        )
+        await store.save(seed)
+
+        var delivered: [ClaudeLimitSnapshot] = []
+        let mgr = makeManager(store: store)
+        await mgr.start(mode: .auto, handler: { snap in delivered.append(snap) }, availabilityHandler: { _ in })
+        await mgr.stop()
+
+        XCTAssertTrue(delivered.isEmpty, "A snapshot from a different OAuth owner must not be restored.")
+    }
+
+    func testMergeMissingFiveHourWindowPreservesFreshSameOwnerWindow() {
+        let now = ISO8601DateFormatter().date(from: "2026-06-23T01:31:00Z")!
+        let owner = "oauth:test-account"
+        let incoming = mergeIncomingSnapshot(now: now, owner: owner)
+        let previous = mergePreviousSnapshot(fetchedAt: now.addingTimeInterval(-60), owner: owner)
 
         let merged = ClaudeUsageSourceManager.mergeMissingFiveHourWindow(
             incoming: incoming,
@@ -363,31 +401,27 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertEqual(merged?.weeklyResetText, incoming.weeklyResetText)
     }
 
-    func testMergeMissingFiveHourWindowRejectsExpiredTmuxSessionLimit() {
+    func testMergeMissingFiveHourWindowRejectsExpiredSameOwnerWindow() {
         let now = ISO8601DateFormatter().date(from: "2026-06-23T01:31:00Z")!
-        let incoming = ClaudeLimitSnapshot(
-            fetchedAt: now,
-            source: .oauthEndpoint,
-            health: .live,
-            fiveHourUsedRatio: 0.0,
-            fiveHourResetText: "",
-            weeklyUsedRatio: 0.03,
-            weeklyResetText: "2027-01-19T09:00:00Z",
-            weekOpusUsedRatio: nil,
-            weekOpusResetText: nil,
-            rawPayloadHash: "oauth-weekly-only"
+        let owner = "oauth:test-account"
+        let incoming = mergeIncomingSnapshot(now: now, owner: owner)
+        let previous = mergePreviousSnapshot(fetchedAt: now.addingTimeInterval(-(31 * 60)), owner: owner)
+
+        let merged = ClaudeUsageSourceManager.mergeMissingFiveHourWindow(
+            incoming: incoming,
+            previous: previous,
+            now: now
         )
-        let previous = ClaudeLimitSnapshot(
-            fetchedAt: now.addingTimeInterval(-(31 * 60)),
-            source: .tmuxUsage,
-            health: .live,
-            fiveHourUsedRatio: 0.24,
-            fiveHourResetText: "11:20pm (America/Los_Angeles)",
-            weeklyUsedRatio: 0.05,
-            weeklyResetText: "Jun 28 at 5am (America/Los_Angeles)",
-            weekOpusUsedRatio: nil,
-            weekOpusResetText: nil,
-            rawPayloadHash: nil
+
+        XCTAssertNil(merged)
+    }
+
+    func testMergeMissingFiveHourWindowRejectsCrossOwnerWindow() {
+        let now = ISO8601DateFormatter().date(from: "2026-06-23T01:31:00Z")!
+        let incoming = mergeIncomingSnapshot(now: now, owner: "oauth:test-account")
+        let previous = mergePreviousSnapshot(
+            fetchedAt: now.addingTimeInterval(-60),
+            owner: "oauth:other-account"
         )
 
         let merged = ClaudeUsageSourceManager.mergeMissingFiveHourWindow(
@@ -397,6 +431,60 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         )
 
         XCTAssertNil(merged)
+    }
+
+    func testMergeMissingFiveHourWindowRejectsUnownedSnapshots() {
+        let now = ISO8601DateFormatter().date(from: "2026-06-23T01:31:00Z")!
+        let incoming = mergeIncomingSnapshot(now: now, owner: "oauth:test-account")
+        let unownedPrevious = mergePreviousSnapshot(fetchedAt: now.addingTimeInterval(-60), owner: nil)
+        let ownedPrevious = mergePreviousSnapshot(fetchedAt: now.addingTimeInterval(-60), owner: "oauth:test-account")
+        let unownedIncoming = mergeIncomingSnapshot(now: now, owner: nil)
+
+        let rejectedPrevious = ClaudeUsageSourceManager.mergeMissingFiveHourWindow(
+            incoming: incoming,
+            previous: unownedPrevious,
+            now: now
+        )
+        let rejectedIncoming = ClaudeUsageSourceManager.mergeMissingFiveHourWindow(
+            incoming: unownedIncoming,
+            previous: ownedPrevious,
+            now: now
+        )
+
+        XCTAssertNil(rejectedPrevious)
+        XCTAssertNil(rejectedIncoming)
+    }
+
+    private func mergeIncomingSnapshot(now: Date, owner: String?) -> ClaudeLimitSnapshot {
+        ClaudeLimitSnapshot(
+            fetchedAt: now,
+            source: .oauthEndpoint,
+            health: .live,
+            fiveHourUsedRatio: 0.0,
+            fiveHourResetText: "",
+            weeklyUsedRatio: 0.03,
+            weeklyResetText: "2027-01-19T09:00:00Z",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: "oauth-weekly-only",
+            ownership: owner
+        )
+    }
+
+    private func mergePreviousSnapshot(fetchedAt: Date, owner: String?) -> ClaudeLimitSnapshot {
+        ClaudeLimitSnapshot(
+            fetchedAt: fetchedAt,
+            source: .oauthEndpoint,
+            health: .live,
+            fiveHourUsedRatio: 0.24,
+            fiveHourResetText: "11:20pm (America/Los_Angeles)",
+            weeklyUsedRatio: 0.05,
+            weeklyResetText: "Jun 28 at 5am (America/Los_Angeles)",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: nil,
+            ownership: owner
+        )
     }
 
     // MARK: - Success-path authoritative override (pure helpers)

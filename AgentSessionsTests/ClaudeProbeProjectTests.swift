@@ -1,5 +1,8 @@
 import XCTest
 import Foundation
+#if canImport(AgentSessions)
+import AgentSessions
+#endif
 
 final class ClaudeProbeProjectTests: XCTestCase {
     private func setEnv(_ key: String, _ value: String) {
@@ -18,6 +21,40 @@ final class ClaudeProbeProjectTests: XCTestCase {
         let parts = trimmed.split(separator: "/").map { $0.replacingOccurrences(of: " ", with: "-") }
         return "-" + parts.joined(separator: "-")
     }
+
+    #if canImport(AgentSessions)
+    func testSessionClassifierResolvesProbeDirectoryOncePerBatch() {
+        var discoveries = 0
+        var projectID: String?
+        func discover() -> String? {
+            discoveries += 1
+            return projectID
+        }
+        let workingDirectory = "/tmp/probe-work"
+        let root = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/test-probe")
+
+        func session(path: String, source: SessionSource = .claude, cwd: String? = nil) -> Session {
+            Session(id: path, source: source, startTime: nil, endTime: nil,
+                    model: nil, filePath: path, eventCount: 0, events: [],
+                    cwd: cwd, repoName: nil, lightweightTitle: nil)
+        }
+
+        let withoutProject = ClaudeProbeConfig.makeSessionClassifier(
+            discoverProjectID: discover, workingDirectory: workingDirectory)
+        XCTAssertFalse(withoutProject(session(path: root + "/one.jsonl")))
+        XCTAssertTrue(withoutProject(session(path: "/tmp/other.jsonl", cwd: workingDirectory)))
+        XCTAssertEqual(discoveries, 1)
+
+        projectID = "test-probe"
+        let withProject = ClaudeProbeConfig.makeSessionClassifier(
+            discoverProjectID: discover, workingDirectory: workingDirectory)
+        XCTAssertTrue(withProject(session(path: root + "/one.jsonl")))
+        XCTAssertTrue(withProject(session(path: root + "/sub/two.jsonl")))
+        XCTAssertFalse(withProject(session(path: root + "-sibling/three.jsonl")))
+        XCTAssertFalse(withProject(session(path: root + "/four.jsonl", source: .codex)))
+        XCTAssertEqual(discoveries, 2)
+    }
+    #endif
 
     func testDiscoveryFindsProjectMatchingProbeWD() throws {
         let testRoot = mkdtemp(prefix: "as-probe-projects")

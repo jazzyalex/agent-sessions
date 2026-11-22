@@ -5,6 +5,43 @@ import AppKit
 final class MarkdownBodyRendererTests: XCTestCase {
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
+    func testSyntaxSnippetsUseRenderedUTF16AndExplicitFenceTags() throws {
+        let tagged = "🌱\n\n```TS title=example\nconst café = `🌿\nnext`\n```\n\n```unknown\nlet x = 1\n```\n\n```swift\n```"
+        let body = MarkdownBodyRenderer.render(tagged, baseFont: font, isDark: false)
+        XCTAssertEqual(body.syntaxSnippets.count, 1)
+        let snippet = try XCTUnwrap(body.syntaxSnippets.first)
+        XCTAssertEqual(snippet.key.language, .typescript)
+        let tokens = TranscriptSyntax.tokenize(snippet.key)
+        var colored: [String] = []
+        snippet.forEachVisibleToken(tokens) { range, _ in
+            colored.append((body.attributed.string as NSString).substring(with: range))
+        }
+        XCTAssertEqual(colored, ["const", "`🌿\nnext`"])
+        let examples: [(String, String, TranscriptSyntaxLanguage)] = [
+            ("swift", "let café = 42 // note", .swift),
+            ("py", "def greet():\n    return \"café\" # note", .python),
+            ("bash", "for file in *.py; do\n echo \"$file\" # note\ndone", .shell),
+            ("js", "const café = 42; // note", .javascript),
+            ("ts", "interface Person { name: string }", .typescript),
+            ("json", "{\"café\": true}", .json),
+            ("yml", "café: true # note", .yaml),
+        ]
+        for dark in [false, true] {
+            for (tag, code, language) in examples {
+                let rendered = MarkdownBodyRenderer.render("🌱\n\n```\(tag)\n\(code)\n```",
+                                                           baseFont: font, isDark: dark)
+                let snippet = try XCTUnwrap(rendered.syntaxSnippets.first, tag)
+                XCTAssertEqual(snippet.key.language, language)
+                let tokens = TranscriptSyntax.tokenize(snippet.key)
+                XCTAssertFalse(tokens.isEmpty, tag)
+                snippet.forEachVisibleToken(tokens) { range, _ in
+                    XCTAssertLessThanOrEqual(NSMaxRange(range), rendered.attributed.length)
+                    XCTAssertFalse((rendered.attributed.string as NSString).substring(with: range).isEmpty)
+                }
+            }
+        }
+    }
+
     func testEmphasisAttributeApplied() {
         let b = MarkdownBodyRenderer.render("*italic*", baseFont: font, isDark: true)
         XCTAssertEqual(b.attributed.string, "italic")

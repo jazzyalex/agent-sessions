@@ -2,14 +2,14 @@ import Foundation
 
 /// Per-turn duration ("how long did the assistant take to answer"), attached
 /// to the turn's anchor block (see `TranscriptTurnTiming`).
-struct TurnTiming: Equatable {
+struct TurnTiming: Equatable, Sendable {
     var durationSeconds: Double?
     var toolCallCount: Int
 }
 
 /// Per-tool-call duration ("how long did this tool take"), keyed by each
 /// output block's `globalBlockIndex` (see `TranscriptTurnTiming`).
-struct ToolTiming: Equatable {
+struct ToolTiming: Equatable, Sendable {
     var durationSeconds: Double?
 }
 

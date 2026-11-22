@@ -86,6 +86,19 @@ final class TranscriptToolCellsTests: XCTestCase {
             table.layoutSubtreeIfNeeded()
         }
 
+        func display() {
+            layout()
+            window.contentView?.displayIfNeeded()
+            table.displayIfNeeded()
+        }
+
+        func syntaxState(_ body: SelectableBlockTextView) -> String {
+            let range = table.rows(in: table.visibleRect)
+            let row = body.blockOrdinal
+            let cell = row >= 0 ? table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TranscriptRowCell : nil
+            return "visible rows=\(range), row=\(row), table attached=\(table.window != nil), body attached=\(body.window != nil), current body=\(cell?.bodyText === body), snippets=\(body.syntaxSnippets.count)"
+        }
+
         /// Runs the main run loop until every off-main presentation landed.
         @discardableResult
         func waitForPresentations(timeout: TimeInterval = 20) -> Bool {
@@ -982,6 +995,31 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "$ make\nok")
     }
 
+    func testTableHoverTracksTheActionAndClearsOnScrollOrReuse() throws {
+        let h = Harness(codexTwoCommands, source: .codex)
+        XCTAssertTrue(h.waitForPresentations())
+        let table = try XCTUnwrap(h.table as? BlockTableView)
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let lines = cell.linesView
+
+        func pointOverLine(_ index: Int) -> NSPoint {
+            let offset = (CGFloat(index) + 0.5) * ToolRowMetrics.lineHeight
+            let y = lines.isFlipped ? lines.bounds.minY + offset : lines.bounds.maxY - offset
+            return lines.convert(NSPoint(x: lines.bounds.midX, y: y), to: nil)
+        }
+
+        table.updateToolHover(at: pointOverLine(0))
+        XCTAssertEqual(cell.hoveredActionIndex, 0)
+        table.updateToolHover(at: pointOverLine(1))
+        XCTAssertEqual(cell.hoveredActionIndex, 1)
+        table.suspendToolHoverForScroll()
+        XCTAssertNil(cell.hoveredActionIndex)
+
+        cell.setHoveredAction(1)
+        cell.prepareForReuse()
+        XCTAssertNil(cell.hoveredActionIndex)
+    }
+
     func testShowRawMentionsShortenedStrings() throws {
         var call = bash("t1", "make")
         call.rawJSON = #"{"type":"tool_use","input":{"command":"make","blob":"[OMITTED bytes=9000]"}}"#
@@ -1530,7 +1568,7 @@ final class TranscriptToolCellsTests: XCTestCase {
         window.close()
     }
 
-    func testNativeCopyAndMenuCopyLeaveOutGutterAndFoldRows() throws {
+    func testNativeCopyAndMenuCopyLeaveOutGutterAndFoldRows() async throws {
         // Native ⌘C writes to the general pasteboard before the fix: keep the reader's text.
         let general = NSPasteboard.general
         let generalChange = general.changeCount
@@ -1546,8 +1584,10 @@ final class TranscriptToolCellsTests: XCTestCase {
         let pasteboard = privatePasteboard()
         h.controller.toolPasteboard = pasteboard
         h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
-        XCTAssertTrue(h.waitForPresentations())
+        await assertSyntaxPainted { !h.controller.hasPendingToolPresentations }
+        h.display()
         let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        await assertSyntaxPainted({ !cell.bodyText.paintedSyntax.isEmpty }, diagnostics: h.syntaxState(cell.bodyText))
         let storage = try XCTUnwrap(cell.bodyText.textStorage)
         let all = NSRange(location: 0, length: storage.length)
         XCTAssertNotNil(showAllLink(in: cell), "the body has a fold row")
@@ -1576,6 +1616,155 @@ final class TranscriptToolCellsTests: XCTestCase {
         perform(menuItem(menu, "Copy"), in: menu)
         XCTAssertEqual(pasteboard.string(forType: .string), expected)
         XCTAssertNil(pasteboard.data(forType: .rtf))
+    }
+
+    func testMessageSyntaxArrivalPreservesSelectionAndFindBackground() async throws {
+        let h = Harness([assistant("```swift\nlet café = 42\n```")])
+        defer { h.window.close() }
+        h.display()
+        let body = try XCTUnwrap(h.view(id: 0, as: BlockCardCellView.self)?.bodyText)
+        let range = (body.string as NSString).range(of: "let")
+        XCTAssertNotEqual(range.location, NSNotFound)
+        body.setSelectedRange(range)
+        body.applyFindHighlights(all: [range], current: range)
+        let background = body.textStorage?.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? NSColor
+        let offset = h.scroll.contentView.bounds.origin
+        await assertSyntaxPainted({ !body.paintedSyntax.isEmpty }, diagnostics: h.syntaxState(body))
+        let foreground = body.textStorage?.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+        XCTAssertNotEqual(foreground, .labelColor)
+        XCTAssertEqual(body.selectedRange(), range)
+        XCTAssertEqual(h.scroll.contentView.bounds.origin, offset)
+        XCTAssertEqual(body.textStorage?.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? NSColor, background)
+        body.clearFindHighlights()
+        let syntaxColor = body.textStorage?.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+        XCTAssertNotEqual(syntaxColor, foreground)
+        XCTAssertNotEqual(syntaxColor, .labelColor)
+        XCTAssertNotEqual(body.textStorage?.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? NSColor, background)
+        body.applyFindHighlights(all: [range], current: nil)
+        XCTAssertNotEqual(body.textStorage?.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor, syntaxColor)
+        body.clearFindHighlights()
+        XCTAssertEqual(body.textStorage?.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor, syntaxColor)
+        XCTAssertEqual((body.string as NSString).substring(with: body.selectedRange()), "let")
+        h.controller.setMonochromeSyntax(true)
+        await assertSyntaxPainted { body.paintedSyntax.isEmpty }
+        XCTAssertEqual(body.textStorage?.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor, .labelColor)
+        h.controller.setMonochromeSyntax(false)
+        h.replace([assistant("```swift\nlet old = true\n```")])
+        h.display()
+        h.replace([assistant("```swift\nvar newest = false\n```")])
+        h.display()
+        let replacement = try XCTUnwrap(h.view(id: 0, as: BlockCardCellView.self)?.bodyText)
+        await assertSyntaxPainted { !replacement.paintedSyntax.isEmpty }
+        XCTAssertEqual(replacement.syntaxSnippets.first?.key.text, "var newest = false")
+        XCTAssertFalse(replacement.string.contains("old"))
+    }
+
+    private func assertSyntaxPainted(_ ready: () -> Bool, diagnostics: @autoclosure () -> String = "",
+                                    file: StaticString = #filePath, line: UInt = #line) async {
+        let deadline = Date().addingTimeInterval(3)
+        while !ready(), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertTrue(ready(), "syntax presentation did not settle. \(diagnostics())", file: file, line: line)
+    }
+
+    func testSyntaxPresentationPerformance() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["AS_SYNTAX_PERF_OUTPUT"] else { throw XCTSkip("Opt-in Release syntax benchmark") }
+        var samples: [[String: Double]] = []
+        for _ in 0..<12 {
+            let message = "```swift\n" + (1...64).map { "let café\($0) = \($0) // 🍃" }.joined(separator: "\n") + "\n```"
+            let start = CFAbsoluteTimeGetCurrent()
+            let m = Harness([assistant(message)])
+            m.display()
+            let messageBody = try XCTUnwrap(m.view(id: 0, as: BlockCardCellView.self)?.bodyText)
+            let plain = CFAbsoluteTimeGetCurrent()
+            await assertSyntaxPainted { !messageBody.paintedSyntax.isEmpty }
+            let messageColor = CFAbsoluteTimeGetCurrent()
+            // Reconfiguring the existing cell with a live edit must color the newest text.
+            let edit = CFAbsoluteTimeGetCurrent()
+            m.replace([assistant(message.replacingOccurrences(of: "let café1", with: "var café1"))])
+            m.display()
+            let editedBody = try XCTUnwrap(m.view(id: 0, as: BlockCardCellView.self)?.bodyText)
+            XCTAssertTrue(editedBody.string.contains("var café1"))
+            await assertSyntaxPainted { !editedBody.paintedSyntax.isEmpty }
+            let edited = CFAbsoluteTimeGetCurrent()
+            m.window.close()
+
+            let result = (1...600).map { "\($0)→let café\($0) = \($0) // 🍃" }.joined(separator: "\n")
+            let h = Harness([user(), read("t1", "/repo/Sample.swift"), output("t1", result), assistant()])
+            let open = CFAbsoluteTimeGetCurrent()
+            h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+            h.display()
+            let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+            await assertSyntaxPainted { !cell.bodyText.isHidden }
+            let toolPlain = CFAbsoluteTimeGetCurrent()
+            await assertSyntaxPainted { !cell.bodyText.paintedSyntax.isEmpty }
+            let toolColor = CFAbsoluteTimeGetCurrent()
+            let fold = try XCTUnwrap(showAllLink(in: cell))
+            let foldStart = CFAbsoluteTimeGetCurrent()
+            _ = h.controller.textView(cell.bodyText, clickedOnLink: fold.url, at: fold.location)
+            await assertSyntaxPainted { !h.controller.hasPendingToolPresentations }
+            h.display()
+            let foldedBody = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self)?.bodyText)
+            await assertSyntaxPainted { !foldedBody.paintedSyntax.isEmpty }
+            let foldEnd = CFAbsoluteTimeGetCurrent()
+            h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+            let reopen = CFAbsoluteTimeGetCurrent()
+            h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+            h.display()
+            let reopenedBody = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self)?.bodyText)
+            await assertSyntaxPainted { !reopenedBody.isHidden && !reopenedBody.paintedSyntax.isEmpty }
+            let reopened = CFAbsoluteTimeGetCurrent()
+            h.window.close()
+            let scrollFixture = (0..<48).map { assistant("```swift\nlet value\($0) = \($0)\n```") }
+            let scroll = Harness(scrollFixture, size: NSSize(width: 640, height: 550))
+            let scrollStart = CFAbsoluteTimeGetCurrent()
+            for row in [0, 18, 4, 27, 11, 34, 2, 39, 14, 45] {
+                scroll.table.scrollRowToVisible(row)
+                scroll.display()
+                try? await Task.sleep(nanoseconds: 1_000_000)
+            }
+            let scrollEnd = CFAbsoluteTimeGetCurrent()
+            let final = try XCTUnwrap(scroll.view(id: 45, as: BlockCardCellView.self))
+            await assertSyntaxPainted { !final.bodyText.paintedSyntax.isEmpty }
+            scroll.window.close()
+            let oversized = (1...4_000).map { "\($0)→let oversizedValue\($0) = \($0) // 🍃" }.joined(separator: "\n")
+            XCTAssertGreaterThan(oversized.utf8.count, TranscriptSyntaxSnippet.bodyLimit)
+            let large = Harness([user(), read("t1", "/repo/Large.swift"), output("t1", oversized), assistant()])
+            let fallbackStart = CFAbsoluteTimeGetCurrent()
+            large.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+            large.display()
+            let plainFallback = try XCTUnwrap(large.view(id: 1, as: ToolInvocationCellView.self)?.bodyText)
+            await assertSyntaxPainted { !plainFallback.isHidden }
+            let fallbackEnd = CFAbsoluteTimeGetCurrent()
+            XCTAssertTrue(plainFallback.syntaxSnippets.isEmpty)
+            XCTAssertTrue(plainFallback.paintedSyntax.isEmpty)
+            large.window.close()
+            var sample = [
+                "message_plain_ms": (plain - start) * 1000,
+                "message_color_after_plain_ms": (messageColor - plain) * 1000,
+                "message_edit_to_color_ms": (edited - edit) * 1000,
+                "tool_plain_ms": (toolPlain - open) * 1000,
+                "tool_color_after_plain_ms": (toolColor - toolPlain) * 1000,
+                "tool_fold_color_ms": (foldEnd - foldStart) * 1000,
+                "tool_reopen_color_ms": (reopened - reopen) * 1000,
+                "rapid_scroll_ms_per_step": (scrollEnd - scrollStart) * 100,
+                "oversized_plain_ms": (fallbackEnd - fallbackStart) * 1000,
+            ]
+            #if DEBUG
+            let controllers = [m.controller, h.controller, scroll.controller]
+            XCTAssertEqual(large.controller.syntaxPeakWork.active, 0)
+            sample["main_color_pass_max_ms"] = controllers.flatMap(\.syntaxPaintMilliseconds).max() ?? 0
+            sample["peak_active_jobs"] = Double(controllers.map { $0.syntaxPeakWork.active }.max() ?? 0)
+            sample["peak_queued_jobs"] = Double(controllers.map { $0.syntaxPeakWork.queued }.max() ?? 0)
+            XCTAssertLessThanOrEqual(sample["peak_active_jobs"] ?? 0, 2)
+            XCTAssertLessThanOrEqual(sample["peak_queued_jobs"] ?? 0, 8)
+            #endif
+            samples.append(sample)
+        }
+        try JSONSerialization.data(withJSONObject: samples, options: [.prettyPrinted, .sortedKeys])
+            .write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
     func testGrowingOutputKeepsASelectionElsewhere() {

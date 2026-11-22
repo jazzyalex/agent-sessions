@@ -202,6 +202,7 @@ struct ToolActionLines: View {
     let isOpen: Bool
     let findMatchCount: Int
     let onToggle: (_ allInGroup: Bool) -> Void
+    var hoveredActionIndex: Int?
     /// Copy the line's action (its plain text).
     var onCopy: (_ actionIndex: Int) -> Void = { _ in }
     /// Show the raw event of the invocation, anchored at the line.
@@ -212,6 +213,7 @@ struct ToolActionLines: View {
             ForEach(Array(lines.enumerated()), id: \.offset) { offset, line in
                 ToolActionLineButton(line: line, index: offset, isOpen: isOpen,
                                      findMatchCount: offset == 0 ? findMatchCount : 0,
+                                     isHovered: hoveredActionIndex == offset,
                                      onToggle: onToggle, onCopy: onCopy, onRaw: onRaw)
             }
         }
@@ -224,10 +226,10 @@ struct ToolActionLineButton: View {
     let index: Int
     let isOpen: Bool
     let findMatchCount: Int
+    let isHovered: Bool
     let onToggle: (_ allInGroup: Bool) -> Void
     let onCopy: (_ actionIndex: Int) -> Void
     let onRaw: (_ actionIndex: Int) -> Void
-    @State private var hovering = false
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -245,7 +247,7 @@ struct ToolActionLineButton: View {
             .accessibilityAction(named: Text(verbatim: ToolMenuText.copy)) { onCopy(index) }
             .accessibilityAction(named: Text(verbatim: ToolMenuText.showRawEvent)) { onRaw(index) }
 
-            if hovering {
+            if isHovered {
                 HStack(spacing: 2) {
                     ToolHoverButton(symbol: "doc.on.doc", help: ToolMenuText.copy, action: { onCopy(index) })
                     ToolHoverButton(symbol: "curlybraces", help: ToolMenuText.showRawEvent, action: { onRaw(index) })
@@ -256,7 +258,6 @@ struct ToolActionLineButton: View {
             }
         }
         .frame(height: ToolRowMetrics.lineHeight)
-        .onHover { hovering = $0 }
     }
 }
 
@@ -683,7 +684,9 @@ class ToolCardCellView: NSTableCellView, TranscriptRowCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        bodyText.textStorage?.setAttributedString(NSAttributedString())
+        if let storage = bodyText.textStorage, storage.length != 0 {
+            storage.setAttributedString(NSAttributedString())
+        }
         bodyText.setSelectedRange(NSRange(location: 0, length: 0))
         bodyText.blockOrdinal = -1
         bodyText.forceActiveSelectionAppearance(false)
@@ -798,6 +801,7 @@ final class ToolInvocationCellView: ToolCardCellView {
     private var shownBody: NSAttributedString?
     private var shownBodyGeneration = 0
     private var lines: [ToolActionLine] = []
+    private(set) var hoveredActionIndex: Int?
     private var isOpen = false
     private var onToggle: (_ allInGroup: Bool) -> Void = { _ in }
     /// Hover Copy: the action index of the line.
@@ -968,11 +972,26 @@ final class ToolInvocationCellView: ToolCardCellView {
     private func renderLines() {
         linesHost.rootView = ToolActionLines(
             lines: lines, isOpen: isOpen, findMatchCount: findMatchCount, onToggle: onToggle,
+            hoveredActionIndex: hoveredActionIndex,
             onCopy: { [weak self] index in self?.performHoverCopy(actionIndex: index) },
             onRaw: { [weak self] index in self?.performHoverRaw(actionIndex: index) })
     }
 
     // MARK: Hover buttons
+
+    func setHoveredAction(_ index: Int?) {
+        guard hoveredActionIndex != index else { return }
+        hoveredActionIndex = index
+        renderLines()
+    }
+
+    func actionIndex(at windowPoint: NSPoint) -> Int? {
+        let local = linesHost.convert(windowPoint, from: nil)
+        let bounds = linesHost.bounds
+        guard bounds.contains(local), !lines.isEmpty else { return nil }
+        let y = linesHost.isFlipped ? local.y - bounds.minY : bounds.maxY - local.y
+        return min(Int(y / ToolRowMetrics.lineHeight), lines.count - 1)
+    }
 
     /// The hover Copy button of line `actionIndex`.
     func performHoverCopy(actionIndex: Int) { onCopy(actionIndex) }
@@ -996,14 +1015,10 @@ final class ToolInvocationCellView: ToolCardCellView {
     // MARK: Context menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        var actionIndex: Int?
+        let actionIndex = actionIndex(at: event.locationInWindow)
         var selection: String?
-        let inLines = linesHost.convert(event.locationInWindow, from: nil)
-        if linesHost.bounds.contains(inLines), !lines.isEmpty {
-            let y = linesHost.isFlipped ? inLines.y : linesHost.bounds.height - inLines.y
-            actionIndex = min(max(Int(y / ToolRowMetrics.lineHeight), 0), lines.count - 1)
-        } else if !bodyText.isHidden,
-                  bodyText.bounds.contains(bodyText.convert(event.locationInWindow, from: nil)) {
+        if actionIndex == nil, !bodyText.isHidden,
+           bodyText.bounds.contains(bodyText.convert(event.locationInWindow, from: nil)) {
             // As ⌘C copies it: no gutter cells, no fold controls.
             let text = bodyText.toolBodySelectionText()
             if !text.isEmpty { selection = text }
@@ -1015,6 +1030,7 @@ final class ToolInvocationCellView: ToolCardCellView {
         super.prepareForReuse()
         shownBody = nil
         bodyFindHighlights = []
+        hoveredActionIndex = nil
     }
 }
 
@@ -1142,6 +1158,7 @@ struct ToolPresentation {
     var findMap: ToolFindMap = .empty
     /// The body's fold controls, in rendered order (Find opens the one that hides a match).
     var foldLinks: [ToolFoldLink] = []
+    var syntaxSnippets: [TranscriptSyntaxSnippet] = []
 }
 
 /// Everything one L2 render needs, captured on the main thread.
@@ -1200,7 +1217,7 @@ enum ToolPresentationRenderer {
                                 plainCopyText: plainCopyText,
                                 findMap: ToolFindMap(segments: ToolSearchText.segments(of: invocation),
                                                      sourceMap: rendered.sourceMap),
-                                foldLinks: rendered.foldLinks.map(\.action))
+                                foldLinks: rendered.foldLinks.map(\.action), syntaxSnippets: rendered.syntaxSnippets)
     }
 
     /// Cache cost of a built invocation: its text in UTF-16 units (outputs, plain forms, script

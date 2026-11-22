@@ -24,6 +24,20 @@ struct SubagentRowMeta: Equatable {
 /// The builder resolves parent references by matching `child.parentSessionID`
 /// against both `session.id` and `session.codexInternalSessionIDHint` (needed
 /// because Claude session IDs are SHA256 hashes, not raw UUIDs).
+enum SessionGroupFolding: CaseIterable, Sendable {
+    case standard
+    case collapsed
+    case expanded
+
+    func isCollapsed(_ id: String, standard: Set<String>) -> Bool {
+        switch self {
+        case .standard: standard.contains(id)
+        case .collapsed: true
+        case .expanded: false
+        }
+    }
+}
+
 enum SubagentHierarchyBuilder {
 
     struct Result {
@@ -59,7 +73,8 @@ enum SubagentHierarchyBuilder {
     static func build(
         sessions: [Session],
         collapsedParents: Set<String> = [],
-        hierarchyEnabled: Bool
+        hierarchyEnabled: Bool,
+        folding: SessionGroupFolding = .standard
     ) -> Result {
         guard hierarchyEnabled else {
             return flatResult(sessions: sessions)
@@ -156,7 +171,7 @@ enum SubagentHierarchyBuilder {
                     hasWorkflowChildren: children.contains { $0.isClaudeWorkflowSubagent }
                 )
 
-                guard !children.isEmpty, !collapsedParents.contains(node.id) else { continue }
+                guard !children.isEmpty, !folding.isCollapsed(node.id, standard: collapsedParents) else { continue }
                 // Reversed: popLast() then yields children in sorted order.
                 for child in children.reversed() {
                     stack.append((child, depth + 1))

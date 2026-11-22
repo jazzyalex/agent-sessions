@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import os.log
 
 private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "ClaudeCloud")
@@ -34,10 +35,13 @@ struct ClaudeCloudRawSession: Equatable, Sendable {
 ///     not auth — so a shell-based reimplementation of this client would appear broken.
 actor ClaudeCloudAPIClient {
 
+    private let credentials: ClaudeCredentialService
     private let session: URLSession
     private var cachedOrgID: String?
+    private var cacheOwner: String?
 
-    init(session: URLSession? = nil) {
+    init(session: URLSession? = nil, credentials: ClaudeCredentialService = .shared) {
+        self.credentials = credentials
         if let session {
             self.session = session
         } else {
@@ -50,6 +54,18 @@ actor ClaudeCloudAPIClient {
 
     func invalidateOrgID() {
         cachedOrgID = nil
+        cacheOwner = nil
+    }
+
+    private func prepareOwner(_ owner: String) {
+        if owner != cacheOwner { cachedOrgID = nil; cacheOwner = owner }
+    }
+
+    private func checkOwner(_ owner: String) throws {
+        guard !Task.isCancelled, cacheOwner == owner,
+              !owner.hasPrefix("web:") || credentials.isCurrent(owner) else {
+            throw CancellationError()
+        }
     }
 
     // MARK: - Requests
@@ -66,14 +82,24 @@ actor ClaudeCloudAPIClient {
         return req
     }
 
-    private func send(_ req: URLRequest) async throws -> Data {
+    private func send(
+        _ req: URLRequest,
+        operationID: SearchResponsivenessOperationID?,
+        context: SearchResponsivenessMetricContext
+    ) async throws -> Data {
+        let metrics = SearchResponsivenessMetrics.shared
+        let span = metrics.beginSpan(.credentialNetwork, operationID: operationID, context: context)
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            if let span {
+                Task.isCancelled ? metrics.cancel(span) : metrics.fail(span, code: .unavailable)
+            }
             throw ClaudeCloudError.offline
         }
+        if let span { Task.isCancelled ? metrics.cancel(span) : metrics.end(span) }
         if let http = response as? HTTPURLResponse {
             let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
             if let mapped = Self.mapHTTP(http.statusCode, retryAfter: retryAfter) {
@@ -84,18 +110,43 @@ actor ClaudeCloudAPIClient {
     }
 
     /// Resolve the organization UUID, cached for the lifetime of the actor.
-    func resolveOrgID(sessionKey: String) async throws -> String {
-        if let cachedOrgID { return cachedOrgID }
+    func resolveOrgID(sessionKey: String, owner suppliedOwner: String? = nil,
+                      lease: ClaudeCredentialRequestLease? = nil,
+                      metricsOperationID suppliedOperationID: SearchResponsivenessOperationID? = nil,
+                      metricsContext suppliedContext: SearchResponsivenessMetricContext? = nil) async throws -> String {
+        let owner = suppliedOwner ?? Self.ephemeralOwner(sessionKey)
+        let metrics = SearchResponsivenessMetrics.shared
+        let metricContext = suppliedContext ?? .credentialOwner(owner)
+        let operationID = suppliedOperationID
+            ?? metrics.operation(source: "claude-cloud-api", sessionID: owner, start: true)
+        try Task.checkCancellation()
+        try lease?.check()
+        guard !owner.hasPrefix("web:") || credentials.isCurrent(owner) else { throw CancellationError() }
+        prepareOwner(owner)
+        try checkOwner(owner)
+        try lease?.check()
+        if let cachedOrgID {
+            metrics.record(.credentialCacheLookup, operationID: operationID,
+                           context: metricContext, status: .cacheHit)
+            return cachedOrgID
+        }
+        metrics.record(.credentialCacheLookup, operationID: operationID,
+                       context: metricContext, status: .cacheMiss)
         guard let url = URL(string: "https://claude.ai/api/organizations") else {
             throw ClaudeCloudError.contractDrift("bad organizations URL")
         }
-        let data = try await send(request(url: url, sessionKey: sessionKey, orgID: nil))
+        let data = try await send(request(url: url, sessionKey: sessionKey, orgID: nil),
+                                  operationID: operationID, context: metricContext)
+        try checkOwner(owner)
+        try lease?.check()
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               let first = rows.first,
               let uuid = (first["uuid"] as? String) ?? (first["id"] as? String) else {
             throw ClaudeCloudError.contractDrift("organizations payload has no uuid")
         }
         cachedOrgID = uuid
+        metrics.record(.credentialCacheWrite, operationID: operationID,
+                       context: metricContext, status: .published)
         return uuid
     }
 
@@ -105,19 +156,34 @@ actor ClaudeCloudAPIClient {
     /// paging further only costs requests; the cap is a bound on a runaway cursor, not a
     /// completeness target.
     func listSessions(sessionKey: String,
+                      owner suppliedOwner: String? = nil,
+                      lease: ClaudeCredentialRequestLease? = nil,
                       orgID: String? = nil,
                       maxPages: Int = 3) async throws -> [ClaudeCloudRawSession] {
+        let owner = suppliedOwner ?? Self.ephemeralOwner(sessionKey)
+        let metrics = SearchResponsivenessMetrics.shared
+        let metricContext = SearchResponsivenessMetricContext.credentialOwner(owner)
+        let operationID = metrics.operation(source: "claude-cloud-api", sessionID: owner, start: true)
+        try Task.checkCancellation()
+        try lease?.check()
+        guard !owner.hasPrefix("web:") || credentials.isCurrent(owner) else { throw CancellationError() }
+        prepareOwner(owner)
+        try checkOwner(owner)
+        try lease?.check()
         // `??` takes an autoclosure, which cannot be async — resolve explicitly.
         let org: String
         if let orgID {
             org = orgID
         } else {
-            org = try await resolveOrgID(sessionKey: sessionKey)
+            org = try await resolveOrgID(sessionKey: sessionKey, owner: owner, lease: lease,
+                                         metricsOperationID: operationID, metricsContext: metricContext)
         }
         var out: [ClaudeCloudRawSession] = []
         var cursor: String?
 
         for _ in 0..<max(1, maxPages) {
+            try checkOwner(owner)
+            try lease?.check()
             var components = URLComponents(string: "https://claude.ai/v1/code/sessions")
             var items = [URLQueryItem(name: "limit", value: "100")]
             if let cursor { items.append(URLQueryItem(name: "cursor", value: cursor)) }
@@ -125,13 +191,20 @@ actor ClaudeCloudAPIClient {
             guard let url = components?.url else {
                 throw ClaudeCloudError.contractDrift("bad sessions URL")
             }
-            let data = try await send(request(url: url, sessionKey: sessionKey, orgID: org))
+            let data = try await send(request(url: url, sessionKey: sessionKey, orgID: org),
+                                      operationID: operationID, context: metricContext)
+            try checkOwner(owner)
+            try lease?.check()
             let page = try Self.decodeList(data)
             out.append(contentsOf: page.rows)
             guard let next = page.nextCursor, !next.isEmpty else { break }
             cursor = next
         }
         return out
+    }
+
+    private static func ephemeralOwner(_ key: String) -> String {
+        "ephemeral:" + SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Pure helpers (unit-tested directly)

@@ -95,6 +95,7 @@ struct RenderedToolBody {
     var sourceMap: [(rendered: NSRange, actionIndex: Int, source: NSRange)]
     /// Every control (fold row links, "… +N chars", "Show script") in rendered order.
     var foldLinks: [(range: NSRange, action: ToolFoldLink)]
+    var syntaxSnippets: [TranscriptSyntaxSnippet] = []
 }
 
 /// Renders one `ToolInvocation` as one attributed string, the L2 detail (spec §6.5–6.7).
@@ -275,6 +276,9 @@ private struct Builder {
     var copyBlocks: [String] = []
     var sourceMap: [(rendered: NSRange, actionIndex: Int, source: NSRange)] = []
     var foldLinks: [(range: NSRange, action: ToolFoldLink)] = []
+    var syntaxSnippets: [TranscriptSyntaxSnippet] = []
+    var syntaxScannedBytes = 0
+    var syntaxSpans: [TranscriptSyntaxSpan]?
 
     private var blockOpen = false
     private var blockBase: Attrs = [:]
@@ -352,7 +356,22 @@ private struct Builder {
         }
         if let output = action.output, !output.text.isEmpty {
             if parts > 0 { gap(lastWasContext ? Style.partGap : Style.paneGap) }
+            let snippets = eligibleSyntax(in: output, hint: action.outputSyntax)
+            if !snippets.isEmpty { syntaxSpans = [] }
             outputPane(output, key: index, isError: isFailure(action.status), mapIndex: index, mapBase: layout.output)
+            if let spans = syntaxSpans {
+                syntaxSpans = nil
+                let projected = snippets.compactMap { $0.projected(through: spans) }
+                if action.outputSyntax?.blameSource == true {
+                    let text = out.string as NSString
+                    for span in projected.flatMap(\.spans) {
+                        let start = text.lineRange(for: NSRange(location: span.renderedLocation, length: 0)).location
+                        out.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor,
+                                         range: NSRange(location: start, length: span.renderedLocation - start))
+                    }
+                }
+                syntaxSnippets += projected
+            }
             parts += 1
         }
         if !action.hiddenNotes.isEmpty {
@@ -408,6 +427,15 @@ private struct Builder {
 
     // MARK: Command and heredoc
 
+    private mutating func eligibleSyntax(in text: DecodedText, hint: ToolOutputSyntax?) -> [TranscriptSyntaxSnippet] {
+        guard let hint else { return [] }
+        let bytes = text.text.utf8.count
+        guard bytes <= TranscriptSyntaxSnippet.bodyLimit - syntaxScannedBytes else { return [] }
+        syntaxScannedBytes += bytes
+        return Array(hint.snippets(in: text)
+            .prefix(TranscriptSyntaxSnippet.snippetsPerBody - syntaxSnippets.count))
+    }
+
     private mutating func commandPane(_ command: String, action: ToolAction, index: Int, layout: PlainLayout,
                                       terminator: String?) {
         beginPane()
@@ -425,11 +453,18 @@ private struct Builder {
                  firstStyle: first, restStyle: rest, columns: columns, mapIndex: index, mapBase: layout.command)
 
         if let heredoc = action.heredoc, !heredoc.text.isEmpty {
+            let hint = ToolOutputSyntax.heredocLanguage(command: command).map { ToolOutputSyntax(language: $0) }
+            let snippets = eligibleSyntax(in: heredoc, hint: hint)
+            if !snippets.isEmpty { syntaxSpans = [] }
             let gutter = gutterStyle(maxNumber: Self.lineCount(heredoc.text))
             let folded = ToolTextBudget.foldCommand(heredoc.text, columns: gutter.columns, state: inputState(state))
             monoText(heredoc.text, folded: folded, kind: .input(action: index), lead: .gutter(nil),
                      firstStyle: gutter.style, restStyle: gutter.style, columns: gutter.columns,
                      mapIndex: index, mapBase: layout.heredoc)
+            if let spans = syntaxSpans {
+                syntaxSpans = nil
+                syntaxSnippets += snippets.compactMap { $0.projected(through: spans) }
+            }
         }
         if let terminator {
             paneBlock(rest)
@@ -617,7 +652,7 @@ private struct Builder {
                     assert(full.distance(from: keptEnd, to: full.endIndex) == hiddenChars,
                            "the shown prefix and the budget's hiddenChars must agree")
                     let range = append(String(full[..<keptEnd]), attrs)
-                    if let mapBase { map(range, index: mapIndex, source: mapBase + lines.u16Start[line]) }
+                    recordText(range, at: lines.u16Start[line], actionIndex: mapIndex, mapBase: mapBase)
                     let control: ToolFoldLink
                     switch kind {
                     case .output(let key): control = .openLongLine(action: key, line: line)
@@ -644,7 +679,7 @@ private struct Builder {
                                       _ attrs: Attrs, mapIndex: Int, mapBase: Int?) {
         let start = lines.u8Start[range.lowerBound], end = lines.u8End[range.upperBound - 1]
         let rendered = append(String(decoding: UnsafeBufferPointer(rebasing: bytes[start..<end]), as: UTF8.self), attrs)
-        if let mapBase { map(rendered, index: mapIndex, source: mapBase + lines.u16Start[range.lowerBound]) }
+        recordText(rendered, at: lines.u16Start[range.lowerBound], actionIndex: mapIndex, mapBase: mapBase)
     }
 
     /// Numbered lines `range` as one run in the open block (all lines of a numbered pane share one
@@ -674,9 +709,8 @@ private struct Builder {
             text.append(content)
             copy.append(content)
             let length = lines.u16End[line] - lines.u16Start[line]
-            if let mapBase {
-                map(NSRange(location: start + offset, length: length), index: mapIndex, source: mapBase + lines.u16Start[line])
-            }
+            recordText(NSRange(location: start + offset, length: length), at: lines.u16Start[line],
+                       actionIndex: mapIndex, mapBase: mapBase)
             offset += length
         }
         let base = attrs.merging(blockBase) { run, _ in run }
@@ -800,6 +834,12 @@ private struct Builder {
         sourceMap.append((rendered: rendered, actionIndex: index, source: NSRange(location: source, length: rendered.length)))
     }
 
+    private mutating func recordText(_ rendered: NSRange, at offset: Int, actionIndex: Int, mapBase: Int?) {
+        if let mapBase { map(rendered, index: actionIndex, source: mapBase + offset) }
+        syntaxSpans?.append(TranscriptSyntaxSpan(source: NSRange(location: offset, length: rendered.length),
+                                                       renderedLocation: rendered.location))
+    }
+
     // MARK: Panes
 
     /// Opens a pane with a filled padding line. Filled lines, not paragraph spacing: TextKit 1 paints
@@ -885,7 +925,7 @@ private struct Builder {
         blockOpen = false
         return RenderedToolBody(attributed: NSAttributedString(attributedString: out),
                                 plainCopyText: copyBlocks.joined(separator: "\n"),
-                                sourceMap: sourceMap, foldLinks: foldLinks)
+                                sourceMap: sourceMap, foldLinks: foldLinks, syntaxSnippets: syntaxSnippets)
     }
 
     // MARK: Helpers

@@ -115,10 +115,11 @@ extension SessionSourceAdapter {
                     currentIsIndexing: { indexer.isIndexing },
                     currentLaunchPhase: { indexer.launchPhase },
                     searchIdentitySnapshots: .provider { indexer.searchIdentitySnapshot },
-                    refresh: { _, _, _ in
-                        // SPEC §8.6: OpenCode's refresh takes no arguments; the unified
-                        // indexer has always dropped mode/trigger/profile for this source.
-                        indexer.refresh()
+                    refresh: { _, trigger, _ in
+                        indexer.refresh(trigger: trigger)
+                    },
+                    cancelRefreshAndWait: {
+                        await indexer.cancelCoreRefreshAndWait()
                     },
                     reloadFocusedSession: { id, force, trigger in
                         let reason: OpenCodeSessionIndexer.ReloadReason

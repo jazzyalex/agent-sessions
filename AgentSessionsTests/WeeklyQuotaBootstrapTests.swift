@@ -111,6 +111,33 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertEqual(result?.unpricedVolumeShare ?? 1, 0, accuracy: 0.0001)
     }
 
+    func testClaudeScanReadsCRLFAndFinalUnterminatedUsageRecord() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        let wholeSecond = claudeUsageLine(id: "whole", at: at, oneHourCacheWrite: 1_000_000)
+        let fractional = claudeUsageLine(id: "fractional", at: at, oneHourCacheWrite: 1_000_000)
+            .replacingOccurrences(of: "Z\"", with: ".123Z\"")
+        try [wholeSecond, fractional].joined(separator: "\r\n")
+            .write(to: root.appendingPathComponent("mixed.jsonl"), atomically: true, encoding: .utf8)
+
+        let result = try XCTUnwrap(ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(), now: anchor.addingTimeInterval(-3600)))
+        XCTAssertEqual(result.dollars, 20, accuracy: 0.001)
+    }
+
+    func testClaudeCancellationDiscardsPartialUsage() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "before", at: at, oneHourCacheWrite: 1_000_000)]
+            + Array(repeating: "{}", count: 1_100), name: "cancelled.jsonl")
+        let gate = CancellationGate(cancelAfter: 5)
+
+        XCTAssertNil(ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(), now: anchor.addingTimeInterval(-3600),
+            shouldCancel: gate.shouldCancel))
+        XCTAssertGreaterThanOrEqual(gate.checkCount, 6)
+    }
+
     /// Real records carry the flat total AND the sub-object that breaks it down, so
     /// the scan must not bill the same tokens through both.
     func testClaudeScanDoesNotDoubleCountFlatAndSplitCacheCreation() throws {
@@ -453,13 +480,13 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
             modelLine("gpt-5.6", at: at),
             turn(output: 1_000_000, resetsAt: anchor, at: at)
         ], name: "cancelled.jsonl")
-        let gate = CancellationGate(cancelAfter: 8)
+        let gate = CancellationGate(cancelAfter: 7)
 
         XCTAssertNil(CodexWeeklyQuotaBootstrapScanner.scan(
             root: root, resetsAt: anchor, windowMinutes: 10080,
             usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
             now: anchor.addingTimeInterval(-3600), shouldCancel: gate.shouldCancel))
-        XCTAssertGreaterThanOrEqual(gate.checkCount, 9)
+        XCTAssertGreaterThanOrEqual(gate.checkCount, 8)
     }
 
     func testAccountScopedScanRejectsConflictingDurableIdentity() throws {

@@ -220,6 +220,26 @@ final class SessionRowsBuilderTests: XCTestCase {
         )
     }
 
+    func testGroupFoldingShowsTheSameManuallyFoldedGroupsOnReturnToStandard() {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let rows = [
+            makeSession(id: "first", modifiedAt: date),
+            makeSession(id: "second", modifiedAt: date),
+            makeSession(id: "first-child", modifiedAt: date, parentSessionID: "first"),
+            makeSession(id: "second-child", modifiedAt: date, parentSessionID: "second")
+        ]
+        let standard: Set<String> = ["first"]
+        func children(_ mode: SessionGroupFolding) -> Set<String> {
+            let result = SubagentHierarchyBuilder.build(sessions: rows, collapsedParents: standard,
+                                                        hierarchyEnabled: true, folding: mode)
+            return Set(result.sessions.filter { $0.parentSessionID != nil }.map(\.id))
+        }
+        XCTAssertEqual(children(.standard), ["second-child"])
+        XCTAssertEqual(children(.collapsed), [])
+        XCTAssertEqual(children(.expanded), ["first-child", "second-child"])
+        XCTAssertEqual(children(.standard), ["second-child"])
+    }
+
     func testHierarchySuppressedDuringSearch() {
         let base = Date(timeIntervalSince1970: 1_700_000_000)
         let parent = makeSession(id: "parent-1", modifiedAt: base)

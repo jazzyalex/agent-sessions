@@ -24,6 +24,20 @@ final class OpenClawSessionParser {
         case promptThenOrigin
     }
 
+    struct ParseAccumulator {
+        var events: [SessionEvent] = []
+        var sessionID: String?
+        var cwd: String?
+        var model: String?
+        var origin: String?
+        var title: String?
+        var firstToolName: String?
+        var tmin: Date?
+        var tmax: Date?
+        var sawNonHousekeepingUser = false
+        var sawHeartbeatPrompt = false
+    }
+
     static func setFullParseBeforeEndStatHookForTesting(_ hook: (() -> Void)?) {
         testingHookLock.lock()
         fullParseBeforeEndStatHookForTesting = hook
@@ -252,257 +266,14 @@ final class OpenClawSessionParser {
         defer { try? fileHandle.close() }
         let reader = JSONLReader(url: url)
 
-        var events: [SessionEvent] = []
-        var sessionID: String? = nil
-        var cwd: String? = nil
-        var model: String? = nil
-        var origin: String? = nil
-        var title: String? = nil
-        var firstToolName: String? = nil
-        var tmin: Date? = nil
-        var tmax: Date? = nil
-
-        var sawNonHousekeepingUser = false
-        var sawHeartbeatPrompt = false
+        var accumulator = ParseAccumulator()
         var idx = 0
 
-            do {
+        do {
             try reader.forEachLine(using: fileHandle) { rawLine in
                 idx += 1
                 guard let obj = decodeObject(rawLine) else { return }
-                let type = normalizedType(obj["type"])
-                if type.isEmpty { return }
-
-                let baseID = eventID(for: url, index: idx)
-                let ts = parseTimestamp(obj["timestamp"] ?? (obj["message"] as? [String: Any])?["timestamp"])
-
-                if let ts {
-                    if tmin == nil || ts < tmin! { tmin = ts }
-                    if tmax == nil || ts > tmax! { tmax = ts }
-                }
-
-                switch type {
-                case "session":
-                    if sessionID == nil, let id = obj["id"] as? String, !id.isEmpty { sessionID = id }
-                    if cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
-                    // Keep as meta for raw view parity.
-                    events.append(SessionEvent(
-                        id: baseID,
-                        timestamp: ts,
-                        kind: .meta,
-                        role: "meta",
-                        text: "[session]",
-                        toolName: nil,
-                        toolInput: nil,
-                        toolOutput: nil,
-                        messageID: obj["id"] as? String,
-                        parentID: nil,
-                        isDelta: false,
-                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                    ))
-
-                case "modelchange":
-                    if let m = obj["modelId"] as? String, !m.isEmpty { model = m }
-                    let provider = obj["provider"] as? String
-                    let mid = obj["modelId"] as? String
-                    let text = "[model_change] " + [provider, mid].compactMap { $0 }.joined(separator: " ")
-                    events.append(SessionEvent(
-                        id: baseID,
-                        timestamp: ts,
-                        kind: .meta,
-                        role: "meta",
-                        text: text.isEmpty ? "[model_change]" : text,
-                        toolName: nil,
-                        toolInput: nil,
-                        toolOutput: nil,
-                        messageID: obj["id"] as? String,
-                        parentID: obj["parentId"] as? String,
-                        isDelta: false,
-                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                    ))
-
-                case "thinkinglevelchange":
-                    let level = obj["thinkingLevel"] as? String
-                    events.append(SessionEvent(
-                        id: baseID,
-                        timestamp: ts,
-                        kind: .meta,
-                        role: "meta",
-                        text: level != nil ? "[thinking_level] \(level!)" : "[thinking_level]",
-                        toolName: nil,
-                        toolInput: nil,
-                        toolOutput: nil,
-                        messageID: obj["id"] as? String,
-                        parentID: obj["parentId"] as? String,
-                        isDelta: false,
-                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                    ))
-
-                case "message":
-                    guard let msg = obj["message"] as? [String: Any] else { return }
-                    let role = normalizedRole(msg["role"])
-                    let messageID = obj["id"] as? String
-                    let parentID = obj["parentId"] as? String
-
-                    if role == "user" {
-                        if let userText = extractText(fromContent: msg["content"]) {
-                            let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if isHeartbeatPrompt(trimmed) { sawHeartbeatPrompt = true }
-                            if !isHeartbeatPrompt(trimmed) && !isNewSessionScaffold(trimmed) {
-                                sawNonHousekeepingUser = true
-                                if origin == nil {
-                                    origin = deriveOrigin(fromUserText: trimmed)
-                                }
-                                if title == nil {
-                                    title = deriveTitle(fromUserText: trimmed)
-                                }
-                            }
-                        }
-                        let text = extractText(fromContent: msg["content"])
-                        if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            events.append(SessionEvent(
-                                id: baseID,
-                                timestamp: ts,
-                                kind: .user,
-                                role: "user",
-                                text: text,
-                                toolName: nil,
-                                toolInput: nil,
-                                toolOutput: nil,
-                                messageID: messageID,
-                                parentID: parentID,
-                                isDelta: false,
-                                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                            ))
-                        }
-
-                    } else if role == "assistant" {
-                        if model == nil, let m = msg["model"] as? String, !m.isEmpty { model = m }
-                        if let content = msg["content"] as? [Any] {
-                            var blockIndex = 0
-                            for anyBlock in content {
-                                blockIndex += 1
-                                guard let block = anyBlock as? [String: Any], let btype = block["type"] as? String else { continue }
-                                switch canonicalBlockType(btype) {
-                                case "text":
-                                    guard let t = block["text"] as? String else { continue }
-                                    let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    if trimmed.isEmpty { continue }
-                                    events.append(SessionEvent(
-                                        id: baseID + String(format: "-b%02d", blockIndex),
-                                        timestamp: ts,
-                                        kind: .assistant,
-                                        role: "assistant",
-                                        text: t,
-                                        toolName: nil,
-                                        toolInput: nil,
-                                        toolOutput: nil,
-                                        messageID: messageID,
-                                        parentID: parentID,
-                                        isDelta: false,
-                                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                                    ))
-                                case "toolcall":
-                                    let toolCallId = stringValue(from: block, keys: ["id", "toolCallId", "tool_call_id", "toolCallID"])
-                                    let toolName = stringValue(from: block, keys: ["name", "tool_name"])
-                                    if firstToolName == nil, let toolName, !toolName.isEmpty {
-                                        firstToolName = toolName
-                                    }
-                                    let args = block["arguments"] ?? block["input"]
-                                    events.append(SessionEvent(
-                                        id: baseID + String(format: "-t%02d", blockIndex),
-                                        timestamp: ts,
-                                        kind: .tool_call,
-                                        role: "assistant",
-                                        text: nil,
-                                        toolName: toolName,
-                                        toolInput: stringifyJSONBounded(args),
-                                        toolOutput: nil,
-                                        toolCallID: ToolCallID.from(toolCallId),
-                                        messageID: toolCallId,
-                                        parentID: messageID,
-                                        isDelta: false,
-                                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                                    ))
-                                default:
-                                    // Keep unknown blocks as meta so the raw stream isn't lost.
-                                    events.append(SessionEvent(
-                                        id: baseID + String(format: "-u%02d", blockIndex),
-                                        timestamp: ts,
-                                        kind: .meta,
-                                        role: "meta",
-                                        text: "[assistant/\(btype)]",
-                                        toolName: nil,
-                                        toolInput: nil,
-                                        toolOutput: nil,
-                                        messageID: messageID,
-                                        parentID: parentID,
-                                        isDelta: false,
-                                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: block))
-                                    ))
-                                }
-                            }
-                        }
-
-                    } else if role == "toolresult" {
-                        let toolCallId = stringValue(from: msg, keys: ["toolCallId", "tool_call_id", "toolCallID"])
-                        let toolName = stringValue(from: msg, keys: ["toolName", "tool_name"])
-                        if firstToolName == nil, let toolName, !toolName.isEmpty {
-                            firstToolName = toolName
-                        }
-                        let output = extractText(fromContent: msg["content"])
-                        let isError = ((msg["isError"] as? Bool) ?? (msg["is_error"] as? Bool) ?? false)
-                        events.append(SessionEvent(
-                            id: baseID,
-                            timestamp: ts,
-                            kind: isError ? .error : .tool_result,
-                            role: "tool",
-                            text: nil,
-                            toolName: toolName,
-                            toolInput: nil,
-                            toolOutput: output,
-                            toolCallID: ToolCallID.from(toolCallId),
-                            messageID: toolCallId,
-                            parentID: toolCallId,
-                            isDelta: false,
-                            rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                        ))
-                    } else {
-                        // Preserve unusual roles as meta.
-                        let text = extractText(fromContent: msg["content"])
-                        events.append(SessionEvent(
-                            id: baseID,
-                            timestamp: ts,
-                            kind: .meta,
-                            role: role,
-                            text: text,
-                            toolName: msg["toolName"] as? String,
-                            toolInput: nil,
-                            toolOutput: nil,
-                            messageID: messageID,
-                            parentID: parentID,
-                            isDelta: false,
-                            rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                        ))
-                    }
-
-                default:
-                    // Preserve unknown record types as meta for raw view/debugging.
-                    events.append(SessionEvent(
-                        id: baseID,
-                        timestamp: ts,
-                        kind: .meta,
-                        role: "meta",
-                        text: "[\(type)]",
-                        toolName: nil,
-                        toolInput: nil,
-                        toolOutput: nil,
-                        messageID: obj["id"] as? String,
-                        parentID: obj["parentId"] as? String,
-                        isDelta: false,
-                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
-                    ))
-                }
+                appendRecord(obj, url: url, index: idx, into: &accumulator)
             }
         } catch {
             return nil
@@ -522,7 +293,7 @@ final class OpenClawSessionParser {
         let agentID = agentIDFromPath(url)
         let pathBaseID = meta.baseName
         let baseID = forcedID
-            ?? sessionID
+            ?? accumulator.sessionID
             ?? (pathBaseID.isEmpty ? sha256(path: url.path) : pathBaseID)
         let id: String = {
             if let forcedID, forcedID.hasPrefix("openclaw:") { return forcedID }
@@ -530,11 +301,11 @@ final class OpenClawSessionParser {
         }()
 
         let mtime = Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000)
-        let start = tmin ?? mtime
-        let end = tmax ?? mtime
-        let isHousekeeping = !sawNonHousekeepingUser && sawHeartbeatPrompt
-        if title == nil, let firstToolName, !firstToolName.isEmpty {
-            title = firstToolName
+        let start = accumulator.tmin ?? mtime
+        let end = accumulator.tmax ?? mtime
+        let isHousekeeping = !accumulator.sawNonHousekeepingUser && accumulator.sawHeartbeatPrompt
+        if accumulator.title == nil, let firstToolName = accumulator.firstToolName, !firstToolName.isEmpty {
+            accumulator.title = firstToolName
         }
 
         var session = Session(
@@ -542,20 +313,259 @@ final class OpenClawSessionParser {
             source: .openclaw,
             startTime: start,
             endTime: end,
-            model: model,
+            model: accumulator.model,
             filePath: url.path,
             fileSizeBytes: Int(clamping: parseStartStat.size),
-            eventCount: max(events.filter { $0.kind != .meta }.count, 0),
-            events: events,
-            cwd: cwd,
-            repoName: origin ?? systemOriginLabel,
-            lightweightTitle: title,
+            eventCount: max(accumulator.events.filter { $0.kind != .meta }.count, 0),
+            events: accumulator.events,
+            cwd: accumulator.cwd,
+            repoName: accumulator.origin ?? systemOriginLabel,
+            lightweightTitle: accumulator.title,
             lightweightCommands: nil,
             isHousekeeping: isHousekeeping,
             deletedAt: meta.deletedAt
         )
         session.sourceFileStat = parseStartStat
         return session
+    }
+
+    static func appendRecord(_ obj: [String: Any],
+                             url: URL,
+                             index: Int,
+                             into accumulator: inout ParseAccumulator, forSearch: Bool = false) {
+        let type = normalizedType(obj["type"])
+        if type.isEmpty { return }
+
+        let baseID = eventID(for: url, index: index)
+        let ts = parseTimestamp(obj["timestamp"] ?? (obj["message"] as? [String: Any])?["timestamp"])
+
+        if let ts {
+            if accumulator.tmin == nil || ts < accumulator.tmin! { accumulator.tmin = ts }
+            if accumulator.tmax == nil || ts > accumulator.tmax! { accumulator.tmax = ts }
+        }
+
+        switch type {
+        case "session":
+            if accumulator.sessionID == nil, let id = obj["id"] as? String, !id.isEmpty { accumulator.sessionID = id }
+            if accumulator.cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty { accumulator.cwd = c }
+            // Keep as meta for raw view parity.
+            accumulator.events.append(SessionEvent(
+                id: baseID,
+                timestamp: ts,
+                kind: .meta,
+                role: "meta",
+                text: "[session]",
+                toolName: nil,
+                toolInput: nil,
+                toolOutput: nil,
+                messageID: obj["id"] as? String,
+                parentID: nil,
+                isDelta: false,
+                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+            ))
+
+        case "modelchange":
+            if let m = obj["modelId"] as? String, !m.isEmpty { accumulator.model = m }
+            let provider = obj["provider"] as? String
+            let mid = obj["modelId"] as? String
+            let text = "[model_change] " + [provider, mid].compactMap { $0 }.joined(separator: " ")
+            accumulator.events.append(SessionEvent(
+                id: baseID,
+                timestamp: ts,
+                kind: .meta,
+                role: "meta",
+                text: text.isEmpty ? "[model_change]" : text,
+                toolName: nil,
+                toolInput: nil,
+                toolOutput: nil,
+                messageID: obj["id"] as? String,
+                parentID: obj["parentId"] as? String,
+                isDelta: false,
+                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+            ))
+
+        case "thinkinglevelchange":
+            let level = obj["thinkingLevel"] as? String
+            accumulator.events.append(SessionEvent(
+                id: baseID,
+                timestamp: ts,
+                kind: .meta,
+                role: "meta",
+                text: level != nil ? "[thinking_level] \(level!)" : "[thinking_level]",
+                toolName: nil,
+                toolInput: nil,
+                toolOutput: nil,
+                messageID: obj["id"] as? String,
+                parentID: obj["parentId"] as? String,
+                isDelta: false,
+                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+            ))
+
+        case "message":
+            guard let msg = obj["message"] as? [String: Any] else { return }
+            let role = normalizedRole(msg["role"])
+            let messageID = obj["id"] as? String
+            let parentID = obj["parentId"] as? String
+
+            if role == "user" {
+                if let userText = extractText(fromContent: msg["content"]) {
+                    let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if isHeartbeatPrompt(trimmed) { accumulator.sawHeartbeatPrompt = true }
+                    if !isHeartbeatPrompt(trimmed) && !isNewSessionScaffold(trimmed) {
+                        accumulator.sawNonHousekeepingUser = true
+                        if accumulator.origin == nil {
+                            accumulator.origin = deriveOrigin(fromUserText: trimmed)
+                        }
+                        if accumulator.title == nil {
+                            accumulator.title = deriveTitle(fromUserText: trimmed)
+                        }
+                    }
+                }
+                let text = extractText(fromContent: msg["content"])
+                if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    accumulator.events.append(SessionEvent(
+                        id: baseID,
+                        timestamp: ts,
+                        kind: .user,
+                        role: "user",
+                        text: text,
+                        toolName: nil,
+                        toolInput: nil,
+                        toolOutput: nil,
+                        messageID: messageID,
+                        parentID: parentID,
+                        isDelta: false,
+                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+                    ))
+                }
+
+            } else if role == "assistant" {
+                if accumulator.model == nil, let m = msg["model"] as? String, !m.isEmpty { accumulator.model = m }
+                if let content = msg["content"] as? [Any] {
+                    var blockIndex = 0
+                    for anyBlock in content {
+                        blockIndex += 1
+                        guard let block = anyBlock as? [String: Any], let btype = block["type"] as? String else { continue }
+                        switch canonicalBlockType(btype) {
+                        case "text":
+                            guard let t = block["text"] as? String else { continue }
+                            let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if trimmed.isEmpty { continue }
+                            accumulator.events.append(SessionEvent(
+                                id: baseID + String(format: "-b%02d", blockIndex),
+                                timestamp: ts,
+                                kind: .assistant,
+                                role: "assistant",
+                                text: t,
+                                toolName: nil,
+                                toolInput: nil,
+                                toolOutput: nil,
+                                messageID: messageID,
+                                parentID: parentID,
+                                isDelta: false,
+                                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+                            ))
+                        case "toolcall":
+                            let toolCallId = stringValue(from: block, keys: ["id", "toolCallId", "tool_call_id", "toolCallID"])
+                            let toolName = stringValue(from: block, keys: ["name", "tool_name"])
+                            if accumulator.firstToolName == nil, let toolName, !toolName.isEmpty {
+                                accumulator.firstToolName = toolName
+                            }
+                            let args = block["arguments"] ?? block["input"]
+                            accumulator.events.append(SessionEvent(
+                                id: baseID + String(format: "-t%02d", blockIndex),
+                                timestamp: ts,
+                                kind: .tool_call,
+                                role: "assistant",
+                                text: nil,
+                                toolName: toolName,
+                                toolInput: stringifyJSONBounded(args, forSearch: forSearch),
+                                toolOutput: nil,
+                                toolCallID: ToolCallID.from(toolCallId),
+                                messageID: toolCallId,
+                                parentID: messageID,
+                                isDelta: false,
+                                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+                            ))
+                        default:
+                            // Keep unknown blocks as meta so the raw stream isn't lost.
+                            accumulator.events.append(SessionEvent(
+                                id: baseID + String(format: "-u%02d", blockIndex),
+                                timestamp: ts,
+                                kind: .meta,
+                                role: "meta",
+                                text: "[assistant/\(btype)]",
+                                toolName: nil,
+                                toolInput: nil,
+                                toolOutput: nil,
+                                messageID: messageID,
+                                parentID: parentID,
+                                isDelta: false,
+                                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: block))
+                            ))
+                        }
+                    }
+                }
+
+            } else if role == "toolresult" {
+                let toolCallId = stringValue(from: msg, keys: ["toolCallId", "tool_call_id", "toolCallID"])
+                let toolName = stringValue(from: msg, keys: ["toolName", "tool_name"])
+                if accumulator.firstToolName == nil, let toolName, !toolName.isEmpty {
+                    accumulator.firstToolName = toolName
+                }
+                let output = extractText(fromContent: msg["content"])
+                let isError = ((msg["isError"] as? Bool) ?? (msg["is_error"] as? Bool) ?? false)
+                accumulator.events.append(SessionEvent(
+                    id: baseID,
+                    timestamp: ts,
+                    kind: isError ? .error : .tool_result,
+                    role: "tool",
+                    text: nil,
+                    toolName: toolName,
+                    toolInput: nil,
+                    toolOutput: output,
+                    toolCallID: ToolCallID.from(toolCallId),
+                    messageID: toolCallId,
+                    parentID: toolCallId,
+                    isDelta: false,
+                    rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+                ))
+            } else {
+                // Preserve unusual roles as meta.
+                let text = extractText(fromContent: msg["content"])
+                accumulator.events.append(SessionEvent(
+                    id: baseID,
+                    timestamp: ts,
+                    kind: .meta,
+                    role: role,
+                    text: text,
+                    toolName: msg["toolName"] as? String,
+                    toolInput: nil,
+                    toolOutput: nil,
+                    messageID: messageID,
+                    parentID: parentID,
+                    isDelta: false,
+                    rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+                ))
+            }
+
+        default:
+            // Preserve unknown record types as meta for raw view/debugging.
+            accumulator.events.append(SessionEvent(
+                id: baseID,
+                timestamp: ts,
+                kind: .meta,
+                role: "meta",
+                text: "[\(type)]",
+                toolName: nil,
+                toolInput: nil,
+                toolOutput: nil,
+                messageID: obj["id"] as? String,
+                parentID: obj["parentId"] as? String,
+                isDelta: false,
+                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+            ))
+        }
     }
 
     // MARK: - Title helpers
@@ -799,7 +809,7 @@ final class OpenClawSessionParser {
         return data.base64EncodedString()
     }
 
-    private static func stringifyJSONBounded(_ any: Any?) -> String? {
+    private static func stringifyJSONBounded(_ any: Any?, forSearch: Bool = false) -> String? {
         guard let any else { return nil }
         if let s = any as? String { return s }
         guard JSONSerialization.isValidJSONObject(any) else { return String(describing: any) }
@@ -807,7 +817,7 @@ final class OpenClawSessionParser {
             return String(describing: any)
         }
         let byteCount = text.utf8.count
-        if byteCount > 32_768 {
+        if !forSearch, byteCount > 32_768 {
             return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
         return text

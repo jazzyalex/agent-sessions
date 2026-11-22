@@ -99,19 +99,12 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
 
 private struct CodexImagesWindowRoot: View {
     @ObservedObject var viewModel: ImageBrowserViewModel
-    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some View {
-        let content = CodexSessionImagesGalleryView(viewModel: viewModel)
-
-        let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
-        Group {
-            switch appAppearance {
-            case .light: content.preferredColorScheme(.light)
-            case .dark: content.preferredColorScheme(.dark)
-            case .system: content
-            }
-        }
+        // Appearance comes only from `window.appearance` (see applyAppearance);
+        // a per-theme `preferredColorScheme` switch rebuilds the view and sticks
+        // on Dark → System. See PreferencesWindowRoot.
+        CodexSessionImagesGalleryView(viewModel: viewModel)
     }
 }
 
@@ -132,6 +125,8 @@ private extension CodexImagesWindowController {
 
     func applyAppearance(forceRedraw: Bool) {
         let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
+        // Keep the change-detection cache in sync (see PreferencesWindowController).
+        lastAppAppearanceRaw = raw
         let appAppearance = AppAppearance(rawValue: raw) ?? .system
         switch appAppearance {
         case .system:

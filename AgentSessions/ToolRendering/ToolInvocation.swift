@@ -46,6 +46,7 @@ struct ToolAction: Equatable, Sendable {
     /// line per input field. Then `[exit N · 48s]` when known, then the decoded output with folds
     /// open and no gutter.
     var plainText: String
+    var outputSyntax: ToolOutputSyntax? = nil
 }
 
 struct ToolInvocation: Equatable, Sendable {

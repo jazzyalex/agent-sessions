@@ -589,6 +589,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             let url = URL(fileURLWithPath: session.filePath)
             // Streamed, never materialized: the largest local Codex rollout is 256 MB.
             var provider = makeTelemetryProvider()
+            provider.prepare(for: url)
             let streamed = streamLines(at: url,
                                        maximumBytes: expectedSignature.size,
                                        afterFirstLine: afterFirstTelemetryLine,

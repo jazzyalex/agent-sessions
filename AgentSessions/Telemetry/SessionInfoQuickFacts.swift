@@ -4,6 +4,14 @@ import Foundation
 /// or session-row surface. The raw values stay on `Session` for diagnostics;
 /// this type only decides whether a value is safe to display.
 public enum SessionInfoMetadataSanitizer {
+    private struct CachedRowTitle {
+        let revision: UUID
+        let providerOverride: String?
+        let title: String?
+    }
+
+    private static let rowTitles = NSCacheMemo<CachedRowTitle>(countLimit: 4_096)
+
     public static func model(_ rawValue: String?, source: SessionSource) -> String? {
         guard let rawValue else { return nil }
         let lines = rawValue
@@ -43,6 +51,21 @@ public enum SessionInfoMetadataSanitizer {
 
     /// Uses already-loaded metadata and events only; never opens a transcript.
     static func rowTitle(for session: Session, override: String? = nil) -> String? {
+        let key = session.id as NSString
+        if let cached = rowTitles.object(forKey: key),
+           cached.revision == session.contentRevision,
+           cached.providerOverride == override {
+            return cached.title
+        }
+        let title = cleanRowTitle(for: session, override: override)
+        rowTitles.setObject(
+            CachedRowTitle(revision: session.contentRevision, providerOverride: override, title: title),
+            forKey: key
+        )
+        return title
+    }
+
+    private static func cleanRowTitle(for session: Session, override: String?) -> String? {
         for candidate in [override, session.customTitle, session.lightweightTitle] {
             if let clean = title(candidate, source: session.source) { return clean }
         }

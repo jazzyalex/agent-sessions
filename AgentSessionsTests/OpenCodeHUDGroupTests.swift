@@ -687,6 +687,28 @@ final class OpenCodeServicePresenceTests: XCTestCase {
         XCTAssertNil(OpenCodeServicePresence.decode(Data("not JSON".utf8), registration: registration, now: Date()))
     }
 
+    func testDeferredRegistrationAbortsWholeBatchEvenWhenAnotherChildFinishes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("service-a.json"))
+        try Data().write(to: root.appendingPathComponent("service-b.json"))
+
+        let result = await OpenCodeServicePresence.read(
+            now: Date(),
+            rootsOverride: [root],
+            registrationReader: { path, _, _ in
+                if path.lastPathComponent == "service-a.json" {
+                    return .deferred
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                return .completed([])
+            }
+        )
+
+        XCTAssertNil(result, "one deferred child must invalidate the entire registration batch")
+    }
+
     func testServiceRequestUsesAdvertisedLoopbackPortAndNativeAuthentication() throws {
         let request = try XCTUnwrap(OpenCodeServicePresence.request(for: registration))
         XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:12345/api/session/active")

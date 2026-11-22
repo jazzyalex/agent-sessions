@@ -4,6 +4,7 @@ import Dispatch
 protocol SearchSessionStoring {
     func transcriptCache(for source: SessionSource) -> TranscriptCache?
     func updateSession(_ session: Session)
+    func scan(session: Session, query: SearchQuery) async -> SearchScanResult
     func parseFull(session: Session) async -> Session?
 }
 
@@ -54,5 +55,12 @@ final class SearchSessionStore: SearchSessionStoring {
         let url = URL(fileURLWithPath: session.filePath)
         let forcedID = session.id
         return adapter.parseFull(url, forcedID)
+    }
+}
+
+// Default keeps test and provider stores on the same bounded production scanner.
+extension SearchSessionStoring {
+    func scan(session: Session, query: SearchQuery) async -> SearchScanResult {
+        await SearchSourceScanner.scan(session: session, query: query)
     }
 }

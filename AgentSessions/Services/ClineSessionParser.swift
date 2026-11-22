@@ -42,13 +42,14 @@ enum ClineSessionParser {
 
     static func parseFileFull(at url: URL,
                               allowLargeFile: Bool = false,
-                              maxBytes: Int = defaultFullParseMaxBytes) -> Session? {
+                              maxBytes: Int = defaultFullParseMaxBytes,
+                              forSearch: Bool = false) -> Session? {
         let size = combinedFileSize(forManifest: url)
         if !allowLargeFile, size > maxBytes { return nil }
-        return build(url: url, includeEvents: true)
+        return build(url: url, includeEvents: true, forSearch: forSearch)
     }
 
-    private static func build(url: URL, includeEvents: Bool) -> Session? {
+    private static func build(url: URL, includeEvents: Bool, forSearch: Bool = false) -> Session? {
         guard let manifest = readManifest(at: url) else { return nil }
         guard manifest.version == 1 else { return nil }
         let size = combinedFileSize(forManifest: url)
@@ -91,7 +92,7 @@ enum ClineSessionParser {
         if let messages {
             for (messageIndex, message) in messages.enumerated() {
                 if includeEvents {
-                    let built = eventsForMessage(message, messageIndex: messageIndex)
+                    let built = eventsForMessage(message, messageIndex: messageIndex, forSearch: forSearch)
                     nonMetaCount += built.filter { $0.kind != .meta }.count
                     commandCount += built.filter { $0.kind == .tool_call }.count
                     if firstUserText == nil {
@@ -260,7 +261,8 @@ enum ClineSessionParser {
     /// `"<messageIndex>-<blockIndex>"`; the message index is the coordinate other
     /// tools can use to locate a record inside the messages file.
     /// Internal so tests can exercise a single message without a file on disk.
-    static func eventsForMessage(_ message: Message, messageIndex: Int) -> [SessionEvent] {
+    static func eventsForMessage(_ message: Message, messageIndex: Int,
+                                 forSearch: Bool = false) -> [SessionEvent] {
         var out: [SessionEvent] = []
         for (blockIndex, block) in message.blocks.enumerated() {
             let raw = message.rawBlocks.count > blockIndex ? message.rawBlocks[blockIndex] : jsonEncode(block)
@@ -271,7 +273,8 @@ enum ClineSessionParser {
                                                   messageIndex: messageIndex,
                                                   blockIndex: blockIndex,
                                                   raw: raw,
-                                                  displayOnlyError: message.isDisplayOnlyError))
+                                                  displayOnlyError: message.isDisplayOnlyError,
+                                                  forSearch: forSearch))
         }
         return out
     }
@@ -282,14 +285,16 @@ enum ClineSessionParser {
                                          messageID: String?,
                                          time: Date?,
                                          messageIndex: Int,
-                                         blockIndex: Int) -> [SessionEvent] {
+                                         blockIndex: Int,
+                                         forSearch: Bool = false) -> [SessionEvent] {
         eventsForBlock(block,
                        role: role,
                        messageID: messageID,
                        time: time,
                        messageIndex: messageIndex,
                        blockIndex: blockIndex,
-                       raw: jsonEncode(block))
+                       raw: jsonEncode(block),
+                       forSearch: forSearch)
     }
 
     private static func eventsForBlock(_ block: [String: Any],
@@ -299,7 +304,8 @@ enum ClineSessionParser {
                                        messageIndex: Int,
                                        blockIndex: Int,
                                        raw: String,
-                                       displayOnlyError: Bool = false) -> [SessionEvent] {
+                                       displayOnlyError: Bool = false,
+                                       forSearch: Bool = false) -> [SessionEvent] {
         let eventID = "\(messageIndex)-\(blockIndex)"
         let type = (block["type"] as? String) ?? ""
         switch type {
@@ -332,13 +338,13 @@ enum ClineSessionParser {
         case "tool_use":
             return [SessionEvent(id: eventID, timestamp: time, kind: .tool_call, role: "assistant", text: nil,
                                  toolName: block["name"] as? String,
-                                 toolInput: jsonString(block["input"]),
+                                 toolInput: jsonString(block["input"], forSearch: forSearch),
                                  toolOutput: nil,
                                  toolCallID: ToolCallID.from(block["id"]),
                                  messageID: block["id"] as? String ?? messageID,
                                  parentID: messageID, isDelta: false, rawJSON: raw)]
         case "tool_result":
-            let output = toolResultOutput(block["content"])
+            let output = toolResultOutput(block["content"], forSearch: forSearch)
             let isError = (block["is_error"] as? Bool) == true
             return [SessionEvent(id: eventID, timestamp: time, kind: isError ? .error : .tool_result, role: "tool", text: nil,
                                  toolName: block["name"] as? String,
@@ -354,9 +360,9 @@ enum ClineSessionParser {
         }
     }
 
-    private static func toolResultOutput(_ value: Any?) -> String? {
+    private static func toolResultOutput(_ value: Any?, forSearch: Bool) -> String? {
         if let string = value as? String { return string }
-        return jsonString(value)
+        return jsonString(value, forSearch: forSearch)
     }
 
     // MARK: - Helpers
@@ -396,12 +402,12 @@ enum ClineSessionParser {
         return f
     }()
 
-    private static func jsonString(_ value: Any?) -> String? {
+    private static func jsonString(_ value: Any?, forSearch: Bool = false) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
         guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
         let byteCount = text.utf8.count
-        if byteCount > 32_768 {
+        if !forSearch, byteCount > 32_768 {
             return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
         return text

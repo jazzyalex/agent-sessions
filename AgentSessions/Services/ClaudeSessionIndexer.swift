@@ -86,6 +86,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
     private var reloadingSessionIDs: Set<String> = []
+    private var reloadGenerationBySessionID: [String: UUID] = [:]
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
     private var lastPrewarmSignatureByID: [String: Int] = [:]
@@ -260,8 +261,12 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         indexingError = nil
         hasEmptyDirectory = false
 
-        let task = Task.detached(priority: .utility) { [weak self, token, mode, executionProfile] in
+        let task = Task.detached(priority: .utility) { [weak self, token, mode, trigger, executionProfile] in
             guard let self else { return }
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
 
             // Fast path: hydrate from SQLite index if available.
             var indexed: [Session] = []
@@ -284,6 +289,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             }
 
             await self.seedKnownFileStatsIfNeeded()
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
             let fm = FileManager.default
             let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
             let existingSessions = indexed.filter(exists)
@@ -294,11 +303,18 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let presentedHydration = !existingSessions.isEmpty
             if presentedHydration {
                 let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
-                let hydratedFiltered = existingSessions.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
+                let hydratedFiltered: [Session]
+                if hideProbes {
+                    let isProbeSession = ClaudeProbeConfig.makeSessionClassifier()
+                    hydratedFiltered = existingSessions.filter { !isProbeSession($0) }
+                } else {
+                    hydratedFiltered = existingSessions
+                }
                 let hydratedSorted = hydratedFiltered.sorted { $0.modifiedAt > $1.modifiedAt }
                 let hydratedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: hydratedSorted, source: .claude)
                 self.publishAfterCurrentUpdate { [weak self] in
                     guard let self, self.isRefreshTokenCurrent(token) else { return }
+                    guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else { return }
                     self.allSessions = hydratedWithArchives
                     self.launchPhase = .scanning
                 }
@@ -315,6 +331,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
             let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual || trigger == .launch) ? .full : .recent
             let previousStats = self.knownFileStatsByPathSnapshot()
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
             let initialDelta = self.discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
             let shouldEscalate = Self.shouldEscalateRecentDeltaToFullReconcile(mode: mode)
             let effectiveMode: IndexRefreshMode = shouldEscalate ? .fullReconcile : mode
@@ -437,15 +457,17 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             }
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let merged = Array(mergedByPath.values).filter(exists)
-            let filtered = merged.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
+            let isProbeSession = ClaudeProbeConfig.makeSessionClassifier()
+            let sessionsForMeta = merged.filter { !isProbeSession($0) }
+            let filtered = hideProbes ? sessionsForMeta : merged
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
+            guard !Task.isCancelled, self.isRefreshTokenCurrent(token) else { return }
             self.applyKnownFileStatsDelta(mode: effectiveMode, delta: delta)
             await self.persistKnownFileStats()
 
             // Persist lightweight session_meta so subsequent hydration is complete.
             // Excludes probe sessions to match analytics policy.
-            let sessionsForMeta = merged.filter { !ClaudeProbeConfig.isProbeSession($0) }
             if !sessionsForMeta.isEmpty {
                 do {
                     let db = try IndexDB()
@@ -461,8 +483,21 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            self.publishAfterCurrentUpdate { [weak self] in
-                guard let self, self.isRefreshTokenCurrent(token) else { return }
+            while !Task.isCancelled {
+                if trigger == .monitor {
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                }
+                let committed = await withCheckedContinuation { continuation in
+                    self.publishAfterCurrentUpdate { [weak self] in
+                guard let self, self.isRefreshTokenCurrent(token) else {
+                    continuation.resume(returning: true)
+                    return
+                }
+                guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else {
+                    continuation.resume(returning: false)
+                    return
+                }
                 LaunchProfiler.log("Claude.refresh: sessions merged (total=\(mergedWithArchives.count))")
                 self.allSessions = mergedWithArchives
                 self.isIndexing = false
@@ -512,6 +547,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     self.progressText = "Ready"
                     self.launchPhase = .ready
                 }
+                continuation.resume(returning: true)
+                    }
+                }
+                if committed { return }
             }
         }
         refreshTask = task
@@ -529,6 +568,24 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         progressText = "Ready"
         if launchPhase != .error {
             launchPhase = .ready
+        }
+    }
+
+    func cancelCoreRefreshAndWait() async {
+        let task = await MainActor.run { () -> Task<Void, Never>? in
+            self.setRefreshToken(UUID())
+            let task = self.refreshTask
+            task?.cancel()
+            self.refreshTask = nil
+            self.transcriptPrewarmTask?.cancel()
+            self.transcriptPrewarmTask = nil
+            return task
+        }
+        await task?.value
+        await MainActor.run {
+            self.isIndexing = false
+            self.isProcessingTranscripts = false
+            if self.launchPhase != .error { self.launchPhase = .ready }
         }
     }
 
@@ -697,14 +754,24 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         for i in out.indices {
             let current = out[i]
             guard current.source == .claude, current.events.isEmpty else { continue }
+            let subagentTitle: String? = {
+                guard current.isSubagent, current.customTitle == nil else { return nil }
+                let url = URL(fileURLWithPath: current.filePath)
+                if let title = ClaudeSessionParser.detectSubagentInfo(from: url).title { return title }
+                let existing = SessionInfoMetadataSanitizer.title(current.lightweightTitle, source: .claude)
+                guard existing == nil || existing == "No prompt" || existing == "Untitled session" else {
+                    return nil
+                }
+                return ClaudeSessionParser.subagentTitleFromParent(for: url)
+            }()
             let titleLooksRepairable = current.lightweightTitle.map(Self.looksLikeClaudeLocalCommandTitle) == true
-            let needsTitleRepair = i < titleRepairLimit && titleLooksRepairable
+            let needsTitleRepair = subagentTitle == nil && i < titleRepairLimit && titleLooksRepairable
             let needsSurfaceClassification = current.surface == nil && !current.isSubagent
             let hasDesktopLocalAgentPath = needsSurfaceClassification && Self.isClaudeDesktopLocalAgentPath(current.filePath)
             let hasDesktopEntrypoint = needsSurfaceClassification &&
                 !hasDesktopLocalAgentPath &&
                 Self.fileHasClaudeDesktopEntrypoint(current.filePath)
-            guard needsTitleRepair || needsSurfaceClassification else { continue }
+            guard subagentTitle != nil || needsTitleRepair || needsSurfaceClassification else { continue }
 
             let reparsed: Session? = {
                 guard needsTitleRepair || hasDesktopLocalAgentPath else { return nil }
@@ -713,6 +780,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             if needsTitleRepair && reparsed == nil { continue }
 
             let repairedTitle: String? = {
+                if let subagentTitle { return subagentTitle }
                 guard (needsTitleRepair || ((hasDesktopEntrypoint || hasDesktopLocalAgentPath) && titleLooksRepairable)),
                       let raw = reparsed?.lightweightTitle else {
                     return current.lightweightTitle
@@ -835,6 +903,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             return
         }
         reloadingSessionIDs.insert(id)
+        let reloadGeneration = UUID()
         reloadLock.unlock()
 
         let existingSnapshot: Session? = {
@@ -848,12 +917,26 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             return session
         }()
 
+        let metrics = SearchResponsivenessMetrics.shared
+        let operation = metrics.operation(source: SessionSource.claude.rawValue, sessionID: id)
+        metrics.record(.parseRequested, operationID: operation, status: .accepted)
+        metrics.recordMissing(.tailRead, reason: .notApplicable, operationID: operation)
         let bgQueue = FeatureFlags.backgroundIngestQueue
         bgQueue.async {
+            metrics.record(.workerStarted, operationID: operation, status: .started)
             defer {
                 self.reloadLock.lock()
                 self.reloadingSessionIDs.remove(id)
                 self.reloadLock.unlock()
+            }
+
+            if reason == .focusedSessionMonitor, TranscriptScrollSignal.shared.isScrolling {
+                Task.detached(priority: .utility) { [weak self] in
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                    self?.reloadSession(id: id, force: force, reason: reason)
+                }
+                return
             }
 
             guard let existing = existingSnapshot,
@@ -863,7 +946,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
             let hasLoadedEvents = !existing.events.isEmpty
             if hasLoadedEvents && !force { return }
-
+            let existingContentRevision = SearchIngestService.contentRevision(for: existing)
+            let existingEventCount = existing.events.count
             let url = URL(fileURLWithPath: existing.filePath)
             let preParseStat = Self.fileStat(for: url)
             self.reloadLock.lock()
@@ -882,12 +966,26 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
+            self.reloadLock.withLock {
+                self.reloadGenerationBySessionID[id] = reloadGeneration
+            }
+
+            let shouldSurfaceLoadingState = reason != .focusedSessionMonitor
+                && (reason == .manualRefresh || !hasLoadedEvents)
             if shouldSurfaceLoadingState {
                 self.publishAfterCurrentUpdate { [weak self] in
                     self?.isLoadingSession = true
                     self?.loadingSessionID = id
                 }
+            }
+
+            if reason == .focusedSessionMonitor, TranscriptScrollSignal.shared.isScrolling {
+                Task.detached(priority: .utility) { [weak self] in
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                    self?.reloadSession(id: id, force: force, reason: reason)
+                }
+                return
             }
 
             let startTime = Date()
@@ -898,21 +996,26 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             #endif
 
             let postParseStat = Self.fileStat(for: url)
-            self.reloadLock.lock()
-            if let preParseStat {
-                self.lastFullReloadFileStatsBySessionID[id] = preParseStat
-            } else {
-                self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
-            }
-            self.reloadLock.unlock()
             if preParseStat != postParseStat {
                 #if DEBUG
                 print("ℹ️ Claude file changed during reload; next monitor tick will retry")
                 #endif
             }
 
-            self.publishAfterCurrentUpdate { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
+                await Task.yield()
+                await Task.yield()
+                if reason == .focusedSessionMonitor {
+                    while TranscriptScrollSignal.shared.isScrolling {
+                        await TranscriptScrollSignal.shared.waitUntilQuiet()
+                        guard !Task.isCancelled else { return }
+                    }
+                }
+                let ownsReload = self.reloadLock.withLock {
+                    self.reloadGenerationBySessionID[id] == reloadGeneration
+                }
+                guard ownsReload else { return }
                 defer {
                     if shouldSurfaceLoadingState, self.loadingSessionID == id {
                         self.isLoadingSession = false
@@ -921,7 +1024,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
 
                 guard let fullSession,
-                      let idx = self.allSessions.firstIndex(where: { $0.id == id }) else {
+                      let idx = self.allSessions.firstIndex(where: { $0.id == id }),
+                      self.allSessions[idx].filePath == existing.filePath,
+                      SearchIngestService.contentRevision(for: self.allSessions[idx]) == existingContentRevision,
+                      self.allSessions[idx].events.count == existingEventCount else {
                     return
                 }
 
@@ -938,7 +1044,9 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     events: fullSession.events,
                     cwd: current.lightweightCwd ?? fullSession.cwd,
                     repoName: current.repoName,
-                    lightweightTitle: current.lightweightTitle ?? fullSession.lightweightTitle,
+                    lightweightTitle: fullSession.isSubagent
+                        ? (fullSession.lightweightTitle ?? current.lightweightTitle)
+                        : (current.lightweightTitle ?? fullSession.lightweightTitle),
                     lightweightCommands: current.lightweightCommands,
                     codexInternalSessionIDHint: fullSession.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint,
                     parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
@@ -949,6 +1057,14 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     surface: fullSession.surface ?? current.surface
                 )
                 self.allSessions[idx] = merged
+                self.reloadLock.withLock {
+                    if let preParseStat {
+                        self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+                    } else {
+                        self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
+                    }
+                }
+                metrics.record(.fullHydrationPublished, operationID: operation, context: .session(merged), status: .published)
 
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.backgroundIngestTaskPriority) {

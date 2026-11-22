@@ -55,8 +55,8 @@ enum FeatureFlags {
     // this version -- so finished sessions indexed before the fix would keep
     // their NULL cwd forever and stay invisible to the path filter. The bump is
     // what forces them to be re-ingested.
-    static let sessionSearchFormatVersion: Int = 5
-    static let sessionToolIOFormatVersion: Int = 1
+    static let sessionSearchFormatVersion: Int = 6
+    static let sessionToolIOFormatVersion: Int = 2
     static let transcriptPrewarmMaxSessionsPerRefresh: Int = 96
     static let transcriptPrewarmMaxSessionBytes: Int = 50 * 1024 * 1024
 

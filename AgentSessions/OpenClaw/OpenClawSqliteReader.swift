@@ -1666,3 +1666,9 @@ struct OpenClawSqliteReader {
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
+
+extension OpenClawSqliteReader {
+    static func searchDecodedPayload(_ statement: OpaquePointer, column: Int32, decodedBytes: Int64) -> String? {
+        decodeCompressedPayload(statement, index: column, decodedBytes: decodedBytes)
+    }
+}

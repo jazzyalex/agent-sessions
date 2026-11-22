@@ -822,11 +822,14 @@ final class SessionParserTests: XCTestCase {
                           all: [session])
 
         try await waitForSearchResults(coordinator, expectedIDs: [session.id])
-        XCTAssertEqual(store.parseFullCallCount, 1,
-                       "a previous format is not proof of current parser semantics")
+        XCTAssertEqual(store.parseFullCallCount, 0, "Instant must never hydrate a stale-format row")
+        coordinator.start(query: "obsolete", filters: Filters(query: "obsolete"),
+                          allowed: [.claude], enableDeepScan: false, all: [session])
+        try await waitForSearchResults(coordinator, expectedIDs: [])
+        XCTAssertEqual(store.parseFullCallCount, 0, "Old-format text stays unavailable until bounded migration")
     }
 
-    func testSearchCoordinatorTreatsSameRevisionAtDifferentIdentityPathAsUnindexed() async throws {
+    func testSearchCoordinatorMovedIdentityDoesNotHydrateCachedEventsDuringInstant() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }
         let livePath = "/tmp/live/opencode.db"
@@ -877,7 +880,8 @@ final class SessionParserTests: XCTestCase {
                           enableDeepScan: false,
                           all: [session])
 
-        try await waitForSearchResults(coordinator, expectedIDs: [session.id])
+        try await waitForSearchResults(coordinator, expectedIDs: [])
+        XCTAssertEqual(coordinator.unresolvedCount, 1)
     }
 
     func testSearchCoordinatorToolCapacityExcludesOrdinaryDuplicatesBeforeLimit() async throws {
@@ -1061,7 +1065,7 @@ final class SessionParserTests: XCTestCase {
                                       file: StaticString = #filePath,
                                       line: UInt = #line) async throws {
         for _ in 0..<50 {
-            if coordinator.results.map(\.id) == expectedIDs {
+            if !coordinator.isRunning, coordinator.results.map(\.id) == expectedIDs {
                 return
             }
             try await Task.sleep(nanoseconds: 20_000_000)
@@ -4908,16 +4912,83 @@ final class SessionParserTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let db = root.appendingPathComponent("opencode.db")
-        let wal = root.appendingPathComponent("opencode.db-wal")
-        try Data().write(to: db)
+        try createOpenCodeSQLiteFixture(at: db)
+
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(db.path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        XCTAssertEqual(sqlite3_exec(handle, "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;", nil, nil, nil), SQLITE_OK)
         let baseline = UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path)
-        try Data([1]).write(to: wal)
+        XCTAssertEqual(sqlite3_exec(handle,
+                                    "INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES ('wal-session', 'p', 's', '/tmp', 'WAL', '1', 1, 2);",
+                                    nil, nil, nil), SQLITE_OK)
         let withWAL = UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path)
         XCTAssertNotEqual(baseline, withWAL)
-        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(20)], ofItemAtPath: wal.path)
+        XCTAssertEqual(withWAL.fileCount, 2)
+        XCTAssertEqual(sqlite3_exec(handle, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil), SQLITE_OK)
         XCTAssertNotEqual(withWAL, UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path))
-        try FileManager.default.removeItem(at: wal)
-        XCTAssertEqual(baseline, UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path))
+    }
+
+    func testOpenCodeDatabaseSnapshotAvoidsLegacyDirectoryFallback() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let legacy = root.appendingPathComponent("ses_legacy.json")
+        try Data("{}".utf8).write(to: legacy)
+        XCTAssertNil(UnifiedSessionIndexer.openCodeDatabaseSnapshot(customRoot: root.path))
+        let legacySnapshot = UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path)
+        XCTAssertEqual(legacySnapshot.fileCount, 1)
+
+        let database = root.appendingPathComponent("opencode.db")
+        try createOpenCodeSQLiteFixture(at: database)
+        let snapshot = try XCTUnwrap(UnifiedSessionIndexer.openCodeDatabaseSnapshot(customRoot: root.path))
+        XCTAssertEqual(snapshot.fileCount, 1)
+        XCTAssertEqual(UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path), snapshot,
+                       "a valid database must take precedence over legacy JSON files")
+        XCTAssertNotEqual(legacySnapshot, snapshot)
+    }
+
+    func testOpenCodeInvalidDatabaseFallsBackToLegacyJSON() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let legacy = root.appendingPathComponent("ses_legacy.json")
+        try Data("{}".utf8).write(to: legacy)
+        try Data("not a sqlite database".utf8).write(to: root.appendingPathComponent("opencode.db"))
+
+        XCTAssertNil(UnifiedSessionIndexer.openCodeDatabaseSnapshot(customRoot: root.path))
+        let fallback = UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path)
+        XCTAssertEqual(fallback.fileCount, 1)
+        XCTAssertEqual(
+            OpenCodeSessionDiscovery(customRoot: root.path).discoverSessionFiles()
+                .map { $0.resolvingSymlinksInPath().path },
+            [legacy.resolvingSymlinksInPath().path]
+        )
+
+        try Data("{\"updated\":true}".utf8).write(to: legacy)
+        XCTAssertNotEqual(fallback,
+                          UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path),
+                          "the invalid database fallback must continue tracking legacy JSON changes")
+    }
+
+    func testOpenCodeTransientDatabaseLockIsNotCachedAsInvalid() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = root.appendingPathComponent("opencode.db")
+        try createOpenCodeSQLiteFixture(at: database)
+
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(database.path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        XCTAssertEqual(sqlite3_exec(handle, "PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE;", nil, nil, nil), SQLITE_OK)
+        XCTAssertNil(UnifiedSessionIndexer.openCodeDatabaseSnapshot(customRoot: root.path))
+        XCTAssertEqual(sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+
+        XCTAssertNotNil(UnifiedSessionIndexer.openCodeDatabaseSnapshot(customRoot: root.path),
+                        "a transient lock must not pin unchanged database metadata to the JSON fallback")
     }
 
     func testDirectorySignatureSnapshot_emptyInputProducesEmpty() {
@@ -11756,6 +11827,112 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(indexer.allSessions.first?.events.last?.text, "delta")
     }
 
+    func testCodexColdOpenTailFirstPaintIsReplacedByOwningFullReload() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexTailFirstOwnership-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let padding = String(repeating: "x", count: FeatureFlags.transcriptTailFirstPaintMinBytes)
+        let ignoredLargeLine = "{\"type\":\"tail_ownership_padding\",\"padding\":\"\(padding)\"}\n"
+        let eventLine = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"tail ownership"}]}}"#
+        var payload = Data(ignoredLargeLine.utf8)
+        payload.append(Data((eventLine + "\n").utf8))
+        try payload.write(to: url)
+        XCTAssertGreaterThan(payload.count, FeatureFlags.transcriptTailFirstPaintMinBytes)
+
+        let sessionID = "reload-tail-first-ownership-id"
+        let lightweight = Session(id: sessionID,
+                                  source: .codex,
+                                  startTime: nil,
+                                  endTime: nil,
+                                  model: nil,
+                                  filePath: url.path,
+                                  fileSizeBytes: payload.count,
+                                  eventCount: 1,
+                                  events: [])
+        let indexer = SessionIndexer()
+        indexer.installSessionsForReloadTesting([lightweight])
+
+        let provisionalPublished = expectation(description: "tail-first provisional publication")
+        let fullPublished = expectation(description: "owning full reload replaces provisional tail")
+        var sawProvisional = false
+        var cancellable = indexer.$allSessions.sink { sessions in
+            guard let session = sessions.first else { return }
+            if session.isPartiallyHydrated, !session.events.isEmpty, !sawProvisional {
+                sawProvisional = true
+                provisionalPublished.fulfill()
+            }
+            if !session.isPartiallyHydrated,
+               session.events.count == 2 {
+                fullPublished.fulfill()
+            }
+        }
+
+        indexer.reloadSession(id: sessionID, reason: .selection)
+        wait(for: [provisionalPublished, fullPublished], timeout: 12)
+        cancellable.cancel()
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: sessionID, timeout: 1))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        XCTAssertTrue(sawProvisional)
+        XCTAssertEqual(indexer.allSessions.first?.events.count, 2)
+        XCTAssertFalse(indexer.allSessions.first?.isPartiallyHydrated ?? true)
+        XCTAssertFalse(indexer.isLoadingSession)
+        XCTAssertNil(indexer.loadingSessionID)
+    }
+
+    func testFocusedCodexReloadDefersPublicationUntilScrollingSettles() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexReloadScrollGate-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let baselineLine = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"baseline"}]}}"#
+        try writeText(baselineLine + "\n", to: url)
+        let size = try XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        let sessionID = "reload-scroll-gate-id"
+        let lightweight = Session(id: sessionID,
+                                  source: .codex,
+                                  startTime: nil,
+                                  endTime: nil,
+                                  model: nil,
+                                  filePath: url.path,
+                                  fileSizeBytes: size,
+                                  eventCount: 1,
+                                  events: [])
+        let indexer = SessionIndexer()
+        indexer.installSessionsForReloadTesting([lightweight])
+
+        let hydrated = expectation(description: "initial scroll-gate hydration")
+        var token = indexer.$allSessions
+            .filter { $0.first?.events.count == 1 }
+            .prefix(1)
+            .sink { _ in hydrated.fulfill() }
+        indexer.reloadSession(id: sessionID, reason: .selection)
+        wait(for: [hydrated], timeout: 3)
+        token.cancel()
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: sessionID, timeout: 1))
+
+        let appendedLine = #"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"deferred delta"}]}}"#
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((appendedLine + "\n").utf8))
+        try handle.close()
+
+        let published = expectation(description: "focused reload publishes after quiet")
+        token = indexer.$allSessions
+            .filter { $0.first?.events.count == 2 }
+            .prefix(1)
+            .sink { _ in published.fulfill() }
+        TranscriptScrollSignal.shared.noteScroll()
+        indexer.reloadSession(id: sessionID, force: true, reason: .focusedSessionMonitor)
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        XCTAssertEqual(indexer.allSessions.first?.events.count, 1,
+                       "A focused monitor must not replace the visible transcript during active scrolling")
+        wait(for: [published], timeout: 3)
+        token.cancel()
+        XCTAssertEqual(indexer.allSessions.first?.events.last?.text, "deferred delta")
+    }
+
     func testFocusedCodexReloadDetectsSameSizeSameMtimeAtomicReplacement() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentSessions-CodexReloadReplacement-\(UUID().uuidString).jsonl")
@@ -12325,6 +12502,39 @@ final class SessionParserTests: XCTestCase {
         XCTAssertNotEqual(identityOne, identityTwo, "identity must not consult origin")
     }
 
+    func testHiddenProjectsPersistAndFilterExactRoots() throws {
+        let suite = "HiddenProjectsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let hidden = makeProjectIdentitySession(id: "automation", cwd: "/AS-hide/one/app")
+        let visible = makeProjectIdentitySession(id: "interactive", cwd: "/AS-hide/two/app")
+        let unknown = makeProjectIdentitySession(id: "no-project", cwd: nil)
+        let project = try XCTUnwrap(hidden.rowProjectIdentity)
+        XCTAssertNotEqual(project, try XCTUnwrap(visible.rowProjectIdentity))
+
+        XCTAssertTrue(HiddenProjects.hide(project, defaults: defaults))
+        XCTAssertFalse(HiddenProjects.hide(project, defaults: defaults))
+        let roots = HiddenProjects.roots(defaults: defaults)
+        XCTAssertEqual(roots, [project.canonicalRootPath])
+
+        let sessions = [hidden, visible, unknown]
+        let filtered = FilterEngine.filterSessions(sessions, filters: Filters(hiddenProjectRoots: roots))
+        XCTAssertEqual(filtered.map(\.id), [visible.id, unknown.id])
+        let scoped = FilterEngine.filterSessions(
+            sessions,
+            filters: Filters(selectedProjectIdentity: project, hiddenProjectRoots: roots)
+        )
+        XCTAssertEqual(scoped.map(\.id), [hidden.id])
+
+        HiddenProjects.unhide(project.canonicalRootPath, defaults: defaults)
+        let restored = FilterEngine.filterSessions(
+            sessions,
+            filters: Filters(hiddenProjectRoots: HiddenProjects.roots(defaults: defaults))
+        )
+        XCTAssertEqual(restored.map(\.id), sessions.map(\.id))
+    }
+
     func testProjectIdentityNilForVirtualAndStoredLabelOnlyRows() throws {
         let codexChats = makeProjectIdentitySession(
             id: "virtual-codex",
@@ -12438,6 +12648,48 @@ final class SessionParserTests: XCTestCase {
                           enableDeepScan: false,
                           all: [unrelated, selected])
         try await waitForSearchResults(coordinator, expectedIDs: [selected.id])
+    }
+
+    func testSearchCoordinatorExcludesHiddenProjectBeforeFTSLimit() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let hidden = makeProjectIdentitySession(id: "hidden-job", cwd: "/AS-hide/automation/app")
+        let visible = makeProjectIdentitySession(id: "visible-session", cwd: "/AS-hide/interactive/app")
+        let hiddenProject = try XCTUnwrap(hidden.rowProjectIdentity)
+        let query = "contextneedle"
+
+        try await db.begin()
+        for session in [hidden, visible] {
+            try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "codex")
+            try await db.upsertSessionMeta(SessionMetaRow(
+                sessionID: session.id, source: "codex", path: session.filePath,
+                mtime: 10, size: 20, startTS: 1, endTS: 2, model: nil,
+                cwd: session.cwd, repo: session.rowRepoName, title: nil,
+                codexInternalSessionID: nil, isHousekeeping: false, messages: 1,
+                commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+            ))
+            let indexedText = session.id == hidden.id
+                ? query
+                : query + " " + String(repeating: "filler ", count: 200)
+            try await db.upsertSessionSearch(sessionID: session.id, source: "codex",
+                                             mtime: 10, size: 20, text: indexedText)
+        }
+        try await db.commit()
+
+        let unfiltered = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: query, includeSystemProbes: true, limit: 1
+        )
+        XCTAssertEqual(unfiltered, [hidden.id], "The hidden project must outrank the visible match")
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db,
+                                            ftsResultLimitForTesting: 1)
+        coordinator.start(query: query,
+                          filters: Filters(query: query, hiddenProjectRoots: [hiddenProject.canonicalRootPath]),
+                          allowed: [.codex], enableDeepScan: false, all: [hidden, visible])
+        try await waitForSearchResults(coordinator, expectedIDs: [visible.id])
+        XCTAssertEqual(coordinator.eligibleCount, 1)
     }
 
     func testSearchCoordinatorExactProjectDoesNotLeakSameIDFromAnotherSource() async throws {

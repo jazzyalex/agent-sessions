@@ -67,6 +67,11 @@ final class ClaudeCloudLiveModel {
     private let catalog: ClaudeCloudSessionCatalog
     private var timer: Timer?
     private var inFlight = false
+    private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration: UInt64 = 0
+    private var refreshQueued = false
+    private var enabled = false
+    private let observers = CredentialNotificationObservations()
 
     /// A network list call. Half-a-minute granularity is ample for a row that says
     /// "still working", and it stays well clear of rate limiting.
@@ -74,9 +79,52 @@ final class ClaudeCloudLiveModel {
 
     private init(catalog: ClaudeCloudSessionCatalog? = nil) {
         self.catalog = catalog ?? ClaudeCloudSessionCatalog(
-            sessionKeyProvider: { ClaudeManualWebCookieStore.shared.currentSessionKey() },
             isEnabled: { Self.effectivelyEnabled() }
         )
+        enabled = Self.effectivelyEnabled()
+        observers.insert(NotificationCenter.default.addObserver(forName: ClaudeCredentialService.didChange,
+                                                                object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor in self?.credentialsChanged() }
+        })
+        observers.insert(NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
+                                                                object: nil, queue: nil) { [weak self] _ in
+            let enabled = Self.effectivelyEnabled()
+            Task { @MainActor in self?.enablementChanged(enabled) }
+        })
+    }
+
+    private func enablementChanged(_ value: Bool) {
+        guard value != enabled else { return }
+        enabled = value
+        cancelRefresh()
+        catalog.invalidate(disabled: !value)
+        publishCatalog()
+        refresh()
+    }
+
+    private func credentialsChanged() {
+        cancelRefresh()
+        catalog.invalidate(disabled: !Self.effectivelyEnabled())
+        publishCatalog()
+        if !ClaudeCredentialService.shared.isMutating { refresh() }
+    }
+
+    private func cancelRefresh() {
+        refreshGeneration &+= 1
+        refreshTask?.cancel()
+        refreshTask = nil
+        inFlight = false
+        refreshQueued = false
+    }
+
+    private func publishCatalog() {
+        state = catalog.state
+        let mapped = ClaudeCloudHUDRowMapper.rows(from: catalog.sessions)
+        if mapped != rows {
+            rows = mapped
+            version &+= 1
+            NotificationCenter.default.post(name: Self.rowsDidChange, object: nil)
+        }
     }
 
     /// Diagnostic heartbeat.
@@ -129,28 +177,29 @@ final class ClaudeCloudLiveModel {
     }
 
     func refresh() {
-        guard !inFlight else { return }
+        guard !inFlight else { refreshQueued = true; return }
         inFlight = true
-        Task { @MainActor [weak self] in
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        refreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.catalog.refresh()
+            guard generation == self.refreshGeneration else { return }
             self.inFlight = false
             // Copy the state across on every refresh, not only when rows change —
             // a transition from ok to expired with an unchanged (empty) row list is
             // exactly the case the status line must catch.
-            self.state = self.catalog.state
-            let mapped = ClaudeCloudHUDRowMapper.rows(from: self.catalog.sessions)
-            let changed = mapped != self.rows
-            if changed {
-                self.rows = mapped
-                self.version &+= 1
-                NotificationCenter.default.post(name: Self.rowsDidChange, object: nil)
-            }
+            let oldRows = self.rows
+            self.publishCatalog()
             self.note("refresh done", extra: [
                 "sessions": self.catalog.sessions.count,
-                "mapped": mapped.count,
-                "changed": changed
+                "mapped": self.rows.count,
+                "changed": oldRows != self.rows
             ])
+            if self.refreshQueued {
+                self.refreshQueued = false
+                self.refresh()
+            }
         }
     }
 }

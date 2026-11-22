@@ -140,10 +140,13 @@ final class JSONLReader {
             }
             if !data.isEmpty {
                 bytesRead += UInt64(data.count)
+                // The buffered prefix was already searched for a newline on
+                // the previous read. Long records only need to scan new bytes.
+                var searchStart = buffer.endIndex
                 buffer.append(data)
                 // If we're currently skipping an oversize line, keep discarding until newline
                 if skippingOversizeLine {
-                    if let nlRange = buffer.range(of: nl) {
+                    if let nlRange = buffer.range(of: nl, in: searchStart..<buffer.endIndex) {
                         if !didEmitSkipStub {
                             if !shouldContinue("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}") {
                                 stoppedEarly = true
@@ -152,6 +155,7 @@ final class JSONLReader {
                             didEmitSkipStub = true
                         }
                         buffer = Data(buffer[nlRange.upperBound..<buffer.endIndex])
+                        searchStart = buffer.startIndex
                         skippingOversizeLine = false
                         didEmitSkipStub = false
                     } else {
@@ -159,14 +163,15 @@ final class JSONLReader {
                         return true
                     }
                 }
-                // Safety check: if buffer is getting huge (>10MB) without finding newline, skip ahead
+                // Skip records that exceed the line-size limit.
                 if !skippingOversizeLine && buffer.count > maxLineBytes {
-                    if let nlRange = buffer.range(of: nl) {
+                    if let nlRange = buffer.range(of: nl, in: searchStart..<buffer.endIndex) {
                         if !shouldContinue("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}") {
                             stoppedEarly = true
                             return false
                         }
                         buffer = Data(buffer[nlRange.upperBound..<buffer.endIndex])
+                        searchStart = buffer.startIndex
                     } else {
                         skippingOversizeLine = true
                         didEmitSkipStub = false
@@ -175,26 +180,25 @@ final class JSONLReader {
                     }
                 }
 
-                var range = buffer.startIndex..<buffer.endIndex
-                while let nlRange = buffer.range(of: Data([0x0A]), options: [], in: range) { // \n
-                    let lineData = buffer.subdata(in: range.lowerBound..<nlRange.lowerBound)
+                var lineStart = buffer.startIndex
+                while let nlRange = buffer.range(of: nl, in: searchStart..<buffer.endIndex) {
+                    let lineData = buffer.subdata(in: lineStart..<nlRange.lowerBound)
+                    lineStart = nlRange.upperBound
+                    searchStart = lineStart
 
                     if let line = String(data: lineData, encoding: .utf8) {
                         let trimmed = line.trimmingCharacters(in: .newlines)
-                        if trimmed.isEmpty {
-                            range = nlRange.upperBound..<buffer.endIndex
-                            continue
-                        }
-                        if !shouldContinue(trimmed) {
+                        if !trimmed.isEmpty, !shouldContinue(trimmed) {
                             stoppedEarly = true
                             return false
                         }
                     } else {
                         reportMalformedLine?()
                     }
-                    range = nlRange.upperBound..<buffer.endIndex
                 }
-                buffer = Data(buffer[range])
+                if lineStart != buffer.startIndex {
+                    buffer = Data(buffer[lineStart..<buffer.endIndex])
+                }
                 return true
             } else {
                 return false

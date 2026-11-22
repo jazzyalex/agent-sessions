@@ -145,7 +145,7 @@ final class PiSessionParser {
         )
     }
 
-    static func parseFileFull(at url: URL, allowLargeFile: Bool = false) -> Session? {
+    static func parseFileFull(at url: URL, allowLargeFile: Bool = false, forSearch: Bool = false) -> Session? {
         if !allowLargeFile,
            let fileSize = fileSize(at: url),
            fileSize > defaultFullParseMaxBytes {
@@ -158,7 +158,7 @@ final class PiSessionParser {
               let id = header.id else { return nil }
 
         let activeEntries = currentTreeEntries(from: entries)
-        let events = buildEvents(entries: activeEntries)
+        let events = buildEvents(entries: activeEntries, forSearch: forSearch)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let title = deriveTitle(entries: activeEntries)
         let start = parseDate(header.timestamp)
@@ -278,7 +278,7 @@ final class PiSessionParser {
         !parsedEntries.isEmpty && !content.hasSuffix("\n") && lineIndex == lineCount - 1
     }
 
-    private static func buildEvents(entries: [Entry]) -> [SessionEvent] {
+    private static func buildEvents(entries: [Entry], forSearch: Bool) -> [SessionEvent] {
         entries.enumerated().flatMap { index, entry -> [SessionEvent] in
             let id = entry.id ?? String(format: "pi-%04d", index + 1)
             let rawJSON = rawJSONBase64(entry)
@@ -287,7 +287,8 @@ final class PiSessionParser {
                                           message: message,
                                           baseID: id,
                                           fallbackTimestamp: parseDate(entry.timestamp) ?? parseMillis(message.timestamp),
-                                          rawJSON: rawJSON)
+                                          rawJSON: rawJSON,
+                                          forSearch: forSearch)
             }
 
             guard entry.type != "session" else { return [] }
@@ -324,7 +325,8 @@ final class PiSessionParser {
                                            message: Entry.Message,
                                            baseID: String,
                                            fallbackTimestamp: Date?,
-                                           rawJSON: String) -> [SessionEvent] {
+                                           rawJSON: String,
+                                           forSearch: Bool) -> [SessionEvent] {
         let role = normalizedRole(message.role)
         switch role {
         case "assistant":
@@ -332,7 +334,8 @@ final class PiSessionParser {
                                    message: message,
                                    baseID: baseID,
                                    fallbackTimestamp: fallbackTimestamp,
-                                   rawJSON: rawJSON)
+                                   rawJSON: rawJSON,
+                                   forSearch: forSearch)
         case "toolresult":
             return [toolResultEvent(entry: entry,
                                     message: message,
@@ -373,7 +376,8 @@ final class PiSessionParser {
                                         message: Entry.Message,
                                         baseID: String,
                                         fallbackTimestamp: Date?,
-                                        rawJSON: String) -> [SessionEvent] {
+                                        rawJSON: String,
+                                        forSearch: Bool) -> [SessionEvent] {
         guard case .array(let blocks)? = message.content else {
             let text = textContent(from: message.content)
             guard text?.isEmpty == false else { return [] }
@@ -432,7 +436,7 @@ final class PiSessionParser {
                                            role: message.role,
                                            text: nil,
                                            toolName: stringValue(object["name"]),
-                                           toolInput: jsonString(object["arguments"]),
+                                           toolInput: jsonString(object["arguments"], forSearch: forSearch),
                                            toolOutput: nil,
                                            toolCallID: ToolCallID.from(stringValue(object["id"])),
                                            messageID: stringValue(object["id"]) ?? baseID,
@@ -729,11 +733,11 @@ final class PiSessionParser {
             .replacingOccurrences(of: "-", with: "") ?? ""
     }
 
-    private static func jsonString(_ value: JSONValue?) -> String? {
+    private static func jsonString(_ value: JSONValue?, forSearch: Bool = false) -> String? {
         guard let value else { return nil }
         if let string = stringValue(value) { return string }
         guard let data = try? JSONEncoder().encode(value) else { return nil }
-        if data.count > 32_768 {
+        if !forSearch, data.count > 32_768 {
             return "[OMITTED large JSON payload bytes=\(data.count)]"
         }
         return String(data: data, encoding: .utf8)

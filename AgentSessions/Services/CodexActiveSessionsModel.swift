@@ -3470,6 +3470,43 @@ final class CodexActiveSessionsModel {
         return Array(Set(pids)).sorted()
     }
 
+    struct AgentProcessMatches {
+        var headlessCodex: Set<Int> = []
+        var claude: Set<Int> = []
+        var headlessClaude: Set<Int> = []
+        var openCode: Set<Int> = []
+        var headlessOpenCode: Set<Int> = []
+        var antigravity: Set<Int> = []
+    }
+
+    /// Resolve each command once for a presence poll. GUI backends still have
+    /// their own discovery paths, and Antigravity still requires a terminal.
+    nonisolated static func agentProcessMatches(from infos: [PSCommandInfo]) -> AgentProcessMatches {
+        var matches = AgentProcessMatches()
+        for info in infos {
+            let paths = executableTokenPaths(from: splitCommandTokens(info.command), depth: 0)
+            let hasTTY = info.tty != nil
+            guard hasTTY || !paths.contains(where: isPathInsideAppBundle) else { continue }
+            for command in paths.lazy.map(commandBasename) {
+                switch command {
+                case "codex" where !hasTTY:
+                    matches.headlessCodex.insert(info.pid)
+                case "claude", "claude-code":
+                    matches.claude.insert(info.pid)
+                    if !hasTTY { matches.headlessClaude.insert(info.pid) }
+                case "opencode":
+                    matches.openCode.insert(info.pid)
+                    if !hasTTY { matches.headlessOpenCode.insert(info.pid) }
+                case "agy", "antigravity":
+                    if hasTTY { matches.antigravity.insert(info.pid) }
+                default:
+                    break
+                }
+            }
+        }
+        return matches
+    }
+
     /// Match the bundled backend, including installations whose app was renamed.
     /// GUI renderers and unrelated `codex` commands are not session owners.
     nonisolated static func codexDesktopPIDs(from infos: [PSCommandInfo]) -> Set<Int> {

@@ -28,6 +28,24 @@ struct ClaudeLimitSnapshot: Equatable, Codable {
     /// window came from the legacy `seven_day_opus` key, which names no model.
     var weekScopedLabel: String?
     var rawPayloadHash: String?         // SHA256 of raw response body, for change detection
+    /// Validated producer identity; nil on legacy snapshots, which cannot be restored/merged.
+    var ownership: String? = nil
+    /// Process-local request validity is deliberately never persisted.
+    var requestLease: ClaudeCredentialRequestLease? = nil
+    private enum CodingKeys: String, CodingKey {
+        case fetchedAt, source, health, fiveHourUsedRatio, fiveHourResetText
+        case weeklyUsedRatio, weeklyResetText, weekOpusUsedRatio, weekOpusResetText
+        case weekScopedLabel, rawPayloadHash, ownership
+    }
+
+    var hasWebOwnership: Bool {
+        ownership?.hasPrefix("web:") == true || ownership?.hasPrefix("legacy:") == true
+    }
+
+    var webOwnershipIsCurrent: Bool {
+        guard let ownership else { return false }
+        return requestLease?.owner == ownership && requestLease?.isValid == true
+    }
 
     // MARK: - Helpers
 

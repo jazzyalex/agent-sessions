@@ -80,12 +80,21 @@ enum ClaudeRunwayLog {
     /// Parses ISO-8601 timestamps (with or without fractional seconds), the
     /// form Claude writes in transcript lines.
     static func date(_ value: Any?) -> Date? {
-        guard let string = value as? String else { return nil }
-        let isoFractional = ISO8601DateFormatter()
-        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = isoFractional.date(from: string) { return date }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        return iso.date(from: string)
+        TimestampParser().date(value)
+    }
+
+    /// Owned by one scan worker. Formatter configuration stays local to it.
+    final class TimestampParser {
+        private lazy var fractional: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter
+        }()
+        private lazy var wholeSecond = ISO8601DateFormatter()
+
+        func date(_ value: Any?) -> Date? {
+            guard let string = value as? String else { return nil }
+            return fractional.date(from: string) ?? wholeSecond.date(from: string)
+        }
     }
 }

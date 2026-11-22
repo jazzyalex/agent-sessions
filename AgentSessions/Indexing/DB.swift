@@ -1023,6 +1023,41 @@ actor IndexDB {
         return out
     }
 
+    /// Required schema/extraction rebuilds survive restarts and bypass content cooldowns.
+    func requiredSearchMigrations(source: String, includeToolIO: Bool, toolIOCutoff: Int64)
+        throws -> (paths: Set<String>, sessionIDs: Set<String>) {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT m.path, m.session_id FROM session_meta m
+        LEFT JOIN session_search s ON s.session_id = m.session_id AND s.source = m.source
+        WHERE m.source = ? AND (s.session_id IS NULL OR s.format_version != ?)
+        UNION
+        SELECT m.path, m.session_id FROM session_meta m LEFT JOIN session_tool_io t
+          ON t.session_id = m.session_id AND t.source = m.source
+        WHERE m.source = ? AND ? = 1 AND COALESCE(t.ref_ts, m.end_ts) >= ?
+          AND (t.session_id IS NULL OR t.format_version != ?);
+        """
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 2, Int32(FeatureFlags.sessionSearchFormatVersion))
+        sqlite3_bind_text(statement, 3, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 4, includeToolIO ? 1 : 0)
+        sqlite3_bind_int64(statement, 5, toolIOCutoff)
+        sqlite3_bind_int(statement, 6, Int32(FeatureFlags.sessionToolIOFormatVersion))
+        var paths = Set<String>(), sessionIDs = Set<String>()
+        var step = sqlite3_step(statement)
+        while step == SQLITE_ROW {
+            if let path = sqlite3_column_text(statement, 0) { paths.insert(String(cString: path)) }
+            if let id = sqlite3_column_text(statement, 1) { sessionIDs.insert(String(cString: id)) }
+            step = sqlite3_step(statement)
+        }
+        guard step == SQLITE_DONE else {
+            throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        return (paths, sessionIDs)
+    }
+
     /// Fetch file paths that are fully populated for search (files + session_meta + session_search).
     /// Used to avoid skipping stale file rows left behind by previous builds where files were tracked
     /// but session meta/search were not.
@@ -2749,6 +2784,21 @@ actor IndexDB {
         return (clause: "\(column) NOT IN (\(placeholders))", binds: sorted)
     }
 
+    /// Actor-local temporary membership is installed synchronously before preparing
+    /// the query. Eligibility reaches SQLite before ranking/LIMIT even above its bind limit.
+    private func installSearchEligibleIDs(_ ids: Set<String>) throws {
+        try exec("CREATE TEMP TABLE IF NOT EXISTS search_eligible_ids (id TEXT PRIMARY KEY) WITHOUT ROWID;")
+        try exec("DELETE FROM temp.search_eligible_ids;")
+        let statement = try prepare("INSERT INTO temp.search_eligible_ids(id) VALUES (?);")
+        defer { sqlite3_finalize(statement) }
+        for id in ids {
+            try Task.checkCancellation()
+            sqlite3_reset(statement); sqlite3_clear_bindings(statement)
+            sqlite3_bind_text(statement, 1, id, -1, SQLITE_TRANSIENT)
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw DBError.execFailed("search eligibility") }
+        }
+    }
+
     func searchSessionIDsFTS(
         sources: [String],
         model: String?,
@@ -2768,7 +2818,13 @@ actor IndexDB {
         guard limit > 0 else { return [] }
         var clauses: [String] = []
         var binds: [Any] = []
+        if let eligibleSessionIDs {
+            if eligibleSessionIDs.isEmpty { return [] }
+            try installSearchEligibleIDs(eligibleSessionIDs)
+            clauses.append("sm.session_id IN (SELECT id FROM temp.search_eligible_ids)")
+        }
 
+        clauses.append("s.format_version = \(FeatureFlags.sessionSearchFormatVersion)")
         clauses.append("session_search_fts MATCH ?")
         binds.append(query)
 
@@ -2806,7 +2862,7 @@ actor IndexDB {
         SELECT sm.session_id
         FROM session_search_fts f
         JOIN session_search s ON s.rowid = f.rowid
-        JOIN session_meta sm ON sm.session_id = s.session_id
+        JOIN session_meta sm ON sm.session_id = s.session_id AND sm.source = s.source
         \(whereSQL)
         ORDER BY bm25(session_search_fts), sm.session_id
         LIMIT ? OFFSET ?;
@@ -2875,7 +2931,13 @@ actor IndexDB {
         guard limit > 0 else { return [] }
         var clauses: [String] = []
         var binds: [Any] = []
+        if let eligibleSessionIDs {
+            if eligibleSessionIDs.isEmpty { return [] }
+            try installSearchEligibleIDs(eligibleSessionIDs)
+            clauses.append("sm.session_id IN (SELECT id FROM temp.search_eligible_ids)")
+        }
 
+        clauses.append("t.format_version = \(FeatureFlags.sessionToolIOFormatVersion)")
         clauses.append("session_tool_io_fts MATCH ?")
         binds.append(query)
 
@@ -2912,7 +2974,7 @@ actor IndexDB {
         SELECT sm.session_id
         FROM session_tool_io_fts f
         JOIN session_tool_io t ON t.rowid = f.rowid
-        JOIN session_meta sm ON sm.session_id = t.session_id
+        JOIN session_meta sm ON sm.session_id = t.session_id AND sm.source = t.source
         \(whereSQL)
         ORDER BY bm25(session_tool_io_fts), sm.session_id
         LIMIT ? OFFSET ?;

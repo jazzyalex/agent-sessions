@@ -184,8 +184,10 @@ enum CardMetrics {
 /// change. Only plain value types are handed to the AppKit controller — the
 /// controller never retains `derivedState`.
 struct TranscriptBlockListView: NSViewRepresentable {
+    @Environment(\.locale) private var presentationLocale
     let derivedState: TranscriptDerivedState
     var showsContext: Bool = false
+    var monochromeSyntax: Bool = false
     let session: Session
     let fontSize: CGFloat
     var configurationChanges: [ConfigurationChange] = []
@@ -326,6 +328,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.onTopProximityChange = onTopProximityChange
         context.coordinator.onAgentStopCountChange = onAgentStopCountChange
         context.coordinator.onRequestToolsShown = onRequestToolsShown
+        context.coordinator.setMonochromeSyntax(monochromeSyntax)
 
         context.coordinator.attach(table: table, scroll: scroll)
         // Find's decode pass starts at the block the reader sees (read when a pass starts). Weak:
@@ -345,6 +348,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.onTopProximityChange = onTopProximityChange
         context.coordinator.onAgentStopCountChange = onAgentStopCountChange
         context.coordinator.onRequestToolsShown = onRequestToolsShown
+        context.coordinator.setMonochromeSyntax(monochromeSyntax)
         // A session switch publishes the new session before its snapshot lands: the snapshot
         // still holds the previous session's blocks. Applying them under the new session id
         // would seed the old session's failed calls (and cache its summaries and L2 bodies)
@@ -360,6 +364,19 @@ struct TranscriptBlockListView: NSViewRepresentable {
               snapshot.key?.subagentType == session.subagentType else {
             return
         }
+        let inputs = TranscriptDerivedState.PresentationInputs(
+            snapshotKey: snapshot.key!, showsContext: showsContext,
+            configurationChanges: configurationChanges,
+            imageBlocks: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys),
+            localeIdentifier: presentationLocale.identifier, activeRoles: activeRoleFilters, diagnosticContext: .session(session))
+        derivedState.preparePresentation(inputs)
+        guard snapshot.key?.contentRevision == session.contentRevision,
+              snapshot.key?.isPartiallyHydrated == session.isPartiallyHydrated,
+              let presentation = derivedState.presentation(matching: inputs) else { return }
+        let metrics = SearchResponsivenessMetrics.shared
+        let metricOperation = metrics.operation(source: session.source.rawValue, sessionID: session.id)
+        let metricContext = SearchResponsivenessMetricContext.session(session, generation: presentation.revision)
+        let applySpan = metrics.beginSpan(.tableApply, operationID: metricOperation, context: metricContext)
         let rowsChanged = context.coordinator.apply(
             allBlocks: snapshot.blocks,
             invocationIndex: snapshot.invocationIndex,
@@ -382,10 +399,41 @@ struct TranscriptBlockListView: NSViewRepresentable {
             activeRoleFilters: activeRoleFilters,
             sharedToolInvocationCache: derivedState.toolSearchStore.invocationCache,
             rowSummaries: snapshot.rowSummaries, showsContext: showsContext,
-            messageGroups: derivedState.messageGroups(showsContext: showsContext,
-                markers: TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: snapshot.blocks),
-                imageBlocks: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys)),
+            messageGroups: presentation.groups,
+            preparedMarkers: presentation.markers,
+            preparedPresentation: presentation,
             turnIndex: snapshot.turnIndex)
+
+        if let applySpan { metrics.end(applySpan) }
+        if metrics.isEnabled {
+            DispatchQueue.main.async {
+                guard derivedState.presentation(matching: inputs) != nil,
+                      metrics.isCurrentSelection(metricOperation),
+                      let selectedContext = derivedState.selectedPresentationContext,
+                      !session.events.isEmpty,
+                      scroll.window?.isVisible == true, !scroll.visibleRect.isEmpty else { return }
+                // Explicit diagnostic mode only. The point is after the AppKit layout/display
+                // pass, never merely after model publication or receipt of a snapshot.
+                metrics.measured(.layoutDisplayCompleted, operationID: metricOperation, context: metricContext) {
+                    scroll.layoutSubtreeIfNeeded()
+                    scroll.displayIfNeeded()
+                }
+                guard context.coordinator.hasReadableVisibleRows else { return }
+                let paintKey = (metricOperation?.rawValue ?? "") + ":" + String(presentation.revision)
+                if context.coordinator.lastMetricPresentation != paintKey {
+                    if findQuery.isEmpty { metrics.recordMissing(.findReady, reason: .notRequested, operationID: metricOperation, context: metricContext) }
+                    if !inlineImagesEnabled { metrics.recordMissing(.imageReady, reason: .notRequested, operationID: metricOperation, context: metricContext) }
+                    context.coordinator.lastMetricPresentation = paintKey
+                    if context.coordinator.lastMetricFirstOperation != metricOperation?.rawValue {
+                        context.coordinator.lastMetricFirstOperation = metricOperation?.rawValue
+                        _ = metrics.recordFirstContentVisible(selected: selectedContext, presented: metricContext,
+                                                              operationID: metricOperation)
+                    }
+                    _ = metrics.recordVisibleContent(session.isPartiallyHydrated ? .partialContentVisible : .fullContentVisible,
+                        selected: selectedContext, presented: metricContext, operationID: metricOperation)
+                }
+            }
+        }
 
         let consumedScrollIntent = context.coordinator.consumeScrollToBottomToken(scrollToBottomToken)
         if consumedScrollIntent {
@@ -441,6 +489,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
         if coordinator.consumeLocalFindToken(findToken) {
             let matches = findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? [] : derivedState.findMatches(query: findQuery, showsContext: showsContext)
+            metrics.record(.findReady, operationID: metricOperation, context: metricContext, status: .published)
             let counts = coordinator.applyFind(
                 source: .local, query: findQuery, matches: matches,
                 token: findToken, direction: findDirection,
@@ -705,6 +754,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// it without limit; cleared on session switch, font change, and appearance
     /// flip (colors are baked at render time). 400 ≈ several screens of messages.
     private let renderedBodyCache = LRUCache<RenderKey, RenderedBody>(maxEntries: 400)
+    private lazy var syntaxScheduler = TranscriptSyntaxScheduler()
+    private var syntaxRefreshPending = false
+    private var monochromeSyntax = false
+    #if DEBUG
+    private(set) var syntaxPaintMilliseconds: [Double] = []
+    var syntaxPeakWork: (active: Int, queued: Int) { (syntaxScheduler.peakActive, syntaxScheduler.peakPending) }
+    #endif
 
     /// The effective-appearance dark flag used to key + bake markdown renders.
     /// Read from the controller's own table view (its `effectiveAppearance` is
@@ -1084,7 +1140,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             forName: NSView.boundsDidChangeNotification,
             object: clip,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self, weak scroll] _ in
+            TranscriptScrollSignal.shared.noteScrollIfUserDriven(
+                event: NSApp.currentEvent,
+                scrollView: scroll
+            )
             self?.handleScrollPositionChanged()
         }
     }
@@ -1116,8 +1176,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Bounds observer body: report both floating-control proximity states and,
     /// when the flag allows, consider a load-older extension.
     private func handleScrollPositionChanged() {
+        (table as? BlockTableView)?.suspendToolHoverForScroll()
         emitProximityIfNeeded()
         maybeScheduleLoadOlder()
+        scheduleSyntaxRefresh()
     }
 
     /// Seed the remount watermark so a jump requested before Rich mounted is
@@ -1410,6 +1472,19 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                                 hiddenNoteBlocks: hiddenNoteBlocks)
     }
 
+    private var lastPreparedPresentationRevision: Int?
+    var lastMetricPresentation: String?
+    var lastMetricFirstOperation: String?
+    var hasReadableVisibleRows: Bool {
+        guard let table else { return false }
+        let visible = table.rows(in: table.visibleRect)
+        guard visible.location != NSNotFound, visible.length > 0 else { return false }
+        return (visible.location..<min(rows.count, NSMaxRange(visible))).contains { index in
+            let row = rows[index]
+            return row.isToolRow || (!row.isMeta && !row.bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
     // MARK: Apply
 
     /// Diff the incoming windowed stream against the current rows and update the
@@ -1438,6 +1513,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                rowSummaries: [Int: TranscriptDerivedState.RowSummaryEntry] = [:],
                showsContext: Bool = false,
                messageGroups suppliedMessageGroups: TranscriptMessageGroupIndex? = nil,
+               preparedMarkers: [Int: [String]]? = nil,
+               preparedPresentation: TranscriptDerivedState.PresentationBundle? = nil,
                turnIndex: TranscriptTurnIndex = .empty) -> Bool {
         guard let table else { return false }
 
@@ -1446,7 +1523,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             usesSharedToolInvocationCache = true
         }
 
-        let newMarkers = TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: allBlocks)
+        let newMarkers = preparedMarkers ?? TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: allBlocks)
         let markersChanged = newMarkers != telemetryMarkers
         telemetryMarkers = newMarkers
         if markersChanged { heightCache.removeAll(keepingCapacity: true) }
@@ -1610,7 +1687,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // `TranscriptTurnTiming.compute` is O(blocks), cheap relative to the
         // coalesce/merge work `apply` already redoes every call, but there's no
         // reason to redo it when the stream is provably unchanged.
-        if totalBlockCount != lastTimingComputedBlockCount || turnIndex != self.turnIndex {
+        if let preparedPresentation {
+            if preparedPresentation.revision != lastPreparedPresentationRevision { turnDataGeneration &+= 1 }
+            lastPreparedPresentationRevision = preparedPresentation.revision
+            turnTimingCache = preparedPresentation.snapshot.turnTiming
+            toolTimingCache = preparedPresentation.snapshot.toolTiming
+        } else if totalBlockCount != lastTimingComputedBlockCount || turnIndex != self.turnIndex {
             turnDataGeneration &+= 1
             lastTimingComputedBlockCount = totalBlockCount
             let timing = TranscriptTurnTiming.compute(blocks: allBlocks, index: self.invocationIndex,
@@ -1629,7 +1711,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         var chipRowsChanged = Set<Int>()
         if visibilityInputs != agentRowVisibilityInputs {
             agentRowVisibilityInputs = visibilityInputs
-            chipRowsChanged = refreshAgentRowVisibility()
+            if let preparedPresentation {
+                agentStopIDs = preparedPresentation.agentStopIDs
+                let anchors = preparedPresentation.chipAnchors
+                for id in Set(anchors.keys).union(turnChipAnchors.keys) where anchors[id] != turnChipAnchors[id] {
+                    chipRowsChanged.insert(id)
+                }
+                turnChipAnchors = anchors
+            } else { chipRowsChanged = refreshAgentRowVisibility() }
         }
 
         // Window maintenance on total-count change (live appends) / first apply.
@@ -2135,6 +2224,70 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             guard let cell = view as? BlockCardCellView else { return }
             configure(cell: cell, forRowModel: rowModel, ordinal: ordinal)
         }
+        if let cell = view as? TranscriptRowCell, !cell.bodyText.syntaxSnippets.isEmpty {
+            scheduleSyntaxRefresh()
+        }
+    }
+
+    func setMonochromeSyntax(_ value: Bool) {
+        guard monochromeSyntax != value else { return }
+        monochromeSyntax = value
+        scheduleSyntaxRefresh()
+    }
+
+    private func scheduleSyntaxRefresh() {
+        guard !syntaxRefreshPending else { return }
+        syntaxRefreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.syntaxRefreshPending = false
+            self.refreshVisibleSyntax()
+        }
+    }
+
+    private func refreshVisibleSyntax() {
+        guard let table, table.window != nil else {
+            syntaxScheduler.update(visible: [], didFinish: {})
+            return
+        }
+        let appearance = table.effectiveAppearance
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let contrast = increaseContrastProvider()
+        let style = (dark ? 1 : 0) + (contrast ? 2 : 0) + (monochromeSyntax ? 4 : 0)
+        #if DEBUG
+        let paintStart = CFAbsoluteTimeGetCurrent()
+        var painted = false
+        #endif
+        var palette: [NSColor]?
+        var pending: [TranscriptSyntaxSnippet.Key] = []
+        var pendingKeys = Set<TranscriptSyntaxSnippet.Key>()
+        forEachVisibleCell { cell, _ in
+            let body = cell.bodyText
+            // The table already clips the rows to the scroll viewport. TextKit can
+            // still report an empty view rectangle before the cell's first layout.
+            guard !body.isHidden, !body.syntaxSnippets.isEmpty else { return }
+            body.prepareSyntaxStyle(style)
+            guard !monochromeSyntax else { return }
+            for (index, snippet) in body.syntaxSnippets.enumerated() where !body.paintedSyntax.contains(index) {
+                guard let tokens = syntaxScheduler.tokens(for: snippet.key) else {
+                    if pending.count < 12, pendingKeys.insert(snippet.key).inserted {
+                        pending.append(snippet.key)
+                    }
+                    continue
+                }
+                if palette == nil { palette = TranscriptSyntax.palette(appearance: appearance, increaseContrast: contrast) }
+                body.paintSyntax(tokens, snippet: snippet, index: index, palette: palette ?? [])
+                #if DEBUG
+                painted = true
+                #endif
+            }
+        }
+        syntaxScheduler.update(visible: pending) { [weak self] in self?.scheduleSyntaxRefresh() }
+        #if DEBUG
+        if painted, syntaxPaintMilliseconds.count < 256 {
+            syntaxPaintMilliseconds.append((CFAbsoluteTimeGetCurrent() - paintStart) * 1000)
+        }
+        #endif
     }
 
     /// Single call site for `BlockCardCellView.configure` (message rows).
@@ -2951,6 +3104,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             menuProvider: { [weak self] actionIndex, selection in
                 self?.toolContextMenu(invocationID: invocationID, actionIndex: actionIndex, selectionText: selection)
             })
+        if bodyReset {
+            cell.bodyText.syntaxSnippets = presentation?.syntaxSnippets ?? []
+        }
         // File-path links in the L2 text (Task C3 parity), around the fold
         // controls the renderer already linked — only when the body text was
         // set anew (a reconfigure with the same body keeps its links). Skipped
@@ -5253,6 +5409,7 @@ final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
 
         let host = NSHostingView(rootView: BlockCardHeader(kind: .meta, timestamp: nil, accent: .secondary))
         host.translatesAutoresizingMaskIntoConstraints = false
+        host.sizingOptions = []
         cardBackground.addSubview(host)
         headerHost = host
 
@@ -5386,6 +5543,7 @@ final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
         bodyText.isHidden = false
 
         let isEmpty: Bool
+        bodyText.syntaxSnippets = renderedBody?.syntaxSnippets ?? []
         if let renderedBody {
             // Markdown message: set the RENDERED attributed string (the exact
             // object the controller measured, so height parity holds — the
@@ -5578,6 +5736,105 @@ final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
 /// behavior.
 final class BlockTableView: NSTableView {
     weak var selectionOwner: BlockTableController?
+    private static let toolHoverScrollDelay: TimeInterval = 0.12
+    private var toolHoverTrackingArea: NSTrackingArea?
+    private var toolHoverTimer: Timer?
+    private weak var hoveredToolCell: ToolInvocationCellView?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if abs(event.scrollingDeltaY) > 0 {
+            TranscriptScrollSignal.shared.noteScroll()
+        }
+        super.scrollWheel(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let originBefore = enclosingScrollView?.contentView.bounds.origin.y
+        super.keyDown(with: event)
+        TranscriptScrollSignal.shared.noteVerticalKeyScrollIfMoved(
+            event: event,
+            originBefore: originBefore,
+            originAfter: enclosingScrollView?.contentView.bounds.origin.y
+        )
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard toolHoverTrackingArea == nil else { return }
+        let area = NSTrackingArea(
+            rect: .zero, options: [.inVisibleRect, .mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        toolHoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard let toolHoverTrackingArea, event.trackingArea === toolHoverTrackingArea else {
+            super.mouseEntered(with: event)
+            return
+        }
+        updateToolHover(at: event.locationInWindow)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        updateToolHover(at: event.locationInWindow)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard let toolHoverTrackingArea, event.trackingArea === toolHoverTrackingArea else {
+            super.mouseExited(with: event)
+            return
+        }
+        clearToolHover()
+    }
+
+    /// Keep hover controls stationary during a scroll. AppKit can move many
+    /// different rows under the same pointer before the wheel comes to rest.
+    func suspendToolHoverForScroll() {
+        clearToolHover()
+        guard window?.isKeyWindow == true else { return }
+        if let toolHoverTimer {
+            toolHoverTimer.fireDate = Date(timeIntervalSinceNow: Self.toolHoverScrollDelay)
+            return
+        }
+        let timer = Timer(timeInterval: Self.toolHoverScrollDelay, repeats: false) { [weak self] _ in
+            self?.resumeToolHoverAfterScroll()
+        }
+        toolHoverTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func resumeToolHoverAfterScroll() {
+        toolHoverTimer = nil
+        guard let window, window.isKeyWindow else { return }
+        updateToolHover(at: window.mouseLocationOutsideOfEventStream)
+    }
+
+    private func clearToolHover() {
+        hoveredToolCell?.setHoveredAction(nil)
+        hoveredToolCell = nil
+    }
+
+    func updateToolHover(at windowPoint: NSPoint) {
+        guard toolHoverTimer == nil else { return }
+        let point = convert(windowPoint, from: nil)
+        let row = row(at: point)
+        guard visibleRect.contains(point), row >= 0,
+              let cell = view(atColumn: 0, row: row, makeIfNecessary: false) as? ToolInvocationCellView,
+              let action = cell.actionIndex(at: windowPoint) else {
+            clearToolHover()
+            return
+        }
+        if hoveredToolCell !== cell { clearToolHover() }
+        hoveredToolCell = cell
+        cell.setHoveredAction(action)
+    }
 
     /// Clicks on rows without a `SelectableBlockTextView` (meta separators,
     /// collapsed tool-card chrome, card background, inter-card gaps) must clear
@@ -5626,6 +5883,69 @@ final class BlockTableView: NSTableView {
 /// text view (see `forceActiveSelectionAppearance`).
 final class SelectableBlockTextView: NSTextView {
     override var acceptsFirstResponder: Bool { true }
+
+    override func scrollWheel(with event: NSEvent) {
+        if abs(event.scrollingDeltaY) > 0 {
+            TranscriptScrollSignal.shared.noteScroll()
+        }
+        super.scrollWheel(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let originBefore = enclosingScrollView?.contentView.bounds.origin.y
+        super.keyDown(with: event)
+        TranscriptScrollSignal.shared.noteVerticalKeyScrollIfMoved(
+            event: event,
+            originBefore: originBefore,
+            originAfter: enclosingScrollView?.contentView.bounds.origin.y
+        )
+    }
+
+    private static let syntaxColor = NSAttributedString.Key("transcriptSyntaxColor")
+    private static let syntaxFindColor = NSAttributedString.Key("transcriptSyntaxFindColor")
+    private static let currentFindTint = NSColor.controlAccentColor.withAlphaComponent(0.45)
+    private static let secondaryFindTint = NSColor.systemYellow.withAlphaComponent(0.35)
+    private static let currentSyntaxFindColor = TranscriptSyntax.findForeground(tint: currentFindTint)
+    private static let secondarySyntaxFindColor = TranscriptSyntax.findForeground(tint: secondaryFindTint)
+
+    var syntaxSnippets: [TranscriptSyntaxSnippet] = [] {
+        didSet {
+            paintedSyntax.removeAll(keepingCapacity: true)
+            syntaxRanges.removeAll(keepingCapacity: true)
+        }
+    }
+    private(set) var paintedSyntax: Set<Int> = []
+    private var syntaxRanges: [NSRange] = []
+    private var syntaxStyle: Int?
+
+    func prepareSyntaxStyle(_ style: Int) {
+        guard syntaxStyle != style, let storage = textStorage else { return }
+        syntaxStyle = style
+        storage.beginEditing()
+        for range in syntaxRanges where NSMaxRange(range) <= storage.length {
+            storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: range)
+            storage.removeAttribute(Self.syntaxColor, range: range)
+        }
+        storage.endEditing()
+        paintedSyntax.removeAll(keepingCapacity: true)
+        syntaxRanges.removeAll(keepingCapacity: true)
+    }
+
+    func paintSyntax(_ tokens: [TranscriptSyntax.Token], snippet: TranscriptSyntaxSnippet,
+                     index: Int, palette: [NSColor]) {
+        guard let storage = textStorage, paintedSyntax.insert(index).inserted else { return }
+        storage.beginEditing()
+        snippet.forEachVisibleToken(tokens) { range, kind in
+            guard NSMaxRange(range) <= storage.length, palette.indices.contains(kind.rawValue) else { return }
+            let color = palette[kind.rawValue]
+            storage.addAttribute(Self.syntaxColor, value: color, range: range)
+            storage.enumerateAttribute(Self.syntaxFindColor, in: range) { value, overlap, _ in
+                storage.addAttribute(.foregroundColor, value: (value as? NSColor) ?? color, range: overlap)
+            }
+            syntaxRanges.append(range)
+        }
+        storage.endEditing()
+    }
 
     /// Set by the cell so this body can report its ordinal + escalate. The
     /// controller owns the row→ordinal mapping and the shared coordinator.
@@ -5703,10 +6023,15 @@ final class SelectableBlockTextView: NSTextView {
         storage.beginEditing()
         for h in highlights {
             guard NSMaxRange(h.range) <= fullLen else { continue }
-            let color: NSColor = h.isCurrent
-                ? NSColor.controlAccentColor.withAlphaComponent(0.45)
-                : NSColor.systemYellow.withAlphaComponent(0.35)
+            let color = h.isCurrent ? Self.currentFindTint : Self.secondaryFindTint
             storage.addAttribute(.backgroundColor, value: color, range: h.range)
+            guard !syntaxSnippets.isEmpty else { continue }
+            let foreground = h.isCurrent ? Self.currentSyntaxFindColor : Self.secondarySyntaxFindColor
+            storage.addAttribute(Self.syntaxFindColor, value: foreground, range: h.range)
+            storage.enumerateAttribute(Self.syntaxColor, in: h.range) { value, range, _ in
+                guard value != nil else { return }
+                storage.addAttribute(.foregroundColor, value: foreground, range: range)
+            }
         }
         storage.endEditing()
     }
@@ -5727,6 +6052,16 @@ final class SelectableBlockTextView: NSTextView {
         let full = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
         storage.removeAttribute(.backgroundColor, range: full)
+        if !syntaxSnippets.isEmpty {
+            storage.enumerateAttribute(Self.syntaxFindColor, in: full) { value, match, _ in
+                guard value != nil else { return }
+                storage.enumerateAttribute(Self.syntaxColor, in: match) { token, range, _ in
+                    guard let color = token as? NSColor else { return }
+                    storage.addAttribute(.foregroundColor, value: color, range: range)
+                }
+            }
+            storage.removeAttribute(Self.syntaxFindColor, range: full)
+        }
         storage.enumerateAttribute(.markdownCodeChip, in: full) { value, range, _ in
             if let color = value as? NSColor {
                 storage.addAttribute(.backgroundColor, value: color, range: range)

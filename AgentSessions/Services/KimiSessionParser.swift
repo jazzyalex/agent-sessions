@@ -34,11 +34,12 @@ enum KimiSessionParser {
         build(url: url, lineLimit: previewLineLimit, includeEvents: false, allowLargeFile: true)
     }
 
-    static func parseFileFull(at url: URL, allowLargeFile: Bool = false) -> Session? {
-        build(url: url, lineLimit: nil, includeEvents: true, allowLargeFile: allowLargeFile)
+    static func parseFileFull(at url: URL, allowLargeFile: Bool = false, forSearch: Bool = false) -> Session? {
+        build(url: url, lineLimit: nil, includeEvents: true, allowLargeFile: allowLargeFile, forSearch: forSearch)
     }
 
-    private static func build(url: URL, lineLimit: Int?, includeEvents: Bool, allowLargeFile: Bool) -> Session? {
+    private static func build(url: URL, lineLimit: Int?, includeEvents: Bool, allowLargeFile: Bool,
+                              forSearch: Bool = false) -> Session? {
         guard let id = KimiSessionDiscovery.sessionID(forWireFile: url) else { return nil }
 
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -70,7 +71,8 @@ enum KimiSessionParser {
                 model = m
             }
 
-            let built = makeEvents(type: type, object: object, time: time, line: line, index: index)
+            let built = makeEvents(type: type, object: object, time: time, line: line, index: index,
+                                   forSearch: forSearch)
             nonMetaCount += built.filter { $0.kind != .meta }.count
             // The preview pass discards `built`, but the "has commands" filter
             // falls back to this count for any session the user has not opened
@@ -185,12 +187,13 @@ enum KimiSessionParser {
                                    object: [String: Any],
                                    time: Date?,
                                    line: String,
-                                   index: Int) -> [SessionEvent] {
+                                   index: Int,
+                                   forSearch: Bool) -> [SessionEvent] {
         if type == "context.append_loop_event",
            let event = object["event"] as? [String: Any],
            let eventType = event["type"] as? String {
             return makeLoopEvents(eventType: eventType, event: event,
-                                  time: time, line: line, index: index)
+                                  time: time, line: line, index: index, forSearch: forSearch)
         }
 
         guard type == "context.append_message",
@@ -255,7 +258,8 @@ enum KimiSessionParser {
                                        event: [String: Any],
                                        time: Date?,
                                        line: String,
-                                       index: Int) -> [SessionEvent] {
+                                       index: Int,
+                                       forSearch: Bool) -> [SessionEvent] {
         switch eventType {
         case "content.part":
             // `think` parts are reasoning, not answer text — same rule the
@@ -273,7 +277,7 @@ enum KimiSessionParser {
         case "tool.call":
             return [SessionEvent(id: "\(index)-t", timestamp: time, kind: .tool_call, role: "assistant", text: nil,
                                  toolName: event["name"] as? String,
-                                 toolInput: jsonString(event["args"]),
+                                 toolInput: jsonString(event["args"], forSearch: forSearch),
                                  toolOutput: nil,
                                  toolCallID: ToolCallID.from(event["toolCallId"]),
                                  // Kimi writes a short summary of the call ("Searching **/*.swift") beside `display`.
@@ -309,12 +313,12 @@ enum KimiSessionParser {
 
     /// Serialises `tool.call` arguments, which arrive as a JSON object.
     /// Mirrors `PiSessionParser.jsonString`, including its large-payload guard.
-    private static func jsonString(_ value: Any?) -> String? {
+    private static func jsonString(_ value: Any?, forSearch: Bool = false) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
         guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
         let byteCount = text.utf8.count
-        if byteCount > 32_768 {
+        if !forSearch, byteCount > 32_768 {
             return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
         return text

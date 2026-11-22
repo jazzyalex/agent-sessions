@@ -60,6 +60,136 @@ final class ToolDetailRendererTests: XCTestCase {
                                   appearance: NSAppearance(named: .aqua)!)
     }
 
+    func testSyntaxProjectionKeepsNumberedAndClippedOutputMapsAndCopy() throws {
+        let content = (1...350).map { line in
+            line == 1 ? "/* 🌱 " + String(repeating: "comment ", count: 240) :
+            line == 349 ? "end */" : "let café = \(line)"
+        }.joined(separator: "\n")
+        var action = shell("nl -ba a.swift", output: content, shape: .lineNumbered(gutter: Array(1...350)))
+        let second = shell("echo plain", output: "let keepPlain = 1")
+        let original = invocation([action, second])
+        action.outputSyntax = ToolOutputSyntax(language: .swift)
+        let colored = invocation([action, second])
+        for folds: [Int: FoldState] in [[:], [0: FoldState(showAll: true)]] {
+            let expected = render(original, folds: folds)
+            let body = render(colored, folds: folds)
+            XCTAssertEqual(body.attributed.string, expected.attributed.string)
+            XCTAssertEqual(body.plainCopyText, expected.plainCopyText)
+            XCTAssertEqual(body.sourceMap.map(\.source), expected.sourceMap.map(\.source))
+            XCTAssertEqual(body.sourceMap.map(\.rendered), expected.sourceMap.map(\.rendered))
+            XCTAssertEqual(ToolCopyFormat.text(.output, invocation: colored, actionIndex: 0), content)
+            let snippet = try XCTUnwrap(body.syntaxSnippets.first)
+            var ranges: [(String, TranscriptSyntax.Kind)] = []
+            snippet.forEachVisibleToken(TranscriptSyntax.tokenize(snippet.key)) { range, kind in
+                XCTAssertNil(body.attributed.attribute(.toolGutter, at: range.location, effectiveRange: nil))
+                ranges.append(((body.attributed.string as NSString).substring(with: range), kind))
+            }
+            XCTAssertTrue(ranges.contains { $0.0.hasPrefix("/* 🌱") && $0.1 == .comment })
+            XCTAssertTrue(ranges.contains { $0.0 == "end */" && $0.1 == .comment })
+            XCTAssertFalse(ranges.contains { $0.0.contains("keepPlain") })
+        }
+    }
+
+    func testTaggedToolFencesPreserveOutputDelimitersAndSkipUnsupportedAndIncompleteFences() throws {
+        var action = shell("tool", output: "Tool result\n```swift\nlet café = 1\n```\n```text\nignored\n```\n~~~py\ndef unfinished():")
+        action.outputSyntax = ToolOutputSyntax(language: nil)
+        let body = render(invocation([action]))
+        XCTAssertEqual(body.syntaxSnippets.map(\.key.text), ["let café = 1\n"])
+        XCTAssertTrue(body.attributed.string.contains("```swift"))
+        XCTAssertTrue(body.attributed.string.contains("~~~py"))
+    }
+
+    func testInterpreterHeredocColorsCodeThroughInputFoldsAndKeepsCopyAndFindMaps() throws {
+        let source = (1...30).map { "print(\"café 🌱 \($0)\") # note" }.joined(separator: "\n")
+        let command = "git log --oneline; python3 - <<'PY'\n\(source)\nPY"
+        let call = built([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "Bash", toolInput: json(["command": command])),
+            F.block(.toolOut, id: "t1", text: "done", toolName: "Bash"),
+        ], source: .claude)
+        for state in [FoldState(), FoldState(commandShowAll: true)] {
+            let body = render(call, folds: [0: state])
+            let snippet = try XCTUnwrap(body.syntaxSnippets.first)
+            XCTAssertEqual(snippet.key.language, .python)
+            XCTAssertEqual(snippet.key.text, source)
+            var literals = 0
+            snippet.forEachVisibleToken(TranscriptSyntax.tokenize(snippet.key)) { range, kind in
+                XCTAssertNil(body.attributed.attribute(.toolGutter, at: range.location, effectiveRange: nil))
+                XCTAssertNil(body.attributed.attribute(.link, at: range.location, effectiveRange: nil))
+                XCTAssertTrue(body.sourceMap.contains { NSIntersectionRange($0.rendered, range) == range })
+                if kind == .literal { literals += 1 }
+            }
+            XCTAssertGreaterThan(literals, 0)
+            XCTAssertEqual(ToolCopyFormat.text(.command, invocation: call, actionIndex: 0), command)
+        }
+        XCTAssertEqual(ToolOutputSyntax.heredocLanguage(command: "bash <<'SH'"), .shell)
+        XCTAssertEqual(ToolOutputSyntax.heredocLanguage(command: "node - <<'JS'"), .javascript)
+        for command in ["cat <<'PY'", "echo \"x; python3 - <<'PY'\"", "python3 - <<'PY' | cat", "$PYTHON - <<'PY'"] {
+            XCTAssertNil(ToolOutputSyntax.heredocLanguage(command: command), command)
+        }
+    }
+
+    func testBlameSourceColorsOnlySourceRunsInMixedOutput() throws {
+        let lines = [
+            "1a7a90d6 2026-10-07 fix: metadata",
+            "1a7a90d6 (Alex 2026-10-07 14:13:51 -0700 26) public static",
+            "1a7a90d6 (Alex 2026-10-07 14:13:51 -0700 27) func café() -> String? {",
+            "1a7a90d6 (Alex 2026-10-07 14:13:51 -0700 28)     return nil",
+            "other command output",
+        ].joined(separator: "\n")
+        let command = "git log -5 --format='%h %ad %s' --date=short -- a.swift; git blame -L 26,28 a.swift; python3 - <<'PY'"
+        let hint = try XCTUnwrap(ToolOutputSyntax.blameRead(.string(command)))
+        var action = shell(command, output: lines)
+        action.outputSyntax = hint
+        let body = render(invocation([action]))
+        let snippet = try XCTUnwrap(body.syntaxSnippets.first)
+        XCTAssertEqual(snippet.key.text, "public static\nfunc café() -> String? {\n    return nil")
+        let prefix = (body.attributed.string as NSString).range(of: "1a7a90d6 (Alex")
+        XCTAssertEqual(body.attributed.attribute(.foregroundColor, at: prefix.location, effectiveRange: nil) as? NSColor,
+                       .secondaryLabelColor)
+        snippet.forEachVisibleToken(TranscriptSyntax.tokenize(snippet.key)) { range, _ in
+            let text = (body.attributed.string as NSString).substring(with: range)
+            XCTAssertFalse(text.contains("1a7a90d6"))
+            XCTAssertFalse(text.contains("2026-10-07"))
+        }
+        XCTAssertEqual(ToolCopyFormat.text(.output, invocation: invocation([action]), actionIndex: 0), lines)
+        for command in ["git blame a.swift; git blame b.py", "git blame $FILE.swift", "echo 'git blame a.swift'", "git blame a.swift | cat"] {
+            XCTAssertNil(ToolOutputSyntax.blameRead(.string(command)), command)
+        }
+    }
+
+    func testBlameDoesNotJoinCommentStateAcrossDifferentFiles() throws {
+        // These adjacent line numbers would otherwise be tokenized as one open
+        // comment, incorrectly hiding the declaration from the second file.
+        let output = [
+            "1a7a90d6 (Alex 2026-10-07 14:13:51 -0700 1) /* open comment",
+            "2b8b01e7 (Alex 2026-10-07 14:13:51 -0700 2) let value = 1",
+        ].joined(separator: "\n")
+        for command in [
+            "git blame -L 1,1 a.swift; git blame -L 2,2 b.swift",
+            "git blame -L 1,1 a.swift\ngit blame -L 2,2 b.swift",
+            "cd one; git blame -L 1,1 a.swift; cd ../two; git blame -L 2,2 a.swift",
+        ] {
+            let call = built([
+                F.block(.user, text: "go"),
+                F.block(.toolCall, id: "t1", toolName: "Bash", toolInput: json(["command": command])),
+                F.block(.toolOut, id: "t1", text: output, toolName: "Bash", sidecar: ToolSidecar(exitCode: 0)),
+            ], source: .claude)
+            let body = render(call)
+            XCTAssertTrue(body.syntaxSnippets.isEmpty, command)
+            XCTAssertEqual(ToolCopyFormat.text(.output, invocation: call, actionIndex: 0), output)
+        }
+
+        // Consecutive reads of the same literal file may retain lexical state.
+        let hint = try XCTUnwrap(ToolOutputSyntax.blameRead(.string(
+            "git blame -L 1,1 a.swift; git blame -L 2,2 'a.swift'")))
+        let snippet = try XCTUnwrap(hint.snippets(in: decoded(output)).first)
+        XCTAssertEqual(snippet.key.text, "/* open comment\nlet value = 1")
+        let tokens = TranscriptSyntax.tokenize(snippet.key)
+        XCTAssertEqual(tokens.count, 1)
+        XCTAssertEqual(tokens.first?.kind, .comment)
+    }
+
     private func numbered(_ range: ClosedRange<Int>, _ make: (Int) -> String = { "line \($0)" }) -> String {
         range.map(make).joined(separator: "\n")
     }

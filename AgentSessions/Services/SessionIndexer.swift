@@ -108,6 +108,7 @@ final class SessionIndexer: ObservableObject {
     // Lazy loading state
     @Published var isLoadingSession: Bool = false
     @Published var loadingSessionID: String? = nil
+    private var loadingSessionGeneration: UUID? = nil
 
     // Transcript cache for accurate search
     private let transcriptCache = TranscriptCache()
@@ -178,6 +179,11 @@ final class SessionIndexer: ObservableObject {
 
     // Track sessions currently being reloaded to prevent duplicate loads
     private var reloadingSessionIDs: Set<String> = []
+    private var reloadGenerationBySessionID: [String: UUID] = [:]
+    /// Identifies tail-first content published by the currently owning full reload.
+    /// The full stage may replace this provisional snapshot even though it differs
+    /// from the lightweight baseline captured before parsing began.
+    private var provisionalReloadGenerationBySessionID: [String: UUID] = [:]
     private let reloadLock = NSCondition()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
     private var appendCursorsBySessionID: [String: CodexAppendCursor] = [:]
@@ -490,10 +496,15 @@ final class SessionIndexer: ObservableObject {
             return
         }
         reloadingSessionIDs.insert(id)
+        let reloadGeneration = UUID()
         reloadLock.unlock()
 
+        let metrics = SearchResponsivenessMetrics.shared
+        let operation = metrics.operation(source: SessionSource.codex.rawValue, sessionID: id)
+        metrics.record(.parseRequested, operationID: operation, status: .accepted)
         let bgQueue = FeatureFlags.backgroundIngestQueue
         bgQueue.async {
+            metrics.record(.workerStarted, operationID: operation, status: .started)
             let loadingTimer: DispatchSourceTimer? = nil
             defer {
                 // Always clean up timer and reloading state
@@ -504,17 +515,25 @@ final class SessionIndexer: ObservableObject {
                 self.reloadLock.unlock()
             }
 
+            if reason == .focusedSessionMonitor, TranscriptScrollSignal.shared.isScrolling {
+                Task.detached(priority: .utility) { [weak self] in
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                    self?.reloadSession(id: id, force: force, reason: reason)
+                }
+                return
+            }
+
             guard let existing = self.allSessions.first(where: { $0.id == id }) else {
                 DBG("⏭️ Skip reload: session not found")
                 // Clear loading state on early exit
                 DispatchQueue.main.async {
-                    if self.loadingSessionID == id {
-                        self.isLoadingSession = false
-                        self.loadingSessionID = nil
-                    }
+                    self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
                 }
                 return
             }
+            let existingContentRevision = SearchIngestService.contentRevision(for: existing)
+            let existingEventCount = existing.events.count
 
             // A tail-only provisional session (Task 9e stage 0) must never look
             // "already loaded" here — the full parse must always follow it.
@@ -522,10 +541,7 @@ final class SessionIndexer: ObservableObject {
             if hasLoadedEvents && !force {
                 DBG("⏭️ Skip reload: session already loaded")
                 DispatchQueue.main.async {
-                    if self.loadingSessionID == id {
-                        self.isLoadingSession = false
-                        self.loadingSessionID = nil
-                    }
+                    self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
                 }
                 return
             }
@@ -546,16 +562,19 @@ final class SessionIndexer: ObservableObject {
                preParseStat == lastReloadStat {
                 DBG("⏭️ Skip reload: unchanged file for \(id.prefix(8)) reason=\(reason.rawValue)")
                 DispatchQueue.main.async {
-                    if self.loadingSessionID == id {
-                        self.isLoadingSession = false
-                        self.loadingSessionID = nil
-                    }
+                    self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
                 }
                 return
             }
 
+            self.reloadLock.withLock {
+                self.reloadGenerationBySessionID[id] = reloadGeneration
+                self.provisionalReloadGenerationBySessionID.removeValue(forKey: id)
+            }
+
             let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
-            let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
+            let shouldSurfaceLoadingState = reason != .focusedSessionMonitor
+                && (reason == .manualRefresh || !hasLoadedEvents)
             DBG("🔄 Reloading session: \(filename) force=\(force) reason=\(reason.rawValue)")
             DBG("  📂 Path: \(existing.filePath)")
 
@@ -563,8 +582,10 @@ final class SessionIndexer: ObservableObject {
                 // Surface loading only for first-time/manual loads; background monitor refreshes
                 // should not overlay already visible transcript content.
                 DispatchQueue.main.async {
+                    guard self.ownsReload(id: id, generation: reloadGeneration) else { return }
                     self.isLoadingSession = true
                     self.loadingSessionID = id
+                    self.loadingSessionGeneration = reloadGeneration
                 }
             }
 
@@ -579,7 +600,8 @@ final class SessionIndexer: ObservableObject {
             // (cwd/repoName/lightweightTitle/lightweightCommands) is carried
             // over from `existing` untouched, exactly as the final merge below
             // already does for those fields.
-            if FeatureFlags.transcriptTailFirstPaint,
+            if reason != .focusedSessionMonitor,
+               FeatureFlags.transcriptTailFirstPaint,
                !hasLoadedEvents,
                let existingSize = existing.fileSizeBytes,
                existingSize >= FeatureFlags.transcriptTailFirstPaintMinBytes,
@@ -587,22 +609,41 @@ final class SessionIndexer: ObservableObject {
                !CodexRolloutStorage.isStoredCompressed(url),
                let tailSession = self.parseFileTail(at: url, forcedID: id) {
                 DispatchQueue.main.async {
+                    guard self.ownsReload(id: id, generation: reloadGeneration) else { return }
                     guard let idx = self.allSessions.firstIndex(where: { $0.id == id }) else { return }
                     let current = self.allSessions[idx]
                     // Only publish the tail content if the real session still has
                     // no events (avoid clobbering a full parse that raced ahead,
                     // e.g. via a concurrent manual refresh).
-                    guard current.events.isEmpty else { return }
+                    guard current.events.isEmpty,
+                          current.filePath == existing.filePath,
+                          SearchIngestService.contentRevision(for: current) == existingContentRevision,
+                          current.events.count == existingEventCount else { return }
                     let published = Self.mergeReloadedSession(
                         current: current,
                         parsed: tailSession,
                         stage: .tail
                     )
+                    guard self.reloadLock.withLock({
+                        guard self.reloadGenerationBySessionID[id] == reloadGeneration else { return false }
+                        self.provisionalReloadGenerationBySessionID[id] = reloadGeneration
+                        return true
+                    }) else { return }
                     var updated = self.allSessions
                     updated[idx] = published
                     self.allSessions = updated
+                    metrics.record(.provisionalHydrationPublished, operationID: operation, context: .session(published), status: .published)
                     DBG("⚡ Tail-first paint published: \(filename) tailEvents=\(published.events.count)")
                 }
+            }
+
+            if reason == .focusedSessionMonitor, TranscriptScrollSignal.shared.isScrolling {
+                Task.detached(priority: .utility) { [weak self] in
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                    self?.reloadSession(id: id, force: force, reason: reason)
+                }
+                return
             }
 
             let startTime = Date()
@@ -663,24 +704,37 @@ final class SessionIndexer: ObservableObject {
                 let elapsed = Date().timeIntervalSince(startTime)
                 DBG("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(parsedSession.events.count)")
                 let postParseStat = Self.fileStat(for: url)
-                self.reloadLock.lock()
-                if let preParseStat {
-                    // Persist the pre-parse stat so follow-up monitor ticks can still
-                    // reload if the file advanced while parse was in flight.
-                    self.lastFullReloadFileStatsBySessionID[id] = preParseStat
-                } else {
-                    self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
-                }
-                self.reloadLock.unlock()
                 if preParseStat != postParseStat {
                     DBG("  ℹ️ File changed during reload; next monitor tick will perform a follow-up parse")
                 }
 
                 let cursorToPublish = nextAppendCursor
-                DispatchQueue.main.async {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if reason == .focusedSessionMonitor {
+                        while TranscriptScrollSignal.shared.isScrolling {
+                            await TranscriptScrollSignal.shared.waitUntilQuiet()
+                            guard !Task.isCancelled else { return }
+                        }
+                    }
+                    let ownsReload = self.reloadLock.withLock {
+                        self.reloadGenerationBySessionID[id] == reloadGeneration
+                    }
+                    guard ownsReload else { return }
                     // Replace in allSessions
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                         let current = self.allSessions[idx]
+                        let ownsProvisionalTail = self.reloadLock.withLock {
+                            self.provisionalReloadGenerationBySessionID[id] == reloadGeneration
+                        }
+                        let baselineIsCurrent = SearchIngestService.contentRevision(for: current) == existingContentRevision
+                            && current.events.count == existingEventCount
+                        guard current.filePath == existing.filePath,
+                              baselineIsCurrent || (ownsProvisionalTail && current.isPartiallyHydrated) else {
+                            self.clearProvisionalReloadIfOwned(id: id, generation: reloadGeneration)
+                            self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
+                            return
+                        }
                         let merged = Self.mergeReloadedSession(
                             current: current,
                             parsed: parsedSession,
@@ -689,10 +743,20 @@ final class SessionIndexer: ObservableObject {
                         var updated = self.allSessions
                         updated[idx] = merged
                         self.allSessions = updated
+                        self.clearProvisionalReloadIfOwned(id: id, generation: reloadGeneration)
+                        metrics.record(.fullHydrationPublished, operationID: operation, context: .session(merged), status: .published)
                         // Advance parser state only after the matching event snapshot is
                         // visible. Advancing it on the worker first could let a second
                         // monitor reload combine a new cursor with stale `allSessions`.
                         self.reloadLock.lock()
+                        if let preParseStat {
+                            // Commit the scan baseline with the snapshot publication.
+                            // If the file advanced during parsing, the next monitor tick
+                            // still observes the newer stat and performs a follow-up.
+                            self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+                        } else {
+                            self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
+                        }
                         if let cursorToPublish {
                             self.appendCursorsBySessionID[id] = cursorToPublish
                         } else {
@@ -713,10 +777,7 @@ final class SessionIndexer: ObservableObject {
                         if shouldSurfaceLoadingState {
                             // Clear loading state AFTER updating allSessions, with small delay for UI to render.
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                if self.loadingSessionID == id {
-                                    self.isLoadingSession = false
-                                    self.loadingSessionID = nil
-                                }
+                                self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
                             }
                         }
                     } else {
@@ -725,10 +786,8 @@ final class SessionIndexer: ObservableObject {
                         self.appendCursorsBySessionID.removeValue(forKey: id)
                         self.reloadLock.unlock()
                         // Clear loading state on failure
-                        if self.loadingSessionID == id {
-                            self.isLoadingSession = false
-                            self.loadingSessionID = nil
-                        }
+                        self.clearProvisionalReloadIfOwned(id: id, generation: reloadGeneration)
+                        self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
                     }
                 }
             } else {
@@ -745,13 +804,32 @@ final class SessionIndexer: ObservableObject {
                 self.reloadLock.unlock()
                 // Clear loading state on failure
                 DispatchQueue.main.async {
-                    if self.loadingSessionID == id {
-                        self.isLoadingSession = false
-                        self.loadingSessionID = nil
-                    }
+                    self.clearProvisionalReloadIfOwned(id: id, generation: reloadGeneration)
+                    self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
                 }
             }
         }
+    }
+
+    private func ownsReload(id: String, generation: UUID) -> Bool {
+        reloadLock.withLock { reloadGenerationBySessionID[id] == generation }
+    }
+
+    private func clearProvisionalReloadIfOwned(id: String, generation: UUID) {
+        reloadLock.withLock {
+            if provisionalReloadGenerationBySessionID[id] == generation {
+                provisionalReloadGenerationBySessionID.removeValue(forKey: id)
+            }
+        }
+    }
+
+    /// Called only from the main queue. A superseded reload must not dismiss the
+    /// loading overlay owned by a newer generation of the same session.
+    private func clearLoadingStateIfOwned(id: String, generation: UUID) {
+        guard loadingSessionID == id, loadingSessionGeneration == generation else { return }
+        isLoadingSession = false
+        loadingSessionID = nil
+        loadingSessionGeneration = nil
     }
 
     private func enqueueTranscriptCacheBuild(session: Session,
@@ -984,6 +1062,10 @@ final class SessionIndexer: ObservableObject {
         let fm = FileManager.default
         let task = Task.detached(priority: .utility) { [weak self, token, root, mode, trigger, executionProfile] in
             guard let self else { return }
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
 
             // Fast path: hydrate from SQLite index if available.
             var indexed: [Session] = []
@@ -1007,6 +1089,11 @@ final class SessionIndexer: ObservableObject {
 
 	            await self.seedKnownFileStatsIfNeeded()
 
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
+
             // Even if we have indexed sessions, scan for NEW/CHANGED files and parse them.
             // If DB hydration succeeded, publish those sessions immediately so the UI is usable
             // while we continue scanning incrementally in the background.
@@ -1026,6 +1113,7 @@ final class SessionIndexer: ObservableObject {
                 let hydratedSnapshot = hydratedSessions
                 await MainActor.run {
                     guard self.refreshToken == token else { return }
+                    guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else { return }
                     self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: hydratedSnapshot, source: .codex)
                     self.scheduleCodexInternalSessionIDBackfillIfNeeded(in: self.allSessions)
                     self.totalFiles = existingSessions.count
@@ -1047,16 +1135,29 @@ final class SessionIndexer: ObservableObject {
             // Check if directory exists and is accessible
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-                await MainActor.run {
-                    guard self.refreshToken == token else { return }
-                    self.isIndexing = false
-                    self.indexingError = "Sessions directory not found: \(root.path)"
-                    self.progressText = "Error"
-                    self.launchPhase = .error
+                while !Task.isCancelled {
+                    if trigger == .monitor {
+                        await TranscriptScrollSignal.shared.waitUntilQuiet()
+                        guard !Task.isCancelled else { return }
+                    }
+                    let committed = await MainActor.run { () -> Bool? in
+                        guard self.refreshToken == token else { return nil }
+                        guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else { return false }
+                        self.isIndexing = false
+                        self.indexingError = "Sessions directory not found: \(root.path)"
+                        self.progressText = "Error"
+                        self.launchPhase = .error
+                        return true
+                    }
+                    if committed != false { return }
                 }
                 return
             }
 
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
             let discovery = CodexSessionDiscovery(customRoot: self.sessionsRootOverride.isEmpty ? nil : self.sessionsRootOverride)
             let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual || trigger == .launch) ? .full : .recent
             let previousStats = self.knownFileStatsSnapshot()
@@ -1202,6 +1303,8 @@ final class SessionIndexer: ObservableObject {
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .codex)
+            guard !Task.isCancelled,
+                  await MainActor.run(body: { self.refreshToken == token }) else { return }
             self.applyKnownFileStatsDelta(scope: deltaScope, currentStatsByPath: currentStatsByPath, removedPaths: removedPaths)
             await self.persistKnownFileStats()
 
@@ -1222,8 +1325,14 @@ final class SessionIndexer: ObservableObject {
                     // Non-fatal: hydration gap will persist until next successful write.
                 }
             }
-            await MainActor.run {
-                guard self.refreshToken == token else { return }
+            while !Task.isCancelled {
+                if trigger == .monitor {
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                }
+                let committed = await MainActor.run { () -> Bool? in
+                guard self.refreshToken == token else { return nil }
+                guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else { return false }
                 let priorSideChats = self.allSessions.filter(\.isSideChat)
                 let mergedWithPreviousSideChats = Self.sortedByModifiedDescending(
                     Self.appendingCodexSideChats(priorSideChats, to: mergedWithArchives)
@@ -1345,6 +1454,9 @@ final class SessionIndexer: ObservableObject {
                         DBG("   hideZeroMessageSessionsPref=\(self.hideZeroMessageSessionsPref)")
                     }
                 }
+                return true
+                }
+                if committed != false { return }
             }
         }
         refreshTask = task
@@ -1366,6 +1478,26 @@ final class SessionIndexer: ObservableObject {
         progressText = "Ready"
         if launchPhase != .error {
             launchPhase = .ready
+        }
+    }
+
+    func cancelCoreRefreshAndWait() async {
+        let task = await MainActor.run { () -> Task<Void, Never>? in
+            self.refreshToken = UUID()
+            let task = self.refreshTask
+            task?.cancel()
+            self.refreshTask = nil
+            self.sideChatRefreshTask?.cancel()
+            self.sideChatRefreshTask = nil
+            self.transcriptPrewarmTask?.cancel()
+            self.transcriptPrewarmTask = nil
+            return task
+        }
+        await task?.value
+        await MainActor.run {
+            self.isIndexing = false
+            self.isProcessingTranscripts = false
+            if self.launchPhase != .error { self.launchPhase = .ready }
         }
     }
 
@@ -2339,6 +2471,18 @@ final class SessionIndexer: ObservableObject {
     }
 
     private func parseFileFullResult(at url: URL, forcedID: String? = nil) -> FullParseResult? {
+        let metrics = SearchResponsivenessMetrics.shared
+        let span = metrics.beginSpan(.fullReadDecode,
+            operationID: metrics.operation(source: SessionSource.codex.rawValue, sessionID: forcedID ?? Self.hash(path: url.path)))
+        let result = parseFileFullResultMeasuredBody(at: url, forcedID: forcedID)
+        if let span {
+            if let result { metrics.end(span, status: result.readSucceeded ? .succeeded : .partial) }
+            else { metrics.fail(span, code: .readError) }
+        }
+        return result
+    }
+
+    private func parseFileFullResultMeasuredBody(at url: URL, forcedID: String?) -> FullParseResult? {
         SessionInfoMetrics.shared.beginTranscript(path: url.path)
         defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
 #if DEBUG
@@ -2686,6 +2830,10 @@ final class SessionIndexer: ObservableObject {
                         forcedID: String? = nil,
                         maxBytes: Int = 2_097_152,
                         maxLines: Int = 400) -> Session? {
+        let metrics = SearchResponsivenessMetrics.shared
+        let span = metrics.beginSpan(.tailRead, operationID: metrics.operation(source: SessionSource.codex.rawValue,
+            sessionID: forcedID ?? Self.hash(path: url.path)))
+        defer { if let span { metrics.end(span) } }
         let _span = Perf.begin("transcriptParseTail", thresholdMs: 50, "path=\(url.lastPathComponent)")
         defer { Perf.end(_span) }
 
@@ -3081,6 +3229,14 @@ final class SessionIndexer: ObservableObject {
     }
 
     static func parseLine(_ line: String, eventID: String) -> (SessionEvent, String?) {
+        let object = line.data(using: .utf8).flatMap {
+            (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+        }
+        return parseLine(line, eventID: eventID, parsedObject: object)
+    }
+
+    static func parseLine(_ line: String, eventID: String,
+                          parsedObject: [String: Any]?) -> (SessionEvent, String?) {
         var timestamp: Date? = nil
         var role: String? = nil
         var type: String? = nil
@@ -3099,8 +3255,7 @@ final class SessionIndexer: ObservableObject {
         var messageDisplayText: String?
         var messageHasEncryptedContent: Bool?
 
-        if let data = line.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        if let obj = parsedObject {
 
             // timestamp could be number or string, and under various keys
             let tsKeys = [

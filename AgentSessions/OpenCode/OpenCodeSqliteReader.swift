@@ -2248,3 +2248,19 @@ extension OpenCodeSqliteReader {
         return scan
     }
 }
+
+// Bounded search adapters reuse the transcript's semantic conversion without collecting rows.
+extension OpenCodeSqliteReader {
+    static func searchUsesV2(_ db: OpaquePointer, sessionID: String) -> Bool {
+        v2SessionExists(db, sessionID: sessionID)
+    }
+    static func searchMessage(_ object: [String: Any]) -> OpenCodeSessionParser.MessageJSON? {
+        decodeMessageJSON(object)
+    }
+    static func searchFallbackEvents(_ message: OpenCodeSessionParser.MessageJSON, id: String, time: Date?) -> [SessionEvent] {
+        var events: [SessionEvent] = [], commands = 0
+        appendMessageEvents(msgID: id, timestamp: time, rawJSON: "", message: message,
+                            partDicts: [], events: &events, commandCount: &commands)
+        return events
+    }
+}

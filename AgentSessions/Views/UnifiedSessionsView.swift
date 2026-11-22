@@ -168,20 +168,6 @@ enum UnifiedTableIdentityPolicy {
 }
 
 enum UnifiedHierarchyCommandPolicy {
-    static func collapsedParentsAfterCollapseAll(
-        existing: Set<String>,
-        visibleParentIDs: Set<String>
-    ) -> Set<String> {
-        existing.union(visibleParentIDs)
-    }
-
-    static func collapsedParentsAfterExpandAll(
-        existing: Set<String>,
-        visibleParentIDs: Set<String>
-    ) -> Set<String> {
-        existing.subtracting(visibleParentIDs)
-    }
-
     static func parentIDForSelectedHierarchyChild(
         rowIDs: [String],
         rowMeta: [String: SubagentRowMeta],
@@ -448,6 +434,7 @@ struct UnifiedSessionsView: View {
         @State private var cachedVisibleRowIDs: Set<String> = []
         @State private var cachedTotalSessionCount: Int = 0
 	    @State private var collapsedParents: Set<String> = []
+    @State private var groupFolding: SessionGroupFolding = .standard
 	    @State private var hasLoadedPersistedCollapsedParents: Bool = false
         @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
         @State private var sideChatParentContextByID: [String: String] = [:]
@@ -481,10 +468,6 @@ struct UnifiedSessionsView: View {
     @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
     @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
-    /// macOS 26 toolbar anchoring (issue #92). Held in `@State`, not `@StateObject`,
-    /// on purpose: this view must not observe it, or every divider drag would
-    /// re-evaluate the whole window body. Only `SessionListToolbarGroup` observes it.
-    @State private var sessionListToolbarAnchor = SessionListToolbarAnchor()
     @AppStorage(PreferencesKey.Unified.collapsedHierarchyParents) private var collapsedHierarchyParentsRaw: String = ""
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -522,6 +505,7 @@ struct UnifiedSessionsView: View {
     @State private var hasEverHadSessions: Bool = false
     @State private var hasUserManuallySelected: Bool = false
     @State private var showAgentEnablementNotice: Bool = false
+    @State private var hiddenProjectNotice: ProjectSelection?
     @State private var isWindowKey: Bool = false
     @State private var activeConsumerID = UUID()
     @State private var cachedFallbackPresenceBySessionKey: [String: CodexActivePresence] = [:]
@@ -538,6 +522,7 @@ struct UnifiedSessionsView: View {
     @StateObject private var datasetSearchRestartCoalescer = SearchDatasetRestartCoalescer()
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
     @StateObject private var searchState = UnifiedSearchState()
+    @StateObject private var windowCommands: SessionWindowCommands
     // Debounced selection-propagation task (see handleSelectionChange). Key-repeat
     // scrubbing fires selection changes every ~30-90ms; without this, each one used
     // to schedule transcript teardown/reload on the next runloop turn, which always
@@ -567,6 +552,7 @@ struct UnifiedSessionsView: View {
          layoutMode: LayoutMode,
          onToggleLayout: @escaping () -> Void) {
         self.unified = unified
+        _windowCommands = StateObject(wrappedValue: SessionWindowCommands(archiveIndexer: unified))
         self.catalog = catalog
         self.antigravityIndexer = catalog.indexer(.antigravity, as: AntigravitySessionIndexer.self)
         self.analyticsReady = analyticsReady
@@ -603,7 +589,11 @@ struct UnifiedSessionsView: View {
 			rootContent
 				.preferredColorScheme(preferredColorScheme)
 				.toolbar { toolbarContent }
-				.modifier(PaneAnchoredToolbarTitle())
+                .focusedSceneObject(windowCommands)
+                .onChange(of: windowCommandAvailability, initial: true) { _, availability in
+                    updateWindowCommands(availability)
+                }
+                .onDisappear { windowCommands.clear() }
 				.overlay(alignment: .topTrailing) { topTrailingNotices }
 				.background(
 					WindowKeyObserver(
@@ -663,55 +653,22 @@ struct UnifiedSessionsView: View {
 				handleSelectionChange(id)
 			}
 
-        let afterCodex = afterSelection
-            .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
-        let afterArchived = afterCodex
+        let afterSearchScopes = afterSelection
             .onChange(of: unified.showArchivedCodexDesktopOnly) { _, _ in restartSearchForActiveQuery() }
             .onChange(of: unified.showArchivedClaudeDesktopOnly) { _, _ in restartSearchForActiveQuery() }
-        let afterClaude = afterArchived
-            .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
-		let afterAntigravity = afterClaude
-			.onChange(of: unified.includeAntigravity) { _, _ in restartSearchIfRunning() }
-		let afterOpenCode = afterAntigravity
-			.onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
-		let afterCopilot = afterOpenCode
-			.onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
-		let afterDroid = afterCopilot
-			.onChange(of: unified.includeDroid) { _, _ in restartSearchIfRunning() }
-
-		let afterOpenClaw = afterDroid
-			.onChange(of: unified.includeOpenClaw) { _, _ in restartSearchIfRunning() }
-
-		let afterCursor = afterOpenClaw
-			.onChange(of: unified.includeCursor) { _, _ in restartSearchIfRunning() }
-
-        let afterPi = afterCursor
-            .onChange(of: unified.includePi) { _, _ in restartSearchIfRunning() }
-
-        let afterKimi = afterPi
-            .onChange(of: unified.includeKimi) { _, _ in restartSearchIfRunning() }
-        let afterGrok = afterKimi
-            .onChange(of: unified.includeGrok) { _, _ in restartSearchIfRunning() }
-        let afterQwen = afterGrok
-            .onChange(of: unified.includeQwen) { _, _ in restartSearchIfRunning() }
-        let afterDevin = afterQwen
-            .onChange(of: unified.includeDevin) { _, _ in restartSearchIfRunning() }
-
-        let afterFx = afterDevin
-            .onChange(of: unified.includeFx) { _, _ in restartSearchIfRunning() }
-        let afterCline = afterFx
-            .onChange(of: unified.includeCline) { _, _ in restartSearchIfRunning() }
-        let afterDeepSeekHarness = afterCline
-            .onChange(of: unified.includeDeepSeekHarness) { _, _ in restartSearchIfRunning() }
             .onChange(of: unified.searchDatasetMembershipRevision) { _, _ in
                 restartSearchForDatasetMembershipChangeIfNeeded()
             }
 
-        let afterActiveOnly = afterDeepSeekHarness
+        let afterActiveOnly = afterSearchScopes
+            .onChange(of: unified.allowedSearchSources()) { _, _ in restartSearchForActiveQuery() }
+            .onChange(of: unified.showFavoritesOnly) { _, _ in restartSearchForActiveQuery() }
+            .onChange(of: unified.hasCommandsOnly) { _, _ in restartSearchForActiveQuery() }
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
                 }
+                restartSearchForActiveQuery()
                 updateCachedRows()
                 ensureDefaultSelectionIfNeeded()
                 refreshSelectionSourceFromCachedRows()
@@ -730,6 +687,7 @@ struct UnifiedSessionsView: View {
                 if !newValue { persistCollapsedParents() }
                 updateCachedRows()
             }
+            .onChange(of: groupFolding) { _, _ in updateCachedRows() }
             .onChange(of: collapsedParents) { _, _ in
                 persistCollapsedParents()
                 updateCachedRows()
@@ -761,6 +719,12 @@ struct UnifiedSessionsView: View {
 			}
 
 		let afterSessions = afterAgents
+            .onChange(of: unified.hiddenProjectRoots) { _, roots in
+                if let project = hiddenProjectNotice, !roots.contains(project.identity.canonicalRootPath) {
+                    hiddenProjectNotice = nil
+                }
+                restartSearchForActiveQuery()
+            }
 			.onReceive(unified.$sessions) { sessions in
 				if !sessions.isEmpty {
 					hasEverHadSessions = true
@@ -820,18 +784,8 @@ struct UnifiedSessionsView: View {
 							showImagesForSelectedSession(showNoSelectionAlert: true)
 						}
 
-                    let afterCollapseAllGroups = afterShowImages
-                        .onReceive(NotificationCenter.default.publisher(for: .collapseAllUnifiedSessionGroupsFromMenu)) { _ in
-                            collapseAllHierarchyParents()
-                        }
-
-                    let afterExpandAllGroups = afterCollapseAllGroups
-                        .onReceive(NotificationCenter.default.publisher(for: .expandAllUnifiedSessionGroupsFromMenu)) { _ in
-                            expandAllHierarchyParents()
-                        }
-
-					let afterShowImagesForInlineImage = afterExpandAllGroups
-							.onReceive(NotificationCenter.default.publisher(for: .showImagesForInlineImage)) { n in
+                    let afterShowImagesForInlineImage = afterShowImages
+                            .onReceive(NotificationCenter.default.publisher(for: .showImagesForInlineImage)) { n in
 								guard let id = n.object as? String else { return }
 							let requestedItemID = n.userInfo?["selectedItemID"] as? String
 
@@ -900,6 +854,24 @@ struct UnifiedSessionsView: View {
 
 	private var topTrailingNotices: some View {
 		VStack(alignment: .trailing, spacing: 8) {
+            if let project = hiddenProjectNotice {
+                HStack(spacing: LayoutTokens.sm) {
+                    Text("Hidden project: \(project.displayName)")
+                        .font(.footnote)
+                    Button("Undo") {
+                        HiddenProjects.unhide(project.identity.canonicalRootPath)
+                        hiddenProjectNotice = nil
+                    }
+                    .controlSize(.small)
+                }
+                .padding(LayoutTokens.sm)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: LayoutTokens.md))
+                .task(id: project) {
+                    try? await Task.sleep(for: .seconds(8))
+                    guard !Task.isCancelled else { return }
+                    hiddenProjectNotice = nil
+                }
+            }
 			if showAgentEnablementNotice {
 				Text("Showing active agents only")
 					.font(.footnote)
@@ -959,19 +931,24 @@ struct UnifiedSessionsView: View {
 	        }
 	    }
 
-	    /// Session-list pane with the onboarding top-card slot (What's New / feedback)
-	    /// mounted above the table, outside its scrolling content. A rendered card
-	    /// is therefore actually on screen and may safely count as an impression.
-	    /// Renders nothing extra when there's nothing to show.
-	    private var listPaneWithTopSlot: some View {
-	        VStack(spacing: 0) {
-	            OnboardingListTopSlot(
-	                coordinator: onboardingCoordinator,
-	                providers: quotaMeterProviders,
-	                audienceReady: topSlotAudienceReady
-	            )
-	            listPane
-	        }
+    /// List controls and onboarding sit above the scrolling table, inside the list pane.
+    private var listPaneWithTopSlot: some View {
+        VStack(spacing: 0) {
+            SessionListHeader(
+                unified: unified, search: searchCoordinator, focus: focusCoordinator,
+                searchState: searchState, filters: sessionListFilterModel, scope: sessionScope,
+                runSearch: { runSessionSearch(deepScan: $0) }
+            )
+            .background(Self.listPaneBackground)
+            .overlay(alignment: .bottom) { paneHairline(.horizontal) }
+
+            OnboardingListTopSlot(
+                coordinator: onboardingCoordinator,
+                providers: quotaMeterProviders,
+                audienceReady: topSlotAudienceReady
+            )
+            listPane
+        }
 	        .onboardingSheets(
 	            coordinator: onboardingCoordinator,
 	            quotaMeterProviders: quotaMeterProviders
@@ -1028,7 +1005,6 @@ struct UnifiedSessionsView: View {
 	                    .padding(.trailing, Self.paneGutter)
 	                    .background(Self.listPaneBackground)
 	                    .overlay(alignment: .trailing) { paneHairline(.vertical) }
-	                    .modifier(ListPaneDividerReporter(anchor: sessionListToolbarAnchor))
 	                transcriptPane
 	                    .frame(minWidth: 450)
 	                    .padding(.leading, Self.paneGutter)
@@ -1120,14 +1096,16 @@ struct UnifiedSessionsView: View {
                     antigravityIndexer: antigravityIndexer,
                     rowMeta: hierarchyRowMeta[s.id],
                     sideChatParentContext: sideChatParentContextByID[s.id],
-                    isExpanded: !collapsedParents.contains(s.id),
+                    isExpanded: !groupFolding.isCollapsed(s.id, standard: collapsedParents),
                     onToggleExpand: { id in
-                            if collapsedParents.contains(id) {
-                                collapsedParents.remove(id)
-                            } else {
-                                collapsedParents.insert(id)
-                            }
+                        let wasCollapsed = groupFolding.isCollapsed(id, standard: collapsedParents)
+                        groupFolding = .standard
+                        if wasCollapsed {
+                            collapsedParents.remove(id)
+                        } else {
+                            collapsedParents.insert(id)
                         }
+                    }
                     )
                     .equatable()
 	                    .contentShape(Rectangle())
@@ -1276,6 +1254,10 @@ struct UnifiedSessionsView: View {
                     Button("Filter by Project: \(selection.displayName)") { applyProjectSelection(selection) }
                         .keyboardShortcut("p", modifiers: [.command, .option])
                         .help("Show only sessions from \(selection.displayName) (⌥⌘P)")
+                    if !unified.hiddenProjectRoots.contains(selection.identity.canonicalRootPath) {
+                        Button("Hide Project: \(selection.displayName)") { hideProject(selection) }
+                            .help("Hide this project's sessions from the list and search")
+                    }
                 }
                 if unified.isArchivedClaudeDesktop(s) {
                     let canRestore = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore)
@@ -1483,7 +1465,7 @@ struct UnifiedSessionsView: View {
 	            indexingError: unified.indexingError,
 	            isDatasetChurning: isDatasetChurning,
 	            isSearchRunning: searchCoordinator.isRunning,
-	            isFiltered: footerIsFiltered
+                isFiltered: hasSessionSearchQuery || !sessionScope.isEmpty
 	        )
 	    }
 
@@ -1527,9 +1509,10 @@ struct UnifiedSessionsView: View {
 	                    .foregroundStyle(.secondary)
 	                Text("No matching sessions")
 	                    .font(.headline)
-	                Text("Try clearing the current filters.")
-	                    .font(.callout)
-	                    .foregroundStyle(.secondary)
+                    SessionScopeMenu(scope: sessionScope)
+                    if footerIsFiltered {
+                        Button("Clear filters", action: clearListFilters)
+                    }
 	            case .noSessions:
 	                Image(systemName: "text.bubble")
 	                    .font(.title2)
@@ -1539,6 +1522,7 @@ struct UnifiedSessionsView: View {
 	                Text("Sessions will appear here after an agent records one.")
 	                    .font(.callout)
 	                    .foregroundStyle(.secondary)
+                    Button("Refresh") { unified.refresh() }
 	            }
         }
 	        .multilineTextAlignment(.center)
@@ -1587,19 +1571,80 @@ struct UnifiedSessionsView: View {
 	    /// are set produces a control that changes nothing when pressed. This set
 	    /// must stay in step with `clearListFilters()`.
     private var footerIsFiltered: Bool {
-        unified.showFavoritesOnly
-            || showActiveSessionsOnly
-            || unified.projectSelection != nil
-            || !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        hasSessionSearchQuery || !sessionScope.recoveries.isEmpty
+    }
+
+    private var hasSessionSearchQuery: Bool {
+        !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var sessionScope: SessionScope {
+        var scope = SessionScope()
+        scope.hiddenRoots = unified.hiddenProjectRoots
+        if unified.showFavoritesOnly {
+            scope.add(String(localized: "Saved Only"), String(localized: "Show unsaved sessions")) {
+                unified.showFavoritesOnly = false
+            }
+        }
+        if showActiveSessionsOnly {
+            scope.add(String(localized: "Live sessions only"), String(localized: "Show inactive sessions")) {
+                showActiveSessionsOnly = false
+            }
+        }
+        if let project = unified.projectSelection {
+            let label = project.disambiguationPath.map { "\(project.displayName) (\($0))" } ?? project.displayName
+            scope.add(label, String(localized: "Show all projects")) { applyProjectSelection(nil) }
+        }
+        if unified.showArchivedCodexDesktopOnly, unified.isSourceActive(.codex) {
+            scope.add(String(localized: "Codex archived only"), String(localized: "Include non-archived Codex sessions")) {
+                unified.showArchivedCodexDesktopOnly = false
+            }
+        }
+        if unified.showArchivedClaudeDesktopOnly, unified.isSourceActive(.claude) {
+            scope.add(String(localized: "Claude archived only"), String(localized: "Include non-archived Claude sessions")) {
+                unified.showArchivedClaudeDesktopOnly = false
+            }
+        }
+        if unified.hasCommandsOnly {
+            scope.add(String(localized: "Commands only"), String(localized: "Include sessions without commands")) {
+                unified.hasCommandsOnly = false
+            }
+        }
+        if unified.dateFrom != nil || unified.dateTo != nil {
+            scope.add(String(localized: "Date range"), String(localized: "Clear date range")) {
+                unified.dateFrom = nil
+                unified.dateTo = nil
+                restartSearchForActiveQuery()
+            }
+        }
+        if let model = unified.selectedModel {
+            scope.add(model, String(localized: "Show all models")) {
+                unified.selectedModel = nil
+                restartSearchForActiveQuery()
+            }
+        }
+        if unified.selectedKinds != Set(SessionEventKind.allCases) {
+            scope.add(String(localized: "Event types"), String(localized: "Show all event types")) {
+                unified.selectedKinds = Set(SessionEventKind.allCases)
+                restartSearchForActiveQuery()
+            }
+        }
+        for source in SessionSource.allCases where unified.isAgentEnabled(source) && !unified.isSourceActive(source) {
+            scope.add(String(localized: "\(source.displayName) hidden"), String(localized: "Show \(source.displayName)")) {
+                includeBinding(for: source).wrappedValue = true
+            }
+        }
+        return scope
     }
 
     private func clearListFilters() {
-        unified.showFavoritesOnly = false
-        showActiveSessionsOnly = false
-        unified.projectSelection = nil
         unified.queryDraft = ""
+        unified.query = ""
+        for recovery in sessionScope.recoveries {
+            recovery.apply()
+        }
         unified.recomputeNow()
-        searchCoordinator.cancel()
+        searchCoordinator.clear()
     }
 
 	    /// "3,775 sessions" when nothing is filtered; "3,625 of 3,775 shown" when
@@ -2019,72 +2064,18 @@ struct UnifiedSessionsView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         if #available(macOS 26.0, *) {
-            paneAnchoredToolbarContent
+            ToolbarItemGroup(placement: .primaryAction) {
+                sessionActionControls
+            }
+            .sharedBackgroundVisibility(.hidden)
         } else {
-            classicToolbarContent
-        }
-    }
-
-    /// macOS 15 and earlier: the established layout, kept as-is. Filters sit in the
-    /// centered principal slot, search and actions trail.
-    @ToolbarContentBuilder
-    private var classicToolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
-            HStack(spacing: 12) {
-                sessionFilterControls
-            }
-            .controlSize(.small)
-            .tint(UnifiedSessionsStyle.selectionAccent)
-        }
-        ToolbarItem(placement: .automatic) {
-            sessionSearchField
-                .frame(maxWidth: 520)
-        }
-        if unified.projectSelection != nil {
-            ToolbarItem(placement: .automatic) {
-                projectFilterBadge
+            ToolbarItemGroup(placement: .automatic) {
+                sessionActionControls
             }
         }
-        ToolbarItemGroup(placement: .automatic) {
-            sessionActionControls
-        }
     }
 
-    /// macOS 26 (issue #92): Tahoe draws a glass capsule around each toolbar group
-    /// and the window-centered principal slot straddled the list/transcript divider,
-    /// so nothing read as belonging to either pane. Here every control that scopes
-    /// the session list (filters, search, project badge) is one leading group whose
-    /// width ends at the divider, and the selected-session actions trail over the
-    /// transcript. Glass is hidden so both groups keep the Sequoia look.
-    @available(macOS 26.0, *)
-    @ToolbarContentBuilder
-    private var paneAnchoredToolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            SessionListToolbarGroup(anchor: sessionListToolbarAnchor) { width in
-                SessionListToolbarRow(unified: unified, search: searchCoordinator, focus: focusCoordinator,
-                                      searchState: searchState, filters: sessionListFilterModel,
-                                      fillsWidth: width != nil)
-            }
-        }
-        .sharedBackgroundVisibility(.hidden)
-
-        ToolbarSpacer(.flexible)
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            sessionActionControls
-        }
-        .sharedBackgroundVisibility(.hidden)
-    }
-
-    private var sessionSearchField: some View {
-        UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
-    }
-
-    private var projectFilterBadge: some View {
-        UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
-    }
-
-    /// Everything the macOS 26 session-list row needs from this view's state.
+    /// Session-list controls shared by all split layouts.
     private var sessionListFilterModel: SessionListFilterModel {
         var pinned: [AgentToolbarSpec] = []
         if codexAgentEnabled {
@@ -2100,82 +2091,13 @@ struct UnifiedSessionsView: View {
             liveFeatureEnabled: liveSessionsFeatureEnabled,
             hierarchy: $showSubagentHierarchy,
             isHierarchyBrowsing: isHierarchyBrowsing,
-            canCollapseAll: isHierarchyBrowsing && !currentExpandableParentIDs.isEmpty,
-            canExpandAll: isHierarchyBrowsing && !collapsedParents.isEmpty,
-            collapseAll: { collapseAllHierarchyParents() },
-            expandAll: { expandAllHierarchyParents() },
+            folding: foldingBinding,
+            hasGroups: !currentExpandableParentIDs.isEmpty,
             pinnedAgents: pinned,
             otherAgents: enabledOtherAgentSpecs,
             isMonochrome: stripMonochrome,
-            clearProject: { applyProjectSelection(nil) }
+            hiddenProjectRoots: unified.hiddenProjectRoots
         )
-    }
-
-    @ViewBuilder
-    private var sessionFilterControls: some View {
-                ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
-                    .disabled(!liveSessionsFeatureEnabled)
-                    .help(
-                        liveSessionsFeatureEnabled
-                            ? "Show only live sessions in the list (Codex, Claude)"
-                            : "Enable live session detection (Beta) in Settings → Quota Meter."
-                    )
-
-                Button(action: { showSubagentHierarchy.toggle() }) {
-                    Image(systemName: showSubagentHierarchy ? "list.bullet.indent" : "list.bullet")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(showSubagentHierarchy ? Color.accentColor : .secondary)
-                }
-                .buttonStyle(.plain)
-                .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
-                .keyboardShortcut("h", modifiers: [.command, .shift])
-
-                // Collapse/Expand-all only apply while browsing the subagent
-                // hierarchy, so keep them out of the toolbar entirely in the
-                // common flat-list mode rather than showing them disabled.
-                if isHierarchyBrowsing {
-                    ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
-                        ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
-                    } action: {
-                        collapseAllHierarchyParents()
-                    }
-                    .disabled(currentExpandableParentIDs.isEmpty)
-
-                    ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
-                        ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
-                    } action: {
-                        expandAllHierarchyParents()
-                    }
-                    .disabled(collapsedParents.isEmpty)
-                }
-
-                if codexAgentEnabled {
-                    Button("") { unified.includeCodex.toggle() }
-                        .keyboardShortcut("1", modifiers: .command)
-                        .opacity(0)
-                        .frame(width: 0, height: 0)
-
-                    AgentTabToggle(title: "Codex", color: Color.agentCodex,
-                                   isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
-                        .help("Show or hide Codex sessions (⌘1)")
-                }
-
-                if claudeAgentEnabled {
-                    Button("") { unified.includeClaude.toggle() }
-                        .keyboardShortcut("2", modifiers: .command)
-                        .opacity(0)
-                        .frame(width: 0, height: 0)
-
-                    AgentTabToggle(title: "Claude", color: Color.agentClaude,
-                                   isMonochrome: stripMonochrome, isOn: $unified.includeClaude)
-                        .help("Show or hide Claude sessions (⌘2)")
-                }
-
-                // Codex + Claude stay as pills; the remaining enabled agents show
-                // as pills while the toolbar is uncrowded, and collapse into a
-                // filter menu once more than four agents are enabled (⌘ shortcuts
-                // are preserved either way).
-                agentToggleControls()
     }
 
     // Ranked by how often a control is reached for without thinking. Three
@@ -2196,35 +2118,7 @@ struct UnifiedSessionsView: View {
             .disabled(!liveSessionsFeatureEnabled)
             .accessibilityLabel(Text("Quota Meter"))
 
-            ToolbarIconButton(help: "Resume the selected session in its original CLI (⌃⌘R).") { _ in
-                ToolbarIcon(systemName: "terminal")
-            } action: {
-                if let s = selectedSession { resume(s) }
-            }
-            .keyboardShortcut("r", modifiers: [.command, .control])
-            .disabled(!canResumeSelectedSession)
-            .accessibilityLabel(Text("Resume"))
-
-            if let s = selectedSession, s.source == .codex, !s.isSideChat {
-                ToolbarIconButton(
-                    help: String(localized: "Continue this session in the local Codex Desktop. Codex Desktop must use the same session storage.",
-                                 comment: "Tooltip for opening the selected local thread in the separate Codex desktop app.")
-                ) { _ in
-                    ToolbarIcon(systemName: "macwindow")
-                } action: {
-                    openInCodexApp(s)
-                }
-                .disabled(CodexResumeCoordinator.appSessionID(for: s) == nil)
-                .accessibilityLabel(Text("Continue in Codex Desktop"))
-            }
-
-            ToolbarIconButton(help: imagesToolbarHelpText) { _ in
-                ToolbarIcon(systemName: "photo.on.rectangle")
-            } action: {
-                showImagesForSelectedSession(showNoSelectionAlert: true)
-            }
-            .disabled(selectedSession == nil)
-            .accessibilityLabel(Text("Image Browser"))
+            resumeControl
 
             ToolbarGroupDivider()
 
@@ -2259,6 +2153,101 @@ struct UnifiedSessionsView: View {
             // workaround the source pills already use when they collapse into
             // AgentOverflowMenu.
             overflowMenuShortcuts
+    }
+
+    private var windowCommandAvailability: SessionWindowCommands.Availability {
+        let session = selectedSession
+        return .init(
+            resume: canResumeSelectedSession,
+            copyResumeCommand: session.map { canCopyResumeCommand($0) } ?? false,
+            openInCodexDesktop: session.map { session in
+                session.source == .codex && !session.isSideChat && CodexResumeCoordinator.appSessionID(for: session) != nil
+            } ?? false,
+            setFolding: !currentExpandableParentIDs.isEmpty
+        )
+    }
+
+    private func updateWindowCommands(_ availability: SessionWindowCommands.Availability) {
+        windowCommands.update(
+            availability,
+            resume: { if canResumeSelectedSession { resumeSelectedSession() } },
+            copyResumeCommand: {
+                if let session = selectedSession, canCopyResumeCommand(session) { copyResumeCommand(session) }
+            },
+            openInCodexDesktop: {
+                if let session = selectedSession, session.source == .codex, !session.isSideChat {
+                    openInCodexApp(session)
+                }
+            },
+            setFolding: { applyGroupFolding($0) }
+        )
+    }
+
+    private var resumeControl: some View {
+        HStack(spacing: LayoutTokens.xs) {
+            Button(action: resumeSelectedSession) {
+                HStack(spacing: LayoutTokens.xs) {
+                    Image(systemName: "terminal")
+                    Text("Resume")
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(Text(resumeUnavailableReason ?? String(localized: "Resume in \(CodexLaunchMode.selectedResumeTerminalTitle())")))
+
+            Menu {
+                resumeMenuActions
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, LayoutTokens.xs)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Resume options")
+            .accessibilityLabel(Text("Resume options"))
+        }
+        .agentPillSurface()
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private var resumeMenuActions: some View {
+        if let session = selectedSession {
+            Button("Resume in \(CodexLaunchMode.selectedResumeTerminalTitle())") { resume(session) }
+                .disabled(!canResumeSelectedSession)
+            if let reason = resumeUnavailableReason { Text(reason) }
+            if session.source == .codex, !session.isSideChat {
+                Button("Continue in Codex Desktop") { openInCodexApp(session) }
+                    .disabled(CodexResumeCoordinator.appSessionID(for: session) == nil)
+            }
+            Button("Copy Resume Command") { copyResumeCommand(session) }
+                .disabled(!canCopyResumeCommand(session))
+        } else {
+            Text("Select a session to resume")
+        }
+    }
+
+    private var resumeUnavailableReason: String? {
+        guard let session = selectedSession else { return String(localized: "Select a session to resume") }
+        guard !canResumeSelectedSession else { return nil }
+        if session.isSideChat || session.isClaudeWorkflowSubagent {
+            return String(localized: "Resume the parent session to continue this work")
+        }
+        if !session.source.descriptor.supportsResume {
+            return String(localized: "\(session.source.displayName) does not support Resume here")
+        }
+        return String(localized: "This session cannot be resumed in a terminal")
+    }
+
+    private func resumeSelectedSession() {
+        if let reason = resumeUnavailableReason {
+            showActionAlert(message: reason)
+        } else if let session = selectedSession {
+            resume(session)
+        }
     }
 
     @ViewBuilder
@@ -2321,6 +2310,9 @@ struct UnifiedSessionsView: View {
                 if let s = selectedSession { openDir(s) }
             }
             .disabled(selectedSession == nil)
+
+            Button("Image Browser") { showImagesForSelectedSession(showNoSelectionAlert: true) }
+                .disabled(selectedSession == nil)
 
             Button(layoutMenuTitle) { onToggleLayout() }
 
@@ -2405,46 +2397,6 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    /// Total enabled agents including Codex/Claude — drives when the other agents
-    /// collapse into the overflow menu.
-    private var enabledAgentCount: Int {
-        (unified.isAgentEnabled(.codex) ? 1 : 0)
-            + (unified.isAgentEnabled(.claude) ? 1 : 0)
-            + enabledOtherAgentSpecs.count
-    }
-
-    @ViewBuilder
-    private func agentToggleControls() -> some View {
-        let specs = enabledOtherAgentSpecs
-        if enabledAgentCount > 4 {
-            AgentOverflowMenu(specs: specs)
-            // Keep ⌘3–9 working while the pills are collapsed into the menu.
-            ForEach(specs) { spec in
-                if let sc = spec.shortcut {
-                    Button("") { spec.isOn.wrappedValue.toggle() }
-                        .keyboardShortcut(sc, modifiers: .command)
-                        .opacity(0)
-                        .frame(width: 0, height: 0)
-                }
-            }
-        } else {
-            ForEach(specs) { spec in
-                agentPill(spec)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func agentPill(_ spec: AgentToolbarSpec) -> some View {
-        let pill = AgentTabToggle(title: spec.title, color: spec.color, isMonochrome: stripMonochrome, isOn: spec.isOn)
-            .help("Show or hide \(spec.title) sessions in the list")
-        if let sc = spec.shortcut {
-            pill.keyboardShortcut(sc, modifiers: .command)
-        } else {
-            pill
-        }
-    }
-
             private var selectedSession: Session? { selection.flatMap { id in cachedRowByID[id] } }
             private var settledSelectedSession: Session? {
                 settledSelection.flatMap { id in cachedRowByID[id] }
@@ -2494,26 +2446,19 @@ struct UnifiedSessionsView: View {
                 )
             }
 
-            private func collapseAllHierarchyParents() {
-                let parentIDs = currentExpandableParentIDs
-                guard !parentIDs.isEmpty else { return }
-                if let parentID = parentIDForSelectedHierarchyChild,
-                   let parent = cachedRows.first(where: { $0.id == parentID }) {
-                    setActiveSelection(parentID, source: parent.source, userInitiated: false)
-                }
-                collapsedParents = UnifiedHierarchyCommandPolicy.collapsedParentsAfterCollapseAll(
-                    existing: collapsedParents,
-                    visibleParentIDs: parentIDs
-                )
+            private var foldingBinding: Binding<SessionGroupFolding> {
+                Binding(get: { groupFolding }, set: { applyGroupFolding($0) })
             }
 
-            private func expandAllHierarchyParents() {
-                guard isHierarchyBrowsing else { return }
-                guard !collapsedParents.isEmpty else { return }
-                collapsedParents = UnifiedHierarchyCommandPolicy.collapsedParentsAfterExpandAll(
-                    existing: collapsedParents,
-                    visibleParentIDs: currentExpandableParentIDs
-                )
+            private func applyGroupFolding(_ folding: SessionGroupFolding) {
+                guard isHierarchyBrowsing, folding != groupFolding else { return }
+                if folding == .collapsed {
+                    if let ancestor = parentIDForSelectedHierarchyChild,
+                       let parent = cachedRowByID[ancestor] {
+                        setActiveSelection(ancestor, source: parent.source, userInitiated: false)
+                    }
+                }
+                groupFolding = folding
             }
 
             private func loadPersistedCollapsedParentsIfNeeded() {
@@ -2573,10 +2518,6 @@ struct UnifiedSessionsView: View {
 	            }
 	        )
 	    }
-
-    private var imagesToolbarHelpText: String {
-        return "Show images for the selected session"
-    }
 
 	    @MainActor
 	    private func setActiveSelection(_ id: String?, source: SessionSource? = nil, userInitiated: Bool) {
@@ -2679,6 +2620,7 @@ struct UnifiedSessionsView: View {
 
 	    private func handleSelectionChange(_ id: String?) {
 		        guard let id, let s = cachedRowByID[id] else {
+                SearchResponsivenessMetrics.shared.clearSelection()
 	            cancelAutoJump()
 	            selectionPropagationTask?.cancel()
 	            selectionPropagationTask = nil
@@ -2687,6 +2629,9 @@ struct UnifiedSessionsView: View {
 	            updateFocusedSessionIfNeeded(nil)
 		            return
 		        }
+	        let metrics = SearchResponsivenessMetrics.shared
+	        let operation = metrics.operation(source: s.source.rawValue, sessionID: s.id, start: true)
+	        metrics.record(.selectionAccepted, operationID: operation, context: .session(s), status: .accepted)
 	        ListScrubSignal.shared.noteSelectionChange()
         // Only the cheap, selection-visual-relevant work runs synchronously in
         // this SwiftUI update turn: the row lookup and presence-probe deferral.
@@ -2882,7 +2827,7 @@ struct UnifiedSessionsView: View {
         if !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !unified.query.isEmpty {
             unified.queryDraft = ""
             unified.query = ""
-            searchCoordinator.cancel()
+            searchCoordinator.clear()
         }
 
         if unified.projectSelection != nil { unified.projectSelection = nil }
@@ -3066,6 +3011,7 @@ struct UnifiedSessionsView: View {
                 allSessions: allSessionsForFallback,
                 previousCachedRows: cachedRows,
                 collapsedParents: collapsedParents,
+                folding: groupFolding,
                 showSubagentHierarchy: showSubagentHierarchy,
                 searchActive: !query.isEmpty,
                 isHierarchyBrowsing: isHierarchyBrowsing,
@@ -4000,12 +3946,16 @@ struct UnifiedSessionsView: View {
         restartSearchForActiveQuery()
     }
 
-    private func restartSearchIfRunning() {
-        restartSearch(onlyIfRunning: true)
+    private func hideProject(_ project: ProjectSelection) {
+        guard HiddenProjects.hide(project.identity) else { return }
+        if unified.projectSelection?.identity == project.identity {
+            unified.projectSelection = nil
+        }
+        hiddenProjectNotice = project
     }
 
     private func restartSearchForActiveQuery() {
-        restartSearch(onlyIfRunning: false)
+        runSessionSearch(deepScan: searchCoordinator.deepScanEnabled)
     }
 
     private func restartSearchForSideChatDatasetChangeIfNeeded() {
@@ -4029,14 +3979,13 @@ struct UnifiedSessionsView: View {
         guard NSApp.isActive else { return }
         datasetSearchRestartCoalescer.schedule {
             guard NSApp.isActive else { return }
-            restartSearch(onlyIfRunning: false, preserveResultsUntilRefreshPublishes: true)
+            runSessionSearch(deepScan: searchCoordinator.deepScanEnabled, preserveResultsUntilRefreshPublishes: true)
         }
     }
 
-    private func restartSearch(onlyIfRunning: Bool, preserveResultsUntilRefreshPublishes: Bool = false) {
-        guard !onlyIfRunning || searchCoordinator.isRunning else { return }
+    private func runSessionSearch(deepScan: Bool, preserveResultsUntilRefreshPublishes: Bool = false) {
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { searchCoordinator.cancel(); return }
+        guard !q.isEmpty else { searchCoordinator.clear(); return }
         let filters = Filters(query: q,
                               dateFrom: unified.dateFrom,
                               dateTo: unified.dateTo,
@@ -4048,14 +3997,17 @@ struct UnifiedSessionsView: View {
                               archivedClaudeDesktopOnly: unified.showArchivedClaudeDesktopOnly,
                               archivedClaudeSessionIDs: unified.archivedClaudeSessionIDs,
                               sideChatsOnly: false,
-                              selectedProjectIdentity: unified.projectSelection?.identity)
+                              selectedProjectIdentity: unified.projectSelection?.identity,
+                              hiddenProjectRoots: unified.hiddenProjectRoots)
+        var candidates = unified.searchCandidates()
+        if showActiveSessionsOnly { candidates = candidates.filter { isSessionLive($0) } }
         searchCoordinator.start(query: q,
                                 filters: filters,
                                 allowed: unified.allowedSearchSources(),
-                                enableDeepScan: searchCoordinator.deepScanEnabled,
-                                all: unified.allSessions,
+                                enableDeepScan: deepScan,
+                                all: candidates,
                                 effectiveDisplayTitles: Self.claudeDisplayTitleSnapshot(
-                                    sessions: unified.allSessions,
+                                    sessions: candidates,
                                     titleFor: { unified.claudeDesktopTitle(for: $0) }),
                                 preserveResultsUntilRefreshPublishes: preserveResultsUntilRefreshPublishes)
     }
@@ -4771,19 +4723,11 @@ private struct SearchScopeChip: View {
     let symbol: String
     let title: LocalizedStringResource
     let help: LocalizedStringResource
-    /// Narrow macOS 26 list pane: the symbol alone, title kept for VoiceOver.
-    var iconOnly: Bool = false
-
     var body: some View {
         Button { isOn.toggle() } label: {
-            HStack(spacing: 4) {
-                Image(systemName: isOn ? "\(symbol).fill" : symbol)
-                    .font(.system(size: 10, weight: .semibold))
-                if !iconOnly {
-                    Text(title)
-                        .font(.system(size: 11, weight: .medium))
-                }
-            }
+            Image(systemName: isOn ? "\(symbol).fill" : symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(minWidth: 20, minHeight: 20)
             .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
@@ -4806,23 +4750,11 @@ private struct SearchScopeChip: View {
 /// leaving every other agent visible — exactly as the pill segments did. Turning
 /// one on also turns its source on, because narrowing a hidden source to its
 /// archive would otherwise show nothing and look broken.
-private struct ArchivedScopeChip: View {
+struct ArchivedScopeActions: View {
     @ObservedObject var unified: UnifiedSessionIndexer
-    let codexEnabled: Bool
-    let claudeEnabled: Bool
-    /// Narrow macOS 26 list pane: the box symbol alone; a filled box still shows
-    /// that a filter is on.
-    var iconOnly: Bool = false
-
-    private var activeCount: Int {
-        (codexEnabled && unified.showArchivedCodexDesktopOnly ? 1 : 0)
-            + (claudeEnabled && unified.showArchivedClaudeDesktopOnly ? 1 : 0)
-    }
 
     var body: some View {
-        if codexEnabled || claudeEnabled {
-            Menu {
-                if codexEnabled {
+                if unified.isAgentEnabled(.codex) {
                     Toggle("Codex archived only", isOn: Binding(
                         get: { unified.showArchivedCodexDesktopOnly },
                         set: { on in
@@ -4830,7 +4762,7 @@ private struct ArchivedScopeChip: View {
                             unified.showArchivedCodexDesktopOnly = on
                         }))
                 }
-                if claudeEnabled {
+                if unified.isAgentEnabled(.claude) {
                     Toggle("Claude archived only", isOn: Binding(
                         get: { unified.showArchivedClaudeDesktopOnly },
                         set: { on in
@@ -4838,16 +4770,37 @@ private struct ArchivedScopeChip: View {
                             unified.showArchivedClaudeDesktopOnly = on
                         }))
                 }
+    }
+}
+
+private struct ArchivedScopeChip: View {
+    @ObservedObject var unified: UnifiedSessionIndexer
+    let codexEnabled: Bool
+    let claudeEnabled: Bool
+    private var activeCount: Int {
+        (codexEnabled && unified.showArchivedCodexDesktopOnly ? 1 : 0)
+            + (claudeEnabled && unified.showArchivedClaudeDesktopOnly ? 1 : 0)
+    }
+
+    private var archiveScopeDescription: String {
+        var labels: [String] = []
+        if codexEnabled && unified.showArchivedCodexDesktopOnly {
+            labels.append(String(localized: "Codex archived only"))
+        }
+        if claudeEnabled && unified.showArchivedClaudeDesktopOnly {
+            labels.append(String(localized: "Claude archived only"))
+        }
+        return labels.isEmpty ? String(localized: "Off") : labels.joined(separator: " · ")
+    }
+
+    var body: some View {
+        if codexEnabled || claudeEnabled {
+            Menu {
+                ArchivedScopeActions(unified: unified)
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: activeCount > 0 ? "archivebox.fill" : "archivebox")
-                        .font(.system(size: 10, weight: .semibold))
-                    if !iconOnly {
-                        Text(activeCount > 1 ? "Archived · \(activeCount)" : "Archived")
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                    }
-                }
+                Image(systemName: activeCount > 0 ? "archivebox.fill" : "archivebox")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(minWidth: 20, minHeight: 20)
                 .foregroundStyle(activeCount > 0 ? Color.accentColor : Color.secondary)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 2)
@@ -4858,8 +4811,148 @@ private struct ArchivedScopeChip: View {
             .fixedSize()
             .help("Narrow a source to its archived Desktop sessions; other agents stay visible")
             .accessibilityLabel(Text("Archived"))
+            .accessibilityValue(Text(archiveScopeDescription))
         }
     }
+}
+
+struct SessionScope {
+    struct Recovery: Identifiable {
+        let label: String
+        let actionTitle: String
+        var id: String { actionTitle }
+        let apply: () -> Void
+    }
+
+    var hiddenRoots: Set<String> = []
+    private(set) var recoveries: [Recovery] = []
+    var isEmpty: Bool { hiddenRoots.isEmpty && recoveries.isEmpty }
+
+    mutating func add(_ label: String, _ action: String, apply: @escaping () -> Void) {
+        recoveries.append(.init(label: label, actionTitle: action, apply: apply))
+    }
+
+    var summary: String {
+        var labels = recoveries.map(\.label)
+        if !hiddenRoots.isEmpty { labels.append(String(localized: "Hidden projects: \(hiddenRoots.count)")) }
+        return labels.joined(separator: " · ")
+    }
+}
+
+private struct SessionScopeMenu: View {
+    let scope: SessionScope
+
+    var body: some View {
+        if !scope.isEmpty {
+            Menu {
+                ForEach(scope.recoveries) { recovery in
+                    Button(recovery.actionTitle, action: recovery.apply)
+                }
+                if !scope.hiddenRoots.isEmpty {
+                    Section("Hidden projects") { UnhideProjectItems(roots: scope.hiddenRoots) }
+                }
+            } label: {
+                HStack(spacing: LayoutTokens.xs) {
+                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    Text(scope.summary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .font(.caption)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help(Text(scope.summary))
+            .accessibilityLabel(Text(scope.summary))
+        }
+    }
+}
+
+private struct SessionSearchFeedback: View {
+    @ObservedObject var search: SearchCoordinator
+    let hasQuery: Bool
+    let scope: SessionScope
+    let checkRemaining: () -> Void
+
+    @ViewBuilder
+    var body: some View {
+        if hasQuery {
+            if let error = search.queryError {
+                HStack(spacing: 4) {
+                    Text("Search error:")
+                        .fontWeight(.semibold)
+                    Text(error)
+                }
+                .font(.caption2)
+                .foregroundStyle(.red)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .help(error)
+                SessionScopeMenu(scope: scope)
+            } else {
+                let found = search.results.count
+                let remaining = max(0, search.eligibleCount - search.completeCount - search.incompleteCount)
+                HStack(spacing: LayoutTokens.sm) {
+                    searchStatus(found: found, remaining: remaining)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Spacer(minLength: 0)
+                    if !search.isRunning && remaining > 0 {
+                        Button(action: checkRemaining) {
+                            if search.wasCanceled && search.completeCount + search.incompleteCount > 0 {
+                                Text("Check sessions again")
+                            } else {
+                                Text("Check remaining sessions")
+                            }
+                        }
+                            .help("Check remaining sessions (Return)")
+                            .controlSize(.small)
+                    }
+                    searchCoverageMenu
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                SessionScopeMenu(scope: scope)
+            }
+        } else {
+            SessionScopeMenu(scope: scope)
+        }
+    }
+
+    @ViewBuilder
+    private func searchStatus(found: Int, remaining: Int) -> some View {
+        if search.isRunning && found == 0 {
+            Text("Searching…")
+        } else if search.wasCanceled {
+            Text("\(found) found so far · Search cancelled")
+        } else if remaining > 0 || search.isRunning || search.unresolvedCount > 0 {
+            Text("\(found) found so far")
+        } else {
+            Text("\(found) matching sessions")
+        }
+    }
+
+    private var searchCoverageMenu: some View {
+        Menu {
+            Text("Eligible: \(search.eligibleCount)")
+            Text("Verified matches: \(search.verifiedKeys.count)")
+            Text("Provisional matches: \(max(0, search.results.count - search.verifiedKeys.count))")
+            Text("Unresolved: \(search.unresolvedCount)")
+            Text("Fully checked: \(search.completeCount)")
+            Text("Partially checked: \(search.incompleteCount)")
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Search coverage")
+        .accessibilityLabel(Text("Search coverage"))
+    }
+
 }
 
 private struct UnifiedSearchFiltersView: View {
@@ -4867,10 +4960,8 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var search: SearchCoordinator
     @ObservedObject var focus: WindowFocusCoordinator
     @ObservedObject var searchState: UnifiedSearchState
-    /// macOS 26 pane-anchored toolbar: the field may shrink further, and the ⌥⌘F
-    /// hint and scope-chip titles drop out when the list pane is narrow. Off, the
-    /// field keeps its established layout.
-    var adaptive: Bool = false
+    let runSearch: (Bool) -> Void
+    @Binding var searchDebouncer: DispatchWorkItem?
     // The pi/kimi/grok enablement flags this view used to AND into its two `search.start`
     // calls are gone: the allow-list now comes from `unified.allowedSearchSources()`, which
     // applies enablement to every registered source (SPEC §8.5). `unified` is observed, and its
@@ -4878,7 +4969,6 @@ private struct UnifiedSearchFiltersView: View {
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @FocusState private var searchFocus: SearchFocusTarget?
-    @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
     private enum SearchFocusTarget: Hashable { case field, clear }
 
@@ -4890,22 +4980,24 @@ private struct UnifiedSearchFiltersView: View {
     }
 
     @ViewBuilder
-    private func scopeChips(iconOnly: Bool) -> some View {
+    private var scopeChips: some View {
         SearchScopeChip(isOn: $unified.showFavoritesOnly,
                         symbol: "star",
                         title: "Saved",
-                        help: "Show only saved sessions",
-                        iconOnly: iconOnly)
+                        help: "Show only saved sessions")
 
         ArchivedScopeChip(unified: unified,
                           codexEnabled: codexAgentEnabled,
-                          claudeEnabled: claudeAgentEnabled,
-                          iconOnly: iconOnly)
+                          claudeEnabled: claudeAgentEnabled)
+    }
+
+    private var searchHelpText: String {
+        String(localized: "Search sessions (⌥⌘F). Terms use AND by default; AND, OR, and NOT are supported. Quoted phrases match within one field; trailing * matches a prefix. Filters: repo:NAME, path:VALUE, #side. Return validates eligible sessions at their source revisions, so coverage can be partial. Escape cancels a running search and keeps its results; press Escape again to clear.",
+               comment: "Help for global session search. Describes supported query grammar, per-source coverage and two-step Escape behavior.")
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            // Inline search field (always visible to keep global search front-and-center)
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13, weight: .semibold))
@@ -4913,29 +5005,25 @@ private struct UnifiedSearchFiltersView: View {
 
                 // Use an AppKit-backed text field to ensure focus works inside a toolbar
                 ToolbarSearchTextField(text: $unified.queryDraft,
-                                       placeholder: String(localized: "Search sessions",
-                                                           comment: "Placeholder in the main window search field; it searches every indexed session, not the open transcript."),
-                                       isFirstResponder: Binding(get: { searchFocus == .field },
-                                                                 set: { want in
-                                                                     if want { searchFocus = .field }
-                                                                     else if searchFocus == .field { searchFocus = nil }
-                                                                 }),
-                                       focusRequestToken: focusRequestToken,
-                                       onCommit: { startSearchImmediate() },
-                                       onEscape: { clearSearchFromField() })
-                    .frame(minWidth: adaptive ? 80 : 220)
-                    .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
+                                   placeholder: String(localized: "Search sessions",
+                                                       comment: "Placeholder in the global session-list search field, distinct from Find in the open transcript."),
+                                   isFirstResponder: Binding(get: { searchFocus == .field },
+                                                             set: { want in
+                                                                 if want { searchFocus = .field }
+                                                                 else if searchFocus == .field { searchFocus = nil }
+                                                             }),
+                                   focusRequestToken: focusRequestToken,
+                                   onCommit: { startSearchImmediate() },
+                                   onEscape: { handleEscapeFromSearchField() })
+                    .frame(minWidth: 64)
+                    .help(searchHelpText)
 
                 if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    if adaptive {
-                        ViewThatFits(in: .horizontal) {
-                            shortcutHint
-                            Color.clear.frame(width: 0, height: 0)
-                        }
-                        .layoutPriority(1)
-                    } else {
+                    ViewThatFits(in: .horizontal) {
                         shortcutHint
+                        Color.clear.frame(width: 0, height: 0)
                     }
+                    .layoutPriority(1)
                 } else {
                     Button(action: {
                         clearSearchFromField()
@@ -4947,25 +5035,18 @@ private struct UnifiedSearchFiltersView: View {
                     }
                     .focused($searchFocus, equals: .clear)
                     .buttonStyle(.plain)
-                    .help("Clear search (⎋)")
+                    .help("Clear search")
                 }
 
                 // Saved is a scope on the result set, so it belongs inside the
                 // field with the other scoping, not as a separate toolbar glyph.
                 Divider().frame(height: 14)
 
-                if adaptive {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { scopeChips(iconOnly: false) }
-                        HStack(spacing: 8) { scopeChips(iconOnly: true) }
-                    }
+                HStack(spacing: LayoutTokens.xs) { scopeChips }
                     .layoutPriority(1)
-                } else {
-                    scopeChips(iconOnly: false)
-                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, LayoutTokens.sm)
+            .padding(.vertical, LayoutTokens.xs)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color(nsColor: .textBackgroundColor))
@@ -4975,7 +5056,8 @@ private struct UnifiedSearchFiltersView: View {
                     .stroke(searchFocus == .field ? UnifiedSessionsStyle.toolbarFocusRingColor : Color(nsColor: .separatorColor).opacity(0.6),
                             lineWidth: searchFocus == .field ? 2 : 1)
             )
-            .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
+            .help(searchHelpText)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .onAppear {
                 if searchState.query != unified.queryDraft {
                     searchState.query = unified.queryDraft
@@ -4988,12 +5070,12 @@ private struct UnifiedSearchFiltersView: View {
                 }
                 let q = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if q.isEmpty {
-                    search.cancel()
+                    search.clear()
                 } else {
                     if FeatureFlags.increaseDeepSearchDebounce {
                         scheduleSearch()
                     } else {
-                        startSearch()
+                        runSearch(false)
                     }
                 }
             }
@@ -5041,206 +5123,64 @@ private struct UnifiedSearchFiltersView: View {
         }
     }
 
-    private func startSearch(deepScan: Bool = false) {
-        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { search.cancel(); return }
-        let filters = Filters(query: q,
-                              dateFrom: unified.dateFrom,
-                              dateTo: unified.dateTo,
-                              model: unified.selectedModel,
-                              kinds: unified.selectedKinds,
-                              repoName: nil,
-                              pathContains: nil,
-                              archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
-                              archivedClaudeDesktopOnly: unified.showArchivedClaudeDesktopOnly,
-                              archivedClaudeSessionIDs: unified.archivedClaudeSessionIDs,
-                              sideChatsOnly: false,
-                              selectedProjectIdentity: unified.projectSelection?.identity)
-        search.start(query: q,
-                     filters: filters,
-                     allowed: unified.allowedSearchSources(),
-                     enableDeepScan: deepScan,
-                     all: unified.allSessions,
-                     effectiveDisplayTitles: UnifiedSessionsView.claudeDisplayTitleSnapshot(
-                         sessions: unified.allSessions,
-                         titleFor: { unified.claudeDesktopTitle(for: $0) }))
-    }
-
     private func startSearchImmediate() {
-        searchDebouncer?.cancel(); searchDebouncer = nil
-        startSearch(deepScan: true)
+        searchDebouncer?.cancel()
+        searchDebouncer = nil
+        runSearch(true)
     }
 
     private func scheduleSearch() {
         searchDebouncer?.cancel()
-        let work = DispatchWorkItem { [weak unified, weak search] in
-            guard let unified = unified, let search = search else { return }
-            let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !q.isEmpty else { search.cancel(); return }
-            let filters = Filters(query: q,
-                                  dateFrom: unified.dateFrom,
-                                  dateTo: unified.dateTo,
-                                  model: unified.selectedModel,
-                                  kinds: unified.selectedKinds,
-                                  repoName: nil,
-                                  pathContains: nil,
-                                  archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
-                                  archivedClaudeDesktopOnly: unified.showArchivedClaudeDesktopOnly,
-                                  archivedClaudeSessionIDs: unified.archivedClaudeSessionIDs,
-                                  sideChatsOnly: false,
-                                  selectedProjectIdentity: unified.projectSelection?.identity)
-            search.start(query: q,
-                         filters: filters,
-                         allowed: unified.allowedSearchSources(),
-                         enableDeepScan: false,
-                         all: unified.allSessions,
-                         effectiveDisplayTitles: UnifiedSessionsView.claudeDisplayTitleSnapshot(
-                             sessions: unified.allSessions,
-                             titleFor: { unified.claudeDesktopTitle(for: $0) }))
-        }
+        let work = DispatchWorkItem { runSearch(false) }
         searchDebouncer = work
         let delay: TimeInterval = FeatureFlags.increaseDeepSearchDebounce ? 0.28 : 0.15
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func clearSearchFromField() {
+        searchDebouncer?.cancel()
+        searchDebouncer = nil
         unified.queryDraft = ""
         unified.query = ""
         unified.recomputeNow()
-        search.cancel()
+        search.clear()
+    }
+
+    private func handleEscapeFromSearchField() -> Bool {
+        searchDebouncer?.cancel()
+        searchDebouncer = nil
+        if search.isRunning {
+            search.cancel()
+            return false
+        }
+        clearSearchFromField()
+        return true
     }
 }
 
-private struct UnifiedProjectFilterBadgeView: View {
-    @ObservedObject var unified: UnifiedSessionIndexer
-    /// Narrow macOS 26 list pane: one tinted "remove folder filter" button; the
-    /// project name moves to its tooltip and VoiceOver value.
-    var compact: Bool = false
-    var onClear: () -> Void
-    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
-
-    var body: some View {
-        if compact {
-            compactBody
-        } else {
-            regularBody
-        }
-    }
-
-    private var accent: Color {
-        stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent
-    }
-
-    private var compactBody: some View {
-        let name = unified.projectSelection.map(Self.badgeText(for:)) ?? ""
-        return Button(action: onClear) {
-            Image(systemName: "folder.badge.minus")
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .background(accent.opacity(0.1))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(accent.opacity(0.3)))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-        .help(Text(verbatim: name + "\n") + Text("Remove the project filter and show all sessions"))
-        .accessibilityLabel(Text("Remove the project filter and show all sessions"))
-        .accessibilityValue(Text(verbatim: name))
-        .fixedSize()
-    }
-
-    private var regularBody: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "folder")
-                .foregroundStyle(.secondary)
-            if let selection = unified.projectSelection {
-                Text(Self.badgeText(for: selection))
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 220, alignment: .leading)
-            }
-            Button(action: {
-                onClear()
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Remove the project filter and show all sessions")
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(accent.opacity(0.1))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(accent.opacity(0.3))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    /// The normal name when unambiguous; name plus the concise parent-path
-    /// discriminator when another visible project shares the name.
-    static func badgeText(for selection: ProjectSelection) -> String {
-        guard let path = selection.disambiguationPath, !path.isEmpty else { return selection.displayName }
-        return "\(selection.displayName) (\(path))"
-    }
-}
-
-// MARK: - AppKit-backed text field for reliable toolbar focus
-/// Width math for the macOS 26 session-list toolbar group (issue #92). The group
-/// starts at the toolbar's leading slot and must stop just short of the
-/// list/transcript divider, so it is sized from two window-space measurements.
 enum SessionListToolbarLayout {
-    /// Breathing room between the group's trailing edge and the divider line,
-    /// matching the pane gutter used inside the split.
-    static let dividerGap: CGFloat = LayoutTokens.sm
-
-    /// Narrowest side-by-side list pane. On macOS 26 the session-list toolbar group
-    /// must fit above it in its minimal form (Filters menu, search with icon-only
-    /// chips, compact project button); `SessionListToolbarLayoutTests` measures
-    /// that row against this width. Older systems keep 320.
     static var sideBySideListMinWidth: CGFloat {
         if #available(macOS 26.0, *) { return tahoeListMinWidth }
         return 320
     }
+
     static let tahoeListMinWidth: CGFloat = 470
-
-    /// The space between the group's leading edge and the divider, never more:
-    /// the group is clipped to this, so it cannot reach into the transcript.
-    /// `nil` means "no side-by-side divider to align to" (stacked layout, hidden
-    /// transcript, or not yet measured): the group then uses its natural width.
-    static func groupWidth(dividerX: CGFloat?, groupMinX: CGFloat?) -> CGFloat? {
-        guard let dividerX, let groupMinX else { return nil }
-        return max(0, (dividerX - groupMinX - dividerGap).rounded(.down))
-    }
-
-    /// Sub-point jitter must not write state, or the measure → resize → measure
-    /// cycle never settles.
-    static func hasMoved(_ old: CGFloat?, to new: CGFloat) -> Bool {
-        guard let old else { return true }
-        return abs(old - new) >= 0.5
-    }
 }
 
-/// The session-list filter state the macOS 26 toolbar row renders. A plain value
+/// State and actions for the session-list filter controls. A plain value
 /// so the row can be built (and measured) without the whole window view.
 struct SessionListFilterModel {
     var liveOnly: Binding<Bool>
     var liveFeatureEnabled: Bool
     var hierarchy: Binding<Bool>
     var isHierarchyBrowsing: Bool
-    var canCollapseAll: Bool
-    var canExpandAll: Bool
-    var collapseAll: () -> Void
-    var expandAll: () -> Void
+    var folding: Binding<SessionGroupFolding>
+    var hasGroups: Bool
     /// Codex and Claude, which stay as their own pills in the regular tier.
     var pinnedAgents: [AgentToolbarSpec]
     var otherAgents: [AgentToolbarSpec]
     var isMonochrome: Bool
-    var clearProject: () -> Void
+    var hiddenProjectRoots: Set<String>
 
     var allAgents: [AgentToolbarSpec] { pinnedAgents + otherAgents }
 }
@@ -5257,21 +5197,51 @@ enum SessionFilterTier: CaseIterable {
     case minimal
 }
 
-/// macOS 26 session-list toolbar row (issue #92): filters, search and project
-/// badge. Filters and badge are offered space first and fall back to smaller
-/// forms; the single search field takes what is left down to its minimum, so it
-/// is never recreated and keeps focus and text while the divider moves.
+/// The control row stays one line at every width. Feedback belongs to the
+/// header below it, so status and scope never affect the controls' alignment.
+struct SessionListHeader: View {
+    @ObservedObject var unified: UnifiedSessionIndexer
+    let search: SearchCoordinator
+    let focus: WindowFocusCoordinator
+    let searchState: UnifiedSearchState
+    let filters: SessionListFilterModel
+    let scope: SessionScope
+    let runSearch: (Bool) -> Void
+
+    @State private var searchDebouncer: DispatchWorkItem?
+
+    var body: some View {
+        let hasQuery = !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        VStack(alignment: .leading, spacing: LayoutTokens.xs) {
+            SessionListToolbarRow(unified: unified, search: search, focus: focus,
+                                  searchState: searchState, filters: filters, runSearch: runSearch,
+                                  searchDebouncer: $searchDebouncer)
+            if hasQuery || !scope.isEmpty {
+                SessionSearchFeedback(search: search, hasQuery: hasQuery, scope: scope) {
+                    searchDebouncer?.cancel()
+                    searchDebouncer = nil
+                    runSearch(true)
+                }
+            }
+        }
+        .padding(.horizontal, LayoutTokens.sm)
+        .padding(.vertical, LayoutTokens.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onDisappear { searchDebouncer?.cancel() }
+    }
+}
+
 struct SessionListToolbarRow: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     let search: SearchCoordinator
     let focus: WindowFocusCoordinator
     let searchState: UnifiedSearchState
     let filters: SessionListFilterModel
-    /// True when sized to the divider; false lets search keep its 520 pt cap.
-    var fillsWidth: Bool
+    let runSearch: (Bool) -> Void
+    @Binding var searchDebouncer: DispatchWorkItem?
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: LayoutTokens.sm) {
             ViewThatFits(in: .horizontal) {
                 SessionFilterCluster(model: filters, tier: .regular)
                 SessionFilterCluster(model: filters, tier: .compact)
@@ -5282,16 +5252,9 @@ struct SessionListToolbarRow: View {
             .layoutPriority(1)
 
             UnifiedSearchFiltersView(unified: unified, search: search, focus: focus,
-                                     searchState: searchState, adaptive: true)
-                .frame(maxWidth: fillsWidth ? .infinity : 520)
+                                     searchState: searchState, runSearch: runSearch,
+                                     searchDebouncer: $searchDebouncer)
 
-            if unified.projectSelection != nil {
-                ViewThatFits(in: .horizontal) {
-                    UnifiedProjectFilterBadgeView(unified: unified, onClear: filters.clearProject)
-                    UnifiedProjectFilterBadgeView(unified: unified, compact: true, onClear: filters.clearProject)
-                }
-                .layoutPriority(1)
-            }
         }
         // ViewThatFits may keep every tier alive, so no shortcut lives inside a
         // tier; they are registered exactly once here.
@@ -5324,6 +5287,51 @@ private struct HiddenShortcutButton: View {
 }
 
 /// One tier of the macOS 26 filter cluster. Holds no keyboard shortcuts.
+private struct SessionGroupFoldingPicker: View {
+    @Binding var selection: SessionGroupFolding
+
+    var body: some View {
+        Picker("Group folding", selection: $selection) {
+            Text("Standard").tag(SessionGroupFolding.standard)
+            Text("Collapse All").tag(SessionGroupFolding.collapsed)
+            Text("Expand All").tag(SessionGroupFolding.expanded)
+        }
+    }
+}
+
+private struct SessionGroupFoldingMenu: View {
+    @Binding var selection: SessionGroupFolding
+
+    var body: some View {
+        Menu {
+            SessionGroupFoldingPicker(selection: $selection).labelsHidden()
+        } label: {
+            Image(systemName: symbol)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Group folding")
+        .accessibilityLabel(Text("Group folding"))
+        .accessibilityValue(Text(mode))
+    }
+
+    private var symbol: String {
+        switch selection {
+        case .standard: "list.bullet.indent"
+        case .collapsed: "arrow.down.right.and.arrow.up.left"
+        case .expanded: "arrow.up.left.and.arrow.down.right"
+        }
+    }
+
+    private var mode: LocalizedStringKey {
+        switch selection {
+        case .standard: "Standard"
+        case .collapsed: "Collapse All"
+        case .expanded: "Expand All"
+        }
+    }
+}
+
 private struct SessionFilterCluster: View {
     let model: SessionListFilterModel
     let tier: SessionFilterTier
@@ -5350,19 +5358,8 @@ private struct SessionFilterCluster: View {
                 .help(model.hierarchy.wrappedValue ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
 
                 if model.isHierarchyBrowsing {
-                    ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
-                        ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
-                    } action: {
-                        model.collapseAll()
-                    }
-                    .disabled(!model.canCollapseAll)
-
-                    ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
-                        ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
-                    } action: {
-                        model.expandAll()
-                    }
-                    .disabled(!model.canExpandAll)
+                    SessionGroupFoldingMenu(selection: model.folding)
+                        .disabled(!model.hasGroups)
                 }
 
                 if tier == .compact {
@@ -5387,9 +5384,45 @@ private struct SessionFilterCluster: View {
                         }
                     }
                 }
+                UnhideProjectsMenu(roots: model.hiddenProjectRoots)
             }
         }
         .fixedSize()
+    }
+}
+
+private struct UnhideProjectsMenu: View {
+    let roots: Set<String>
+
+    var body: some View {
+        if !roots.isEmpty {
+            Menu {
+                UnhideProjectItems(roots: roots)
+            } label: {
+                Text("Unhide")
+                    .foregroundStyle(.primary)
+                    .agentPillSurface()
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .fixedSize()
+        }
+    }
+}
+
+struct UnhideProjectItems: View {
+    let roots: Set<String>
+
+    var body: some View {
+        let projects = Dictionary(grouping: roots) { URL(fileURLWithPath: $0).lastPathComponent }
+        ForEach(projects.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }, id: \.self) { name in
+            if let paths = projects[name] {
+                ForEach(paths.sorted(), id: \.self) { path in
+                    let label = paths.count == 1 && !name.isEmpty ? name : path
+                    Button("Unhide \(label)") { HiddenProjects.unhide(path) }
+                }
+            }
+        }
     }
 }
 
@@ -5404,21 +5437,23 @@ private struct SessionFiltersMenu: View {
                 .disabled(!model.liveFeatureEnabled)
             Toggle("Show subagent hierarchy (⇧⌘H)", isOn: model.hierarchy)
             if model.isHierarchyBrowsing {
-                Button("Collapse All", action: model.collapseAll)
-                    .disabled(!model.canCollapseAll)
-                Button("Expand All", action: model.expandAll)
-                    .disabled(!model.canExpandAll)
+                SessionGroupFoldingPicker(selection: model.folding)
+                    .disabled(!model.hasGroups)
             }
             Divider()
             ForEach(model.allAgents) { spec in
                 Toggle(isOn: spec.isOn) { Text(spec.title) }
+            }
+            if !model.hiddenProjectRoots.isEmpty {
+                Section("Hidden projects") {
+                    UnhideProjectItems(roots: model.hiddenProjectRoots)
+                }
             }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: model.liveOnly.wrappedValue
                       ? "line.3.horizontal.decrease.circle.fill"
                       : "line.3.horizontal.decrease.circle")
-                Text("Filters")
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
             }
@@ -5434,148 +5469,13 @@ private struct SessionFiltersMenu: View {
     }
 }
 
-/// Window-space measurements for the macOS 26 session-list toolbar group.
-final class SessionListToolbarAnchor: ObservableObject {
-    /// x of the list/transcript divider; `nil` when panes are not side by side.
-    @Published var dividerX: CGFloat?
-    /// x of the toolbar group's leading edge.
-    @Published var groupMinX: CGFloat?
-
-    var groupWidth: CGFloat? {
-        SessionListToolbarLayout.groupWidth(dividerX: dividerX, groupMinX: groupMinX)
-    }
-}
-
-/// The only view that observes the anchor, so divider drags re-render just the
-/// toolbar group.
-private struct SessionListToolbarGroup<Content: View>: View {
-    @ObservedObject var anchor: SessionListToolbarAnchor
-    @ViewBuilder var content: (CGFloat?) -> Content
-
-    var body: some View {
-        let width = anchor.groupWidth
-        content(width)
-            .frame(width: width, alignment: .leading)
-            // Last resort only: the compact variants are sized to fit the
-            // narrowest list pane, but nothing may ever draw past the divider.
-            .clipped()
-            .background(WindowFrameReader { [anchor] frame in
-                if SessionListToolbarLayout.hasMoved(anchor.groupMinX, to: frame.minX) {
-                    anchor.groupMinX = frame.minX
-                }
-            })
-    }
-}
-
-/// macOS 26: the window title would take ~120 pt from the session-list group at
-/// the leading edge (or float over the transcript after it), so it is not drawn
-/// in the toolbar. The window keeps its title for the Window menu and Mission
-/// Control. Older systems are unchanged.
-private struct PaneAnchoredToolbarTitle: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.toolbar(removing: .title)
-        } else {
-            content
-        }
-    }
-}
-
-/// Reports where the list pane ends (the divider) on macOS 26. A no-op on older
-/// systems, whose toolbar does not align to the panes.
-private struct ListPaneDividerReporter: ViewModifier {
-    let anchor: SessionListToolbarAnchor
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content
-                .background(WindowFrameReader { [anchor] frame in
-                    if SessionListToolbarLayout.hasMoved(anchor.dividerX, to: frame.maxX) {
-                        anchor.dividerX = frame.maxX
-                    }
-                })
-                .onDisappear { [anchor] in anchor.dividerX = nil }
-        } else {
-            content
-        }
-    }
-}
-
-/// Reports the hosting view's frame in window coordinates. SwiftUI's `.global`
-/// space is per hosting view, and toolbar items live in a different hosting view
-/// from the split, so the two can only be compared in AppKit window space.
-private struct WindowFrameReader: NSViewRepresentable {
-    var onChange: (CGRect) -> Void
-
-    func makeNSView(context: Context) -> FrameReportingView {
-        let view = FrameReportingView()
-        view.onChange = onChange
-        return view
-    }
-
-    func updateNSView(_ view: FrameReportingView, context: Context) {
-        view.onChange = onChange
-        view.reportSoon()
-    }
-
-    final class FrameReportingView: NSView {
-        var onChange: ((CGRect) -> Void)?
-        private var resizeObserver: NSObjectProtocol?
-        private var lastReported: CGRect?
-        private var reportPending = false
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
-            resizeObserver = nil
-            lastReported = nil
-            guard let window else { return }
-            resizeObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.didResizeNotification,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reportSoon() }
-            }
-            reportSoon()
-        }
-
-        override func layout() {
-            super.layout()
-            reportSoon()
-        }
-
-        /// Deferred one runloop turn: the callback writes SwiftUI state, which must
-        /// not happen during a view update, and coalescing keeps live resize cheap.
-        func reportSoon() {
-            guard !reportPending else { return }
-            reportPending = true
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.reportPending = false
-                guard self.window != nil else { return }
-                let frame = self.convert(self.bounds, to: nil)
-                guard frame != self.lastReported else { return }
-                self.lastReported = frame
-                self.onChange?(frame)
-            }
-        }
-
-        deinit {
-            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
-        }
-    }
-}
-
 private struct ToolbarSearchTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     @Binding var isFirstResponder: Bool
     var focusRequestToken: Int
     var onCommit: () -> Void
-    var onEscape: () -> Void
+    var onEscape: () -> Bool
 
     class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: ToolbarSearchTextField
@@ -5602,12 +5502,13 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
                 return true
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                // Clear the field editor directly so Escape visibly empties the field even
-                // though it stays first responder (updateNSView won't overwrite an
-                // actively-edited field).
-                textView.string = ""
-                if parent.text != "" { parent.text = "" }
-                parent.onEscape()
+                // Preserve the query on the first Escape while a search is running. When
+                // there is no active run, the callback clears the binding and the field
+                // editor directly because updateNSView will not overwrite active editing.
+                if parent.onEscape() {
+                    textView.string = ""
+                    if parent.text != "" { parent.text = "" }
+                }
                 return true
             }
             return false

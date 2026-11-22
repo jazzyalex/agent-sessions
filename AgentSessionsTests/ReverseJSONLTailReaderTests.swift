@@ -159,4 +159,15 @@ final class ReverseJSONLTailReaderTests: XCTestCase {
         XCTAssertEqual(try JSONLReader(url: tempURL).readLines(),
                        [#"{"n":1}"#, #"{"n":2}"#])
     }
+
+    func testJSONLReaderKeepsBufferedPrefixAndResumesAfterOversizeLine() throws {
+        let chunkSize = 8 * 1024
+        let longLine = #"{"text":""# + String(repeating: "a", count: 3 * chunkSize) + #""}"#
+        let oversizeLine = String(repeating: "b", count: 8_388_608 + 2 * chunkSize)
+        let finalLine = #"{"n":2}"#
+        write("\n" + longLine + "\r\n" + oversizeLine + "\n" + finalLine)
+
+        XCTAssertEqual(try JSONLReader(url: tempURL, chunkSize: chunkSize).readLines(),
+                       [longLine, #"{"type":"omitted","text":"[Oversize line omitted]"}"#, finalLine])
+    }
 }

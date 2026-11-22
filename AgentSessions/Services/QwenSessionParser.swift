@@ -198,8 +198,8 @@ enum QwenSessionParser {
     /// whatever the user has, because refusing to open a large transcript is worse than
     /// the parse cost. The `allowLargeFile:` seam other parsers carry was dead here — no
     /// caller ever took the guarded path — so it is not kept as decoration.
-    static func parseFileFull(at url: URL) -> Session? {
-        build(url: url, includeEvents: true)
+    static func parseFileFull(at url: URL, forSearch: Bool = false) -> Session? {
+        build(url: url, includeEvents: true, forSearch: forSearch)
     }
 
     static func isValidHeadObject(_ object: [String: Any], expectedSessionID: String) -> Bool {
@@ -207,7 +207,7 @@ enum QwenSessionParser {
         return record.sessionID.caseInsensitiveCompare(expectedSessionID) == .orderedSame
     }
 
-    private static func build(url: URL, includeEvents: Bool) -> Session? {
+    private static func build(url: URL, includeEvents: Bool, forSearch: Bool = false) -> Session? {
         guard let expectedSessionID = QwenSessionDiscovery.sessionID(forTranscript: url) else { return nil }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
 
@@ -298,7 +298,7 @@ enum QwenSessionParser {
                 firstUserTitle = text
             }
 
-            let events = makeEvents(from: record)
+            let events = makeEvents(from: record, forSearch: forSearch)
             nonMetaCount += events.reduce(into: 0) { count, event in
                 if event.kind != .meta { count += 1 }
             }
@@ -552,7 +552,7 @@ enum QwenSessionParser {
         return copy
     }
 
-    private static func makeEvents(from record: Record) -> [SessionEvent] {
+    private static func makeEvents(from record: Record, forSearch: Bool = false) -> [SessionEvent] {
         let timestamp = timestamp(from: record.object)
         let rawJSON = jsonString(record.object) ?? "{}"
         let role = (record.object["message"] as? [String: Any])?["role"] as? String
@@ -589,7 +589,7 @@ enum QwenSessionParser {
                     output.append(event(id: "\(record.uuid)-t\(partIndex)", timestamp: timestamp,
                                         kind: .tool_call, role: role ?? "assistant", text: nil,
                                         toolName: call["name"] as? String,
-                                        toolInput: jsonString(call["args"]),
+                                        toolInput: jsonString(call["args"], forSearch: forSearch),
                                         messageID: call["id"] as? String,
                                         rawJSON: rawJSON, parentID: record.parentUUID))
                 }
@@ -607,7 +607,7 @@ enum QwenSessionParser {
                     .compactMap { ($0 as? [String: Any])?["functionResponse"] as? [String: Any] }
                     .first
                 return [event(id: "\(record.uuid)-m", timestamp: timestamp, kind: .meta,
-                              role: record.subtype, text: toolResponseText(response?["response"]),
+                              role: record.subtype, text: toolResponseText(response?["response"], forSearch: forSearch),
                               toolName: response?["name"] as? String,
                               messageID: response?["id"] as? String,
                               rawJSON: rawJSON, parentID: record.parentUUID)]
@@ -620,7 +620,7 @@ enum QwenSessionParser {
                                     kind: toolResultIsError(record.object) ? .error : .tool_result,
                                     role: role ?? "tool", text: nil,
                                     toolName: response["name"] as? String,
-                                    toolOutput: toolResponseText(response["response"]),
+                                    toolOutput: toolResponseText(response["response"], forSearch: forSearch),
                                     messageID: response["id"] as? String,
                                     rawJSON: rawJSON, parentID: record.parentUUID))
             }
@@ -630,7 +630,7 @@ enum QwenSessionParser {
                                     kind: toolResultIsError(record.object) ? .error : .tool_result,
                                     role: role ?? "tool", text: nil,
                                     toolName: result?["name"] as? String,
-                                    toolOutput: jsonString(result?["resultDisplay"]),
+                                    toolOutput: jsonString(result?["resultDisplay"], forSearch: forSearch),
                                     messageID: result?["callId"] as? String,
                                     rawJSON: rawJSON, parentID: record.parentUUID))
             }
@@ -779,22 +779,22 @@ enum QwenSessionParser {
     /// Qwen wraps every tool result as `{"output": "<text>"}` (or `{"error": …}`), including
     /// the `agent` subagent's markdown report. Unwrap single-key envelopes so the transcript
     /// shows the text rather than a JSON literal with escaped newlines.
-    static func toolResponseText(_ value: Any?) -> String? {
+    static func toolResponseText(_ value: Any?, forSearch: Bool = false) -> String? {
         if let dict = value as? [String: Any], dict.count == 1 {
             if let output = dict["output"] as? String { return output }
             if let error = dict["error"] as? String { return error }
         }
-        return jsonString(value)
+        return jsonString(value, forSearch: forSearch)
     }
 
-    private static func jsonString(_ value: Any?) -> String? {
+    private static func jsonString(_ value: Any?, forSearch: Bool = false) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
         guard let text = ToolJSON.string(from: value, pretty: false) else {
             return nil
         }
         let byteCount = text.utf8.count
-        if byteCount > 32_768 { return "[OMITTED large JSON payload bytes=\(byteCount)]" }
+        if !forSearch && byteCount > 32_768 { return "[OMITTED large JSON payload bytes=\(byteCount)]" }
         return text
     }
 

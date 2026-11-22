@@ -290,7 +290,9 @@ enum SessionInlineImageMapper {
                                                                                minimumBase64PayloadLength: 1,
                                                                                shouldCancel: shouldCancel)
             case .claude:
-                return ClaudeBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: shouldCancel)
+                // The full scan also proves absence. Avoid walking the same
+                // records again when the probe finds a Claude image.
+                return true
             case .opencode:
                 let messageIDs = Array(Set(session.events.compactMap(\.messageID)).filter { $0.hasPrefix("msg_") })
                 return OpenCodeBase64ImageScanner.fileContainsBase64ImageDataURL(sessionFileURL: sessionFileURL,

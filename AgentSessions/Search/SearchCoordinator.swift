@@ -80,6 +80,14 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         var totalLarge: Int = 0
     }
 
+    @Published private(set) var queryError: String?
+    @Published private(set) var eligibleCount = 0
+    @Published private(set) var completeCount = 0
+    @Published private(set) var incompleteCount = 0
+    @Published private(set) var unresolvedCount = 0
+    @Published private(set) var verifiedKeys: Set<SessionKey> = []
+    @Published private(set) var snippets: [SessionKey: String] = [:]
+
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var wasCanceled: Bool = false
     @Published private(set) var results: [Session] = []
@@ -95,6 +103,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
     private var runID = UUID()
+    private var cancelledVerificationRunID: UUID?
+    private var metricOperation: SearchResponsivenessOperationID?
     // When a dataset-triggered refresh preserves old results, this holds the
     // run that owns the single replacing publication. Cleared when that run's
     // first publication replaces (or when a newer run starts).
@@ -173,24 +183,31 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }
 
-    func cancel() {
-        cancel(clearResults: true)
-    }
+    func cancel() { cancel(clearResults: false) }
+    func clear() { cancel(clearResults: true) }
 
     private func cancel(clearResults: Bool) {
+        SearchResponsivenessMetrics.shared.record(.searchCancelRequested, operationID: metricOperation, status: .cancelled)
         currentTask?.cancel()
         currentTask = nil
         deepScanTask?.cancel()
         deepScanTask = nil
+        cancelledVerificationRunID = clearResults ? nil : runID
+        let cancellationRun = UUID()
+        runID = cancellationRun
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.runID = UUID()
+            guard let self, self.runID == cancellationRun else { return }
             self.isRunning = false
             self.wasCanceled = true
             self.deepScanEnabled = false
             self.progress = .init()
             if clearResults {
                 self.results = []
+                self.queryError = nil
+                self.eligibleCount = 0
+                self.completeCount = 0
+                self.incompleteCount = 0
+                self.unresolvedCount = 0
             }
         }
     }
@@ -252,689 +269,237 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                all: [Session],
                effectiveDisplayTitles: [SessionKey: String] = [:],
                preserveResultsUntilRefreshPublishes: Bool = false) {
-        // Cancel any in-flight search
         currentTask?.cancel()
         deepScanTask?.cancel()
-        deepScanTask = nil
+        let currentRun = UUID()
+        runID = currentRun
+        cancelledVerificationRunID = nil
+        let metrics = SearchResponsivenessMetrics.shared
+        let operation = metrics.newOperationID()
+        metricOperation = operation
+        metrics.record(.searchRequestAccepted, operationID: operation, status: .accepted)
         wasCanceled = false
-        let newRunID = UUID()
-        runID = newRunID
-        preservedReplacementRunID = preserveResultsUntilRefreshPublishes ? newRunID : nil
-        // Immutable snapshot of effective displayed titles for this run. The
-        // caller may provide Claude archive sidecar titles; absence falls back
-        // to `session.listTitle`. Dictionary capture is a value copy.
-        let titleOverrides = effectiveDisplayTitles
-
-        let parsedForMetadata = FilterEngine.parseOperators(filters.query)
-        let metadataFreeText = parsedForMetadata.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let metadataRepo = filters.repoName ?? parsedForMetadata.repo
-        let metadataPath = filters.pathContains ?? parsedForMetadata.path
-        let metadataSideChatsOnly = filters.sideChatsOnly || parsedForMetadata.sideChatsOnly
-        let hasMetadataOnlyFilters = filters.model != nil ||
-            filters.dateFrom != nil ||
-            filters.dateTo != nil ||
-            metadataRepo != nil ||
-            metadataPath != nil ||
-            metadataSideChatsOnly ||
-            filters.selectedProjectIdentity != nil
-        if metadataFreeText.isEmpty, hasMetadataOnlyFilters {
-            let candidates = Self.candidates(from: all, allowed: allowed, filters: filters)
-            let out = Self.metadataFilteredCandidates(candidates,
-                                                        filters: filters,
-                                                        effectiveRepo: metadataRepo,
-                                                        effectivePath: metadataPath,
-                                                        effectiveSideChatsOnly: metadataSideChatsOnly,
-                                                        effectiveProjectIdentity: filters.selectedProjectIdentity)
-            Task { @MainActor [weak self] in
-                guard let self, self.runID == newRunID else { return }
-                self.results = out
-                _ = self.consumePreservedReplacement(for: newRunID)
-                self.isRunning = false
-                self.progress = .init()
-            }
-            return
-        }
-        
-        // Phase 0: fast path via SQLite FTS if available.
-        // NOTE: no standalone clear task here. The running-state clear runs as
-        // the first ordered hop inside each worker task below, so the
-        // clear-then-seed ordering is deterministic per run: a clear can never
-        // land after (and wipe) seeded title results.
-        if FeatureFlags.enableFTSSearch, let db = db {
-            // Cursor sessions are not indexed in the FTS database — exclude from FTS queries
-            // so they fall through to the unindexed/legacy transcript-cache search path.
-            let ftsAllowed = allowed.filter { $0 != .cursor }
-            let allowedRaw = ftsAllowed.map { $0.rawValue }
-            let parsed = FilterEngine.parseOperators(filters.query)
-            let freeText = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-            let effectiveFTSQuery = Self.makeInstantFTSQuery(from: freeText)
-            let effectiveRepo = filters.repoName ?? parsed.repo
-            let effectivePath = filters.pathContains ?? parsed.path
-            let effectiveSideChatsOnly = filters.sideChatsOnly || parsed.sideChatsOnly
-            let hasMetaFilters = (filters.model != nil) || (filters.dateFrom != nil) || (filters.dateTo != nil) || (effectiveRepo != nil) || (effectivePath != nil) || effectiveSideChatsOnly || filters.selectedProjectIdentity != nil
-            let includeSystemProbes = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
-
-            let prio: TaskPriority = FeatureFlags.lowerQoSForInteractiveSearch ? .utility : .userInitiated
-            currentTask = Task.detached(priority: prio) { [weak self, newRunID, titleOverrides] in
-                guard let self else { return }
-                // Ordered running-state initialization for this run. Every later
-                // results write on this task is sequenced after this hop, so the
-                // clear cannot race ahead of seeded title results.
-                await MainActor.run {
-                    guard self.runID == newRunID else { return }
-                    self.isRunning = true
-                    self.deepScanEnabled = enableDeepScan
-                    if self.preservedReplacementRunID != newRunID {
-                        self.results = []
-                    }
-                    self.progress = .init(phase: .indexed, scannedSmall: 0, totalSmall: 0, scannedLarge: 0, totalLarge: 0)
-                }
-                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                let hasData = (try? await db.hasSearchData(sources: allowedRaw)) ?? false
-                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                guard hasData else {
-                    // Fall back to legacy search until the DB is warmed, but seed
-                    // cheap effective-title matches so title correctness never
-                    // depends on DB warmup. Legacy appends without wiping them.
-                    let fallbackCandidates = Self.candidates(from: all, allowed: allowed, filters: filters)
-                    let fallbackSearchable = Self.metadataFilteredCandidates(fallbackCandidates,
-                                                                              filters: filters,
-                                                                              effectiveRepo: effectiveRepo,
-                                                                              effectivePath: effectivePath,
-                                                                              effectiveSideChatsOnly: effectiveSideChatsOnly,
-                                                                              effectiveProjectIdentity: filters.selectedProjectIdentity)
-                    let seededTitles = Self.cheapEffectiveTitleMatches(in: fallbackSearchable,
-                                                                        freeText: freeText,
-                                                                        overrides: titleOverrides)
-                    if !seededTitles.isEmpty {
-                        await MainActor.run {
-                            guard self.runID == newRunID else { return }
-                            self.results = seededTitles
-                            _ = self.consumePreservedReplacement(for: newRunID)
-                        }
-                    }
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                    await self.startLegacySearch(runID: newRunID,
-                                                 query: query,
-                                                 filters: filters,
-                                                 allowed: allowed,
-                                                 all: all,
-                                                 allowDeepScan: enableDeepScan,
-                                                 initialSeen: Set(seededTitles.map(SessionKey.init)),
-                                                 replaceFirstPublication: preserveResultsUntilRefreshPublishes && seededTitles.isEmpty)
-                    return
-                }
-
-                let candidates = Self.candidates(from: all, allowed: allowed, filters: filters)
-                let searchableCandidates = Self.metadataFilteredCandidates(candidates,
-                                                                            filters: filters,
-                                                                            effectiveRepo: effectiveRepo,
-                                                                            effectivePath: effectivePath,
-                                                                            effectiveSideChatsOnly: effectiveSideChatsOnly,
-                                                                            effectiveProjectIdentity: filters.selectedProjectIdentity)
-                var byKey: [SessionKey: Session] = [:]
-                byKey.reserveCapacity(searchableCandidates.count)
-                for session in searchableCandidates { byKey[SessionKey(session)] = session }
-
-                // If there's no free-text component, prefer in-memory filtering for correctness even
-                // when the DB is only partially populated.
-                if freeText.isEmpty, hasMetaFilters {
-                    let out = FilterEngine.filterSessions(candidates, filters: filters, transcriptCache: nil, allowTranscriptGeneration: false)
+        queryError = nil
+        completeCount = 0
+        incompleteCount = 0
+        unresolvedCount = 0
+        eligibleCount = 0
+        verifiedKeys = []
+        snippets = [:]
+        deepScanEnabled = enableDeepScan
+        isRunning = true
+        if !preserveResultsUntilRefreshPublishes { results = [] }
+        let store = self.store
+        currentTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            let terminal = metrics.beginSpan(.searchTerminal, operationID: operation)
+            defer { if let terminal { Task.isCancelled ? metrics.cancel(terminal) : metrics.end(terminal) } }
+            do {
+                let (metadata, _) = try SearchQuery.metadataTokens(SearchQuery.lex(filters.query))
+                let candidates = Self.metadataFilteredCandidates(
+                    Self.candidates(from: all, allowed: allowed, filters: filters), filters: filters,
+                    effectiveRepo: filters.repoName ?? metadata.repo,
+                    effectivePath: filters.pathContains ?? metadata.path,
+                    effectiveSideChatsOnly: filters.sideChatsOnly || metadata.sideChatsOnly,
+                    effectiveProjectIdentity: filters.selectedProjectIdentity)
+                let eligible = candidates.map { Self.searchRow($0, title: effectiveDisplayTitles[SessionKey($0)]) }
+                metrics.record(.searchEligibleCount, operationID: operation, counters: [.eligibleSessions: Int64(eligible.count)])
+                let exact = Self.exactIdentityMatches(metadata.freeText, sessions: eligible)
+                if metadata.freeText.isEmpty || !exact.isEmpty {
+                    let rows = metadata.freeText.isEmpty ? eligible : exact
                     await MainActor.run {
-                        guard self.runID == newRunID else { return }
-                        self.results = out
+                        guard self.runID == currentRun else { return }
+                        self.results = rows
+                        self.verifiedKeys = Set(rows.map(SessionKey.init))
+                        self.eligibleCount = rows.count
+                        self.completeCount = rows.count
                         self.isRunning = false
-                        self.progress.phase = .idle
+                        self.progress = .init()
                     }
                     return
                 }
 
-                if !freeText.isEmpty {
-                    // The analytics-backed DB can be partially populated during warmup.
-                    // Use FTS for indexed sessions, then fall back to legacy matching for unindexed ones.
-                    // Currency-aware membership (not presence-only): a session counts as "indexed" only
-                    // while its `session_search` row still matches the file's current mtime/size. A hot,
-                    // actively-appending file whose re-ingest is throttled (quiet gate + size cooldown in
-                    // SearchIngestService) drops out of this set, so shouldIncludeUnindexedCandidate lets
-                    // the legacy full-scan pick it up and return FRESH text instead of stale FTS rows.
-                    var indexedKeys: Set<SessionKey> = []
-                    var presentKeys: Set<SessionKey> = []
-                    for source in ftsAllowed {
-                        let current = (try? await db.indexedSessionIDsCurrent(sources: [source.rawValue])) ?? []
-                        indexedKeys.formUnion(current.map { SessionKey(source: source, id: $0) })
-                        let present = (try? await db.indexedSessionIDs(sources: [source.rawValue])) ?? []
-                        presentKeys.formUnion(present.map { SessionKey(source: source, id: $0) })
+                let tokenizer = try SearchTokenizer()
+                let compiled = try SearchQuery(filters.query, tokenizer: tokenizer)
+                var hits: [SessionKey: Session] = [:]
+                for session in eligible {
+                    try Task.checkCancellation()
+                    let predicate = SearchPredicateAccumulator(query: compiled, tokenizer: tokenizer)
+                    for field in [session.listTitle, session.lightweightCwd ?? "", session.lightweightRepoName ?? ""] {
+                        try predicate.consume(field: field)
                     }
-                    // Shared-database sessions use their lightweight per-session update
-                    // revision instead of the database file's global stat. Overlay those
-                    // identities onto the path-current set so a WAL-only update becomes
-                    // stale immediately without invalidating every sibling session.
-                    let identitySessions = all.filter { session in
-                        guard allowed.contains(session.source) else { return false }
-                        let url = URL(fileURLWithPath: session.filePath)
-                        let descriptor = session.source.descriptor
-                        return descriptor.parseFullByIdentity != nil
-                            && descriptor.searchUsesIdentityAtURL?(url) == true
-                    }
-                    for session in identitySessions { indexedKeys.remove(SessionKey(session)) }
-                    for group in Dictionary(grouping: identitySessions, by: \.source) {
-                        let states = (try? await db.sessionSearchIdentityStatesByID(for: group.key.rawValue)) ?? [:]
-                        for session in group.value
-                        where states[session.id]?.storagePath == session.filePath
-                            && states[session.id].map({
-                                SearchIngestService.contentRevision($0.revision, matches: session)
-                            }) == true {
-                            indexedKeys.insert(SessionKey(session))
-                        }
-                    }
-                    // Present-but-not-current: sessions with a session_search row whose stored mtime/size
-                    // no longer matches the file (re-ingest throttled). These have stale/no FTS coverage and
-                    // must be scanned regardless of size (see shouldIncludeUnindexedCandidate).
-                    let staleKeys = presentKeys.subtracting(indexedKeys)
-                    // In-memory candidate eligible scope: an exact project
-                    // selection or an archived-Claude-only search must both bind
-                    // the DB result window to the exact metadata-filtered
-                    // candidates before FTS LIMIT, or unrelated high-ranked rows
-                    // consume it. Out-of-scope present rows join the ineligible
-                    // set so the SQL LIMIT bounds the filtered ranking. Uses
-                    // only the existing eligible/ineligible coordinator
-                    // mechanism; DB.swift is untouched.
-                    let needsCandidateScope = filters.selectedProjectIdentity != nil
-                        || filters.archivedClaudeDesktopOnly
-                    let candidateScopedKeys: Set<SessionKey>? = needsCandidateScope
-                        ? Set(searchableCandidates.map(SessionKey.init))
-                        : nil
-                    var ftsEligibleKeys = indexedKeys
-                    var ftsIneligibleKeys = staleKeys
-                    if let scoped = candidateScopedKeys {
-                        ftsEligibleKeys = ftsEligibleKeys.intersection(scoped)
-                        ftsIneligibleKeys = ftsIneligibleKeys.union(presentKeys.subtracting(scoped))
-                    }
-                    let ftsEligibleIDs = Set(ftsEligibleKeys.map(\.id))
-                    let ftsIneligibleIDs = Set(ftsIneligibleKeys.map(\.id))
-                    let ftsOwnerByID = Dictionary(uniqueKeysWithValues: presentKeys.map { ($0.id, $0) })
-                    // Cheap effective-title matches are correctness results: they
-                    // derive only from already metadata-filtered candidates and
-                    // never depend on FTS currency, capacity, edits, or reindex.
-                    let titleMatches = Self.cheapEffectiveTitleMatches(in: searchableCandidates,
-                                                                        freeText: freeText,
-                                                                        overrides: titleOverrides)
-                    let titleOnlyKeys = Set(titleMatches.map(SessionKey.init))
-                    if ftsEligibleKeys.isEmpty {
-                        if !titleMatches.isEmpty {
-                            await MainActor.run {
-                                guard self.runID == newRunID else { return }
-                                self.results = titleMatches
-                                _ = self.consumePreservedReplacement(for: newRunID)
-                            }
-                        }
-                        if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                        await self.startLegacySearch(runID: newRunID,
-                                                     query: query,
-                                                     filters: filters,
-                                                     allowed: allowed,
-                                                     all: all,
-                                                     allowDeepScan: enableDeepScan,
-                                                     initialSeen: titleOnlyKeys,
-                                                     replaceFirstPublication: preserveResultsUntilRefreshPublishes && titleMatches.isEmpty)
-                        return
-                    }
-
-                    let dbResultLimit = self.ftsResultLimitForTesting
-                        ?? Self.ftsResultLimit(filters: filters,
-                                               effectiveRepo: effectiveRepo,
-                                               totalSessionCount: all.count)
-                    // Filter currency while stepping one SQLite statement. This both fills
-                    // the post-filter result window and keeps the scan on one read snapshot,
-                    // so concurrent identity cleanup cannot shift an OFFSET between pages.
-                    let ids = (try? await db.searchSessionIDsFTS(
-                        sources: allowedRaw,
-                        model: filters.model,
-                        repoSubstr: nil,
-                        pathSubstr: effectivePath,
-                        dateFrom: filters.dateFrom,
-                        dateTo: filters.dateTo,
-                        query: effectiveFTSQuery,
-                        includeSystemProbes: includeSystemProbes,
-                        limit: dbResultLimit,
-                        eligibleSessionIDs: ftsEligibleIDs,
-                        ineligibleSessionIDs: ftsIneligibleIDs
-                    )) ?? []
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-
-                    let deepEnabled = enableDeepScan && self.deepToolOutputsEnabled()
-                    var mergedKeys = ids.compactMap { ftsOwnerByID[$0] }
-                    var mergedSet = Set(mergedKeys)
-                    // Title-only hits stay outside FTS capacity accounting so
-                    // title correctness never depends on the FTS result limit.
-                    // mergedSet stays FTS-only; `seen` tracks the full union.
-                    // Dedupe against published FTS sessions (byID-filtered), not
-                    // raw FTS IDs, so a title is never dropped when its FTS row
-                    // exists but the session fell outside the metadata window.
-                    let ftsInitial = mergedKeys.compactMap { byKey[$0] }
-                    let ftsInitialKeys = Set(ftsInitial.map(SessionKey.init))
-                    let titleOnlyInitial = titleMatches.filter { !ftsInitialKeys.contains(SessionKey($0)) }
-                    var out = ftsInitial + titleOnlyInitial
-                    var seen = Set(out.map(SessionKey.init))
-                    let initialOut = out
-                    await MainActor.run {
-                        guard self.runID == newRunID else { return }
-                        self.results = initialOut
-                        _ = self.consumePreservedReplacement(for: newRunID)
-                    }
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-
-                    // Append tool I/O FTS hits after the initial UI update to keep Instant responsive.
-                    if self.toolIOIndexEnabled(), mergedKeys.count < dbResultLimit {
-                        var currentToolIOKeys: Set<SessionKey> = []
-                        var presentToolIOKeys: Set<SessionKey> = []
-                        for source in ftsAllowed {
-                            let current = (try? await db.indexedToolIOSessionIDsCurrent(sources: [source.rawValue])) ?? []
-                            currentToolIOKeys.formUnion(current.map { SessionKey(source: source, id: $0) })
-                            let present = (try? await db.toolIOSessionIDs(sources: [source.rawValue])) ?? []
-                            presentToolIOKeys.formUnion(present.map { SessionKey(source: source, id: $0) })
-                        }
-                        for session in identitySessions { currentToolIOKeys.remove(SessionKey(session)) }
-                        for group in Dictionary(grouping: identitySessions, by: \.source) {
-                            let states = (try? await db.sessionToolIOIdentityStatesByID(for: group.key.rawValue)) ?? [:]
-                            for session in group.value
-                            where states[session.id]?.storagePath == session.filePath
-                                && states[session.id].map({
-                                    SearchIngestService.contentRevision($0.revision, matches: session)
-                                }) == true {
-                                currentToolIOKeys.insert(SessionKey(session))
-                            }
-                        }
-                        // Present-but-not-current tool I/O rows: the exact complement of the
-                        // eligible set inside the tool I/O corpus, so the SQL LIMIT can bound
-                        // the filtered ranking instead of the unfiltered one.
-                        let staleToolIOKeys = presentToolIOKeys.subtracting(currentToolIOKeys)
-                        var toolEligibleKeys = currentToolIOKeys
-                        var toolIneligibleKeys = staleToolIOKeys
-                        if let scoped = candidateScopedKeys {
-                            toolEligibleKeys = toolEligibleKeys.intersection(scoped)
-                            toolIneligibleKeys = toolIneligibleKeys.union(presentToolIOKeys.subtracting(scoped))
-                        }
-                        let toolEligibleIDs = Set(toolEligibleKeys.map(\.id))
-                        let toolIneligibleIDs = Set(toolIneligibleKeys.map(\.id))
-                        let toolOwnerByID = Dictionary(uniqueKeysWithValues: presentToolIOKeys.map { ($0.id, $0) })
-                        let toolResultLimit = dbResultLimit - mergedKeys.count
-                        // Exclude ordinary hits before applying capacity; otherwise a top
-                        // tool match that is already present consumes the remaining slot and
-                        // hides the next unique tool-only result.
-                        let toolIDs = (try? await db.searchSessionIDsToolIOFTS(
-                            sources: allowedRaw,
-                            model: filters.model,
-                            repoSubstr: nil,
-                            pathSubstr: effectivePath,
-                            dateFrom: filters.dateFrom,
-                            dateTo: filters.dateTo,
-                            query: effectiveFTSQuery,
-                            includeSystemProbes: includeSystemProbes,
-                            limit: toolResultLimit,
-                            eligibleSessionIDs: toolEligibleIDs,
-                            ineligibleSessionIDs: toolIneligibleIDs,
-                            excludingSessionIDs: Set(mergedKeys.compactMap { key in
-                                toolOwnerByID[key.id] == key ? key.id : nil
-                            })
-                        )) ?? []
-                        var addedAny = false
-                        for id in toolIDs {
-                            if mergedKeys.count >= dbResultLimit { break }
-                            guard let key = toolOwnerByID[id] else { continue }
-                            if mergedSet.insert(key).inserted {
-                                mergedKeys.append(key)
-                                addedAny = true
-                            }
-                        }
-                        if addedAny {
-                            // Re-union FTS hits (ordinary + tool, ranked) with the
-                            // cheap title matches so title correctness never
-                            // disappears when tool-I/O results publish.
-                            let ftsOut = mergedKeys.compactMap { byKey[$0] }
-                            let ftsOutKeys = Set(ftsOut.map(SessionKey.init))
-                            let titleOnlyDeduped = titleMatches.filter { !ftsOutKeys.contains(SessionKey($0)) }
-                            let updated = ftsOut + titleOnlyDeduped
-                            await MainActor.run {
-                                guard self.runID == newRunID else { return }
-                                self.results = updated
-                            }
-                            out = updated
-                            seen = Set(updated.map(SessionKey.init))
-                        }
-                    }
-
-                    // Always include Cursor sessions in unindexed candidates (they have no FTS index).
-                    // Also include non-large unindexed rows so restored/lightweight sessions remain
-                    // content-searchable while their FTS rows are still missing or warming.
-                    let smallSearchThreshold = FeatureFlags.searchSmallSizeBytes
-                    let unindexedCandidates = searchableCandidates.filter {
-                        Self.shouldIncludeUnindexedCandidate($0,
-                                                             indexedIDs: indexedKeys,
-                                                             seenIDs: seen,
-                                                             enableDeepScan: enableDeepScan,
-                                                             smallSearchThreshold: smallSearchThreshold,
-                                                             staleIDs: staleKeys)
-                    }
-                    let deepCandidates = deepEnabled
-                        ? searchableCandidates.filter {
-                            indexedKeys.contains(SessionKey($0))
-                                && !seen.contains(SessionKey($0))
-                                && Self.shouldDeepScan(session: $0)
-                        }
-                        : []
-
-                    let shouldRunUnindexed = !unindexedCandidates.isEmpty
-                    let shouldRunDeep = !deepCandidates.isEmpty
-                    if !shouldRunUnindexed && !shouldRunDeep {
-                        await MainActor.run {
-                            guard self.runID == newRunID else { return }
-                            self.isRunning = false
-                            self.progress.phase = .idle
-                        }
-                        return
-                    }
-
-                    self.startBackgroundDeepScan(
-                        runID: newRunID,
-                        query: query,
-                        filters: filters,
-                        unindexedCandidates: unindexedCandidates,
-                        deepCandidates: deepCandidates,
-                        initialSeen: seen
-                    )
-                    return
+                    if predicate.truth(complete: false) == .yes { hits[SessionKey(session)] = session }
                 }
-
-                if hasMetaFilters {
-                    let ids = (try? await db.prefilterSessionIDs(
-                        sources: allowedRaw,
-                        model: filters.model,
-                        repoSubstr: effectiveRepo,
-                        pathSubstr: effectivePath,
-                        dateFrom: filters.dateFrom,
-                        dateTo: filters.dateTo,
-                        limit: FeatureFlags.ftsSearchLimit
-                    )) ?? []
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-
-                    var byID: [String: Session] = [:]
-                    byID.reserveCapacity(all.count)
-                    for s in all { byID[s.id] = s }
-                    let out = ids.compactMap { byID[$0] }
-                    await MainActor.run {
-                        guard self.runID == newRunID else { return }
-                        self.results = out
-                        _ = self.consumePreservedReplacement(for: newRunID)
-                        self.isRunning = false
-                        self.progress.phase = .idle
+                if FeatureFlags.enableFTSSearch, let db = self.db, let fts = compiled.ftsCandidate {
+                    // Scope each source and every metadata predicate before capacity. Source-qualified
+                    // keys also avoid dictionary traps when two providers use the same raw ID.
+                    for source in allowed {
+                        try Task.checkCancellation()
+                        let scoped = eligible.filter { $0.source == source }
+                        let originals = candidates.filter { $0.source == source }
+                        let ids = await Self.indexedCandidates(originals, db: db, toolIO: false)
+                        guard !ids.isEmpty else { continue }
+                        let limit = self.ftsResultLimitForTesting ?? FeatureFlags.ftsSearchLimit
+                        let ordinary = (try? await db.searchSessionIDsFTS(
+                            sources: [source.rawValue], model: nil, repoSubstr: nil, pathSubstr: nil,
+                            dateFrom: nil, dateTo: nil, query: fts,
+                            includeSystemProbes: UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"),
+                            limit: limit, eligibleSessionIDs: ids)) ?? []
+                        var found = Set(ordinary)
+                        if self.toolIOIndexEnabled() {
+                            let tool = (try? await db.searchSessionIDsToolIOFTS(
+                                sources: [source.rawValue], model: nil, repoSubstr: nil, pathSubstr: nil,
+                                dateFrom: nil, dateTo: nil, query: fts,
+                                includeSystemProbes: UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"),
+                                limit: max(0, limit - found.count), eligibleSessionIDs: await Self.indexedCandidates(originals, db: db, toolIO: true),
+                                excludingSessionIDs: found)) ?? []
+                            found.formUnion(tool)
+                        }
+                        for session in scoped where found.contains(session.id) { hits[SessionKey(session)] = session }
                     }
-                    return
                 }
-
-                // Nothing to search.
+                try Task.checkCancellation()
+                let instantRows = eligible.filter { hits[SessionKey($0)] != nil }
                 await MainActor.run {
-                    guard self.runID == newRunID else { return }
-                    self.results = []
-                    _ = self.consumePreservedReplacement(for: newRunID)
+                    guard self.runID == currentRun else { return }
+                    metrics.record(.searchInstantFirstPublication, operationID: operation, status: .published, counters: [.resultCount: Int64(instantRows.count)])
+                    self.results = instantRows
+                    self.eligibleCount = eligible.count
+                    self.unresolvedCount = eligible.count
+                    self.progress = .init(phase: enableDeepScan ? .legacySmall : .indexed,
+                                          scannedSmall: 0, totalSmall: eligible.count)
+                    self.isRunning = enableDeepScan
+                }
+                guard enableDeepScan else { return }
+                var complete = 0, incomplete = 0, unresolved = 0
+                var verified: Set<SessionKey> = []
+                var snippets: [SessionKey: String] = [:]
+                var lastPublication = ContinuousClock.now
+                var visited = 0
+                for (index, session) in eligible.enumerated() {
+                    if Task.isCancelled { break }
+                    let result = await SearchMetricScope.$requestID.withValue(operation) {
+                        await store.scan(session: session, query: compiled)
+                    }
+                    if Task.isCancelled { break }
+                    visited = index + 1
+                    if result.summary.complete { complete += 1 } else { incomplete += 1 }
+                    switch result.truth {
+                    case .yes:
+                        verified.insert(result.key)
+                        hits[result.key] = session
+                        snippets[result.key] = result.snippet
+                    case .no: hits[result.key] = nil
+                    case .unknown: unresolved += 1
+                    }
+                    if ContinuousClock.now - lastPublication >= .milliseconds(100) || index == eligible.count - 1 {
+                        let rows = eligible.filter { hits[SessionKey($0)] != nil }
+                        let counts = (complete, incomplete, unresolved + eligible.count - index - 1)
+                        let verifiedSnapshot = verified, snippetSnapshot = snippets
+                        await MainActor.run {
+                            guard self.runID == currentRun else { return }
+                            self.results = rows
+                            metrics.record(.searchCoverageCounters, operationID: operation, status: .published, counters: [.completeSessions: Int64(counts.0), .incompleteSessions: Int64(counts.1), .verifiedResults: Int64(verifiedSnapshot.count)])
+                            self.verifiedKeys = verifiedSnapshot
+                            self.snippets = snippetSnapshot
+                            self.completeCount = counts.0
+                            self.incompleteCount = counts.1
+                            self.unresolvedCount = counts.2
+                            self.progress.scannedSmall = index + 1
+                        }
+                        lastPublication = .now
+                    }
+                }
+                let finalRows = eligible.filter { hits[SessionKey($0)] != nil }
+                let finalVerified = verified, finalSnippets = snippets
+                let finalCounts = (complete, incomplete, unresolved + eligible.count - visited)
+                await MainActor.run {
+                    guard self.runID == currentRun || self.cancelledVerificationRunID == currentRun else { return }
+                    self.results = finalRows
+                    self.verifiedKeys = finalVerified
+                    self.snippets = finalSnippets
+                    self.completeCount = finalCounts.0
+                    self.incompleteCount = finalCounts.1
+                    self.unresolvedCount = finalCounts.2
                     self.isRunning = false
                     self.progress.phase = .idle
+                    self.cancelledVerificationRunID = nil
                 }
-            }
-            return
-        }
-
-        // Launch orchestration (no FTS: feature flag off or no DB). Seed cheap
-        // effective-title matches so title correctness never depends on the index.
-        Task { [weak self, titleOverrides] in
-            guard let self else { return }
-            // Same ordered initialization as the FTS path: clear first on this
-            // task, so seeded titles below cannot be wiped by a racing clear.
-            await MainActor.run {
-                guard self.runID == newRunID else { return }
-                self.isRunning = true
-                self.deepScanEnabled = enableDeepScan
-                if self.preservedReplacementRunID != newRunID {
+            } catch is CancellationError {
+                await self.finishCanceled(runID: currentRun)
+            } catch {
+                await MainActor.run {
+                    guard self.runID == currentRun else { return }
+                    self.queryError = error.localizedDescription
                     self.results = []
+                    self.isRunning = false
                 }
-                self.progress = .init(phase: .indexed, scannedSmall: 0, totalSmall: 0, scannedLarge: 0, totalLarge: 0)
             }
-            if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-            let parsedSeed = FilterEngine.parseOperators(filters.query)
-            let freeTextSeed = parsedSeed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !freeTextSeed.isEmpty {
-                let seedCandidates = Self.candidates(from: all, allowed: allowed, filters: filters)
-                let seedSearchable = Self.metadataFilteredCandidates(seedCandidates,
-                                                                       filters: filters,
-                                                                       effectiveRepo: filters.repoName ?? parsedSeed.repo,
-                                                                       effectivePath: filters.pathContains ?? parsedSeed.path,
-                                                                       effectiveSideChatsOnly: filters.sideChatsOnly || parsedSeed.sideChatsOnly,
-                                                                       effectiveProjectIdentity: filters.selectedProjectIdentity)
-                let seeded = Self.cheapEffectiveTitleMatches(in: seedSearchable,
-                                                              freeText: freeTextSeed,
-                                                              overrides: titleOverrides)
-                if !seeded.isEmpty {
-                    await MainActor.run {
-                        guard self.runID == newRunID else { return }
-                        self.results = seeded
-                        _ = self.consumePreservedReplacement(for: newRunID)
-                    }
-                }
-                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                await self.startLegacySearch(runID: newRunID,
-                                             query: query,
-                                             filters: filters,
-                                             allowed: allowed,
-                                             all: all,
-                                             allowDeepScan: enableDeepScan,
-                                             initialSeen: Set(seeded.map(SessionKey.init)),
-                                             replaceFirstPublication: preserveResultsUntilRefreshPublishes && seeded.isEmpty)
-                return
-            }
-            await self.startLegacySearch(runID: newRunID,
-                                         query: query,
-                                         filters: filters,
-                                         allowed: allowed,
-                                         all: all,
-                                         allowDeepScan: enableDeepScan,
-                                         replaceFirstPublication: preserveResultsUntilRefreshPublishes)
         }
     }
 
-    private func startLegacySearch(runID: UUID,
-                                   query: String,
-                                   filters: Filters,
-                                   allowed: Set<SessionSource>,
-                                   all: [Session],
-                                   allowDeepScan: Bool,
-                                   initialSeen: Set<SessionKey> = [],
-                                   replaceFirstPublication: Bool = false) async {
-        let prio: TaskPriority = FeatureFlags.lowerQoSForInteractiveSearch ? .utility : .userInitiated
-        currentTask = Task.detached(priority: prio) { [weak self, runID] in
-            guard let self else { return }
-            // Restore pre-index candidate building: all allowed sessions, no DB/hybrid tiers
-            let threshold = FeatureFlags.searchSmallSizeBytes
-            let candidates = Self.candidates(from: all, allowed: allowed, filters: filters)
-
-            var nonLarge: [Session] = []
-            var large: [Session] = []
-            nonLarge.reserveCapacity(candidates.count)
-            large.reserveCapacity(max(1, candidates.count / 2))
-            for s in candidates {
-                let size = Self.sizeBytes(for: s)
-                if size >= threshold { large.append(s) } else { nonLarge.append(s) }
+    static func exactIdentityMatches(_ freeText: String, sessions: [Session]) -> [Session] {
+        guard let tokens = try? SearchQuery.lex(freeText), tokens.count == 1 else { return [] }
+        let raw = tokens[0].value
+        guard !raw.contains("*") else { return [] }
+        func normalized(_ value: String) -> String { UUID(uuidString: value)?.uuidString.lowercased() ?? value }
+        let wanted = normalized(raw)
+        return sessions.filter { session in
+            var aliases = [session.id]
+            if session.source == .codex || session.source == .claude {
+                if let hint = session.codexInternalSessionIDHint { aliases.append(hint) }
+                let basename = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
+                let candidate = session.source == .codex ? String(basename.suffix(36)) : basename
+                if let id = UUID(uuidString: candidate) { aliases.append(id.uuidString) }
             }
-            nonLarge.sort { $0.modifiedAt > $1.modifiedAt }
-            large.sort { $0.modifiedAt > $1.modifiedAt }
-
-            let nonLargeCount = nonLarge.count
-            let largeCount = large.count
-            await MainActor.run {
-                guard self.runID == runID else { return }
-                self.progress = .init(phase: .legacySmall, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
-            }
-
-            // Phase 1: nonLarge batched
-            let batchSize = 64
-            // Seeded effective-title IDs are already published; skip them here
-            // so the legacy scan unions without duplicating or wiping them.
-            var seen = initialSeen
-            for start in stride(from: 0, to: nonLarge.count, by: batchSize) {
-                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-                let end = min(start + batchSize, nonLarge.count)
-                let batch = Array(nonLarge[start..<end])
-                let hits = await self.searchBatch(batch: batch,
-                                                  query: query,
-                                                  filters: filters,
-                                                  threshold: threshold,
-                                                  textScope: .all,
-                                                  allowDeepParse: true,
-                                                  allowTranscriptGeneration: false)
-                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-
-                // Filter out duplicates before entering MainActor
-                let newHits = hits.filter { !seen.contains(SessionKey($0)) }
-                for s in newHits { seen.insert(SessionKey(s)) }
-
-                await MainActor.run {
-                    guard self.runID == runID else { return }
-                    if replaceFirstPublication, !newHits.isEmpty, self.consumePreservedReplacement(for: runID) {
-                        self.results = newHits
-                    } else {
-                        self.results.append(contentsOf: newHits)
-                    }
-                    if FeatureFlags.throttleSearchUIUpdates {
-                        let now = DispatchTime.now()
-                        if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
-                            self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
-                            self.progressThrottleLastFlush = now
-                        }
-                    } else {
-                        self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
-                    }
-                }
-                if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
-            }
-
-            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-
-            // Phase 2: large sequential
-            await MainActor.run { if self.runID == runID { self.progress.phase = .legacyLarge } }
-            var idx = 0
-            var staged: [Session] = []
-            var lastResultsFlush = DispatchTime.now()
-            while idx < large.count {
-                // Check for promotion request and reorder so promoted item is next.
-                let want = await self.promotionState.consumePromoted()
-
-                if let want, let pos = large[idx...].firstIndex(where: { $0.id == want }) {
-                    if pos != idx { large.swapAt(idx, pos) }
-                }
-
-                let s = large[idx]
-                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-                if let parsed = await self.parseFullIfNeeded(session: s,
-                                                             threshold: threshold,
-                                                             allowDeepParse: allowDeepScan,
-                                                             allowLargePiParse: allowDeepScan) {
-                    if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-
-                    // Optionally persist parsed session back to indexers for accuracy outside search
-                    if allowDeepScan, !FeatureFlags.disableSessionUpdatesDuringSearch {
-                        self.store.updateSession(parsed)
-                    }
-
-                    let cache = self.transcriptCache(for: parsed.source)
-                    if FilterEngine.sessionMatches(parsed,
-                                                  filters: filters,
-                                                  transcriptCache: cache,
-                                                  allowTranscriptGeneration: false,
-                                                  textScope: .all) {
-                        // Check and update seen outside MainActor
-                        let parsedKey = SessionKey(parsed)
-                        let shouldAdd = !seen.contains(parsedKey)
-                        if shouldAdd {
-                            seen.insert(parsedKey)
-                            if FeatureFlags.coalesceSearchResults {
-                                staged.append(parsed)
-                                let now = DispatchTime.now()
-                                if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
-                                    let toFlush = staged
-                                    staged.removeAll(keepingCapacity: true)
-                                    lastResultsFlush = now
-                                    await MainActor.run {
-                                        guard self.runID == runID else { return }
-                                        if replaceFirstPublication, !toFlush.isEmpty, self.consumePreservedReplacement(for: runID) {
-                                            self.results = toFlush
-                                        } else {
-                                            self.results.append(contentsOf: toFlush)
-                                        }
-                                    }
-                                }
-                            } else {
-                                await MainActor.run {
-                                    guard self.runID == runID else { return }
-                                    if replaceFirstPublication, self.consumePreservedReplacement(for: runID) {
-                                        self.results = [parsed]
-                                    } else {
-                                        self.results.append(parsed)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if FeatureFlags.throttleSearchUIUpdates {
-                    let now = DispatchTime.now()
-                    if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 {
-                        let currentIdx = idx
-                        await MainActor.run {
-                            if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 }
-                            self.progressThrottleLastFlush = now
-                        }
-                    }
-                } else {
-                    let currentIdx = idx
-                    await MainActor.run { if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 } }
-                }
-                if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
-                idx += 1
-            }
-            // Final flush of any staged results
-            if FeatureFlags.coalesceSearchResults && !staged.isEmpty {
-                let toFlush = staged
-                staged.removeAll()
-                await MainActor.run {
-                    guard self.runID == runID else { return }
-                    if replaceFirstPublication, self.consumePreservedReplacement(for: runID) {
-                        self.results = toFlush
-                    } else {
-                        self.results.append(contentsOf: toFlush)
-                    }
-                }
-            }
-
-            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-                await MainActor.run {
-                    guard self.runID == runID else { return }
-                    if replaceFirstPublication, self.consumePreservedReplacement(for: runID) {
-                        // Zero-hit refresh must still replace: no legacy batch
-                        // published, so clear preserved old rows instead of leaving
-                        // deleted rows visible.
-                        self.results = []
-                    }
-                    self.isRunning = false
-                    self.progress.phase = .idle
-                }
+            return aliases.contains { normalized($0) == wanted }
         }
-        await currentTask?.value
     }
 
-    /// Internal, not private, so tests can pin the nil-vs-zero distinction in
-    /// `lightweightCommands`. This is the only consumer that treats the two
-    /// differently — `passesHasCommandsFilter` collapses them with `?? 0` — so
-    /// without reaching it, a parser emitting `0` where it means "unknown" is
-    /// unfalsifiable by the suite.
+    private static func indexedCandidates(_ sessions: [Session], db: IndexDB, toolIO: Bool) async -> Set<String> {
+        guard let source = sessions.first?.source else { return [] }
+        let present = Set(toolIO
+            ? ((try? await db.toolIOSessionIDs(sources: [source.rawValue])) ?? [])
+            : ((try? await db.indexedSessionIDs(sources: [source.rawValue])) ?? []))
+        var current = Set(toolIO
+            ? ((try? await db.indexedToolIOSessionIDsCurrent(sources: [source.rawValue])) ?? [])
+            : ((try? await db.indexedSessionIDsCurrent(sources: [source.rawValue])) ?? []))
+        let identities = sessions.filter {
+            $0.source.descriptor.searchUsesIdentityAtURL?(URL(fileURLWithPath: $0.filePath)) == true
+        }
+        if !identities.isEmpty {
+            let states = toolIO
+                ? ((try? await db.sessionToolIOIdentityStatesByID(for: source.rawValue)) ?? [:])
+                : ((try? await db.sessionSearchIdentityStatesByID(for: source.rawValue)) ?? [:])
+            for session in identities {
+                current.remove(session.id)
+                if let state = states[session.id], state.storagePath == session.filePath,
+                   SearchIngestService.contentRevision(state.revision, matches: session) { current.insert(session.id) }
+            }
+        }
+        return Set(sessions.map(\.id)).subtracting(present.subtracting(current))
+    }
+
+    static func searchRow(_ session: Session, title: String? = nil, path: String? = nil, parsedMetadata: Bool = false, id: String? = nil) -> Session {
+        var row = Session(id: id ?? session.id, source: session.source, startTime: session.startTime,
+            endTime: session.endTime, model: session.model, filePath: path ?? session.filePath,
+            fileSizeBytes: session.fileSizeBytes, eventCount: session.eventCount, events: [],
+            cwd: parsedMetadata ? session.cwd : session.lightweightCwd, repoName: parsedMetadata ? session.repoName : session.lightweightRepoName,
+            lightweightTitle: title ?? session.listTitle, lightweightCommands: parsedMetadata ? session.events.filter { $0.kind == .tool_call }.count : session.lightweightCommands,
+            isHousekeeping: session.isHousekeeping, codexInternalSessionIDHint: parsedMetadata ? session.codexInternalSessionID : session.codexInternalSessionIDHint,
+            parentSessionID: session.parentSessionID, subagentType: session.subagentType,
+            relationshipKind: session.relationshipKind, customTitle: title ?? session.customTitle,
+            codexOriginator: session.codexOriginator, codexSource: session.codexSource,
+            codexSurface: session.codexSurface, originator: session.originator,
+            originSource: session.originSource, surface: session.surface,
+            reasoningEffort: session.reasoningEffort, deletedAt: session.deletedAt)
+        row.isFavorite = session.isFavorite
+        row.sourceStorageIdentity = session.sourceStorageIdentity
+        row.sourceStorageRevision = session.sourceStorageRevision
+        row.sourcePreviewDigest = session.sourcePreviewDigest
+        return row
+    }
+
     static func shouldDeepScan(session: Session) -> Bool {
         let estimatedCommands: Int = {
             if let c = session.lightweightCommands { return c }
@@ -967,53 +532,6 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     ///
     /// We avoid trigram/substr indexing, but we can still improve recall (especially for identifiers)
     /// by using FTS prefix queries when the user's input is a simple space-delimited term list.
-    private static func makeInstantFTSQuery(from freeText: String) -> String {
-        let q = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return q }
-
-        let explicit = SearchTextMatcher.hasExplicitFTSSyntax(q)
-
-        // Multi-word queries should behave like phrase searches by default (the same semantics
-        // used for transcript navigation), so users can distinguish "exit" from "exit code".
-        // Power users can still opt into explicit FTS query syntax by using quotes/operators/etc.
-        if q.contains(where: \.isWhitespace) {
-            // If the user already wrote an explicit FTS query (quotes, boolean ops, prefix, etc),
-            // do not rewrite it.
-            if explicit { return q }
-
-            let normalized = q.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            return "\"\(normalized)\""
-        }
-
-        // If the user already wrote an explicit FTS query (quotes, boolean ops, prefix, etc),
-        // do not rewrite it.
-        if explicit { return q }
-
-        let rawTerms = q.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard !rawTerms.isEmpty else { return q }
-
-        func isSimpleTerm(_ s: String) -> Bool {
-            guard !s.isEmpty else { return false }
-            // Restrict to ASCII letters/digits/underscore to avoid breaking FTS syntax.
-            for u in s.unicodeScalars {
-                let v = u.value
-                let isAZ = (v >= 65 && v <= 90) || (v >= 97 && v <= 122)
-                let is09 = (v >= 48 && v <= 57)
-                let isUnderscore = (v == 95)
-                if !(isAZ || is09 || isUnderscore) { return false }
-            }
-            return true
-        }
-
-        // Only auto-prefix longer, simple terms; short prefixes get noisy.
-        let rewritten = rawTerms.map { term -> String in
-            guard term.count >= 3 else { return term }
-            guard isSimpleTerm(term) else { return term }
-            return term + "*"
-        }
-        return rewritten.joined(separator: " ")
-    }
-
     private static func candidates(from all: [Session], allowed: Set<SessionSource>, filters: Filters) -> [Session] {
         let sideChatsOnly = filters.sideChatsOnly || FilterEngine.parseOperators(filters.query).sideChatsOnly
         return all.filter { session in
@@ -1044,280 +562,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                                        archivedClaudeDesktopOnly: filters.archivedClaudeDesktopOnly,
                                        archivedClaudeSessionIDs: filters.archivedClaudeSessionIDs,
                                        sideChatsOnly: effectiveSideChatsOnly ?? filters.sideChatsOnly,
-                                       selectedProjectIdentity: effectiveProjectIdentity ?? filters.selectedProjectIdentity)
+                                       selectedProjectIdentity: effectiveProjectIdentity ?? filters.selectedProjectIdentity,
+                                       hiddenProjectRoots: filters.hiddenProjectRoots)
         return FilterEngine.filterSessions(candidates,
                                            filters: metadataFilters,
                                            transcriptCache: nil,
                                            allowTranscriptGeneration: false)
-    }
-
-    /// The effective row title for search: a caller-provided immutable snapshot
-    /// (e.g. Claude archive sidecar titles) wins when present for the session identity;
-    /// otherwise the model-level row title is used. No DB migration or reindex.
-    private static func effectiveSearchTitle(for session: Session,
-                                             overrides: [SessionKey: String]) -> String {
-        if let override = overrides[SessionKey(session)] {
-            return override
-        }
-        return session.listTitle
-    }
-
-    /// Cheap title-only matches for a non-empty free-text query, derived only from
-    /// candidates that already pass allowed-source and all metadata filters.
-    /// Uses `SearchTextMatcher.hasMatch` for the same matching semantics.
-    /// Empty free text never produces title matches.
-    private static func cheapEffectiveTitleMatches(in candidates: [Session],
-                                                   freeText: String,
-                                                   overrides: [SessionKey: String]) -> [Session] {
-        let q = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return [] }
-        return candidates.filter { session in
-            let title = effectiveSearchTitle(for: session, overrides: overrides)
-            if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
-            return SearchTextMatcher.hasMatch(in: title, query: q)
-        }
-    }
-
-    private static func ftsResultLimit(filters: Filters,
-                                        effectiveRepo: String?,
-                                        totalSessionCount: Int) -> Int {
-        if filters.archivedCodexDesktopOnly || effectiveRepo != nil || filters.selectedProjectIdentity != nil || filters.archivedClaudeDesktopOnly {
-            return max(FeatureFlags.ftsSearchLimit, totalSessionCount)
-        }
-        return FeatureFlags.ftsSearchLimit
-    }
-
-    private func startBackgroundDeepScan(runID: UUID,
-                                         query: String,
-                                         filters: Filters,
-                                         unindexedCandidates: [Session],
-                                         deepCandidates: [Session],
-                                         initialSeen: Set<SessionKey>) {
-        deepScanTask?.cancel()
-        deepScanTask = Task.detached(priority: .utility) { [weak self, runID] in
-            guard let self else { return }
-            guard self.runID == runID else { return }
-            defer {
-                DispatchQueue.main.async { [weak self] in
-                    if self?.runID == runID {
-                        self?.deepScanTask = nil
-                    }
-                }
-            }
-            var seen = initialSeen
-
-            if !unindexedCandidates.isEmpty {
-                await self.runDeepSearchAppend(
-                    runID: runID,
-                    query: query,
-                    filters: filters,
-                    candidates: unindexedCandidates,
-                    initialSeen: seen,
-                    finishWhenDone: deepCandidates.isEmpty,
-                    progressPhases: (.unindexedSmall, .unindexedLarge),
-                    textScope: .all
-                )
-                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-                seen = await MainActor.run { Set(self.results.map(SessionKey.init)) }
-            }
-
-            if !deepCandidates.isEmpty {
-                await self.runDeepSearchAppend(
-                    runID: runID,
-                    query: query,
-                    filters: filters,
-                    candidates: deepCandidates,
-                    initialSeen: seen,
-                    finishWhenDone: true,
-                    progressPhases: (.toolOutputsSmall, .toolOutputsLarge),
-                    textScope: .toolOutputsOnly
-                )
-            }
-        }
-    }
-
-    private func runDeepSearchAppend(runID: UUID,
-                                     query: String,
-                                     filters: Filters,
-                                     candidates: [Session],
-                                     initialSeen: Set<SessionKey>,
-                                     finishWhenDone: Bool,
-                                     progressPhases: (Progress.Phase, Progress.Phase),
-                                     textScope: FilterEngine.TextScope) async {
-        let threshold = FeatureFlags.searchSmallSizeBytes
-        var nonLarge: [Session] = []
-        var large: [Session] = []
-        nonLarge.reserveCapacity(candidates.count)
-        large.reserveCapacity(max(1, candidates.count / 2))
-        for s in candidates {
-            let size = Self.sizeBytes(for: s)
-            if size >= threshold { large.append(s) } else { nonLarge.append(s) }
-        }
-        nonLarge.sort { $0.modifiedAt > $1.modifiedAt }
-        large.sort { $0.modifiedAt > $1.modifiedAt }
-
-        let nonLargeCount = nonLarge.count
-        let largeCount = large.count
-        await MainActor.run {
-            guard self.runID == runID else { return }
-            self.progress = .init(phase: progressPhases.0, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
-        }
-
-        var seen = initialSeen
-
-        // Phase 1: nonLarge batched
-        let batchSize = 64
-        for start in stride(from: 0, to: nonLarge.count, by: batchSize) {
-            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-            let end = min(start + batchSize, nonLarge.count)
-            let batch = Array(nonLarge[start..<end])
-            let hits = await self.searchBatch(batch: batch,
-                                              query: query,
-                                              filters: filters,
-                                              threshold: threshold,
-                                              textScope: textScope,
-                                              allowDeepParse: true,
-                                              allowTranscriptGeneration: false)
-            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-
-            let newHits = hits.filter { !seen.contains(SessionKey($0)) }
-            for s in newHits { seen.insert(SessionKey(s)) }
-
-            await MainActor.run {
-                guard self.runID == runID else { return }
-                self.results.append(contentsOf: newHits)
-                if FeatureFlags.throttleSearchUIUpdates {
-                    let now = DispatchTime.now()
-                    if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
-                        self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
-                        self.progressThrottleLastFlush = now
-                    }
-                } else {
-                    self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
-                }
-            }
-            if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
-        }
-
-        if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-
-        // Phase 2: large sequential
-        await MainActor.run { if self.runID == runID { self.progress.phase = progressPhases.1 } }
-        var idx = 0
-        var staged: [Session] = []
-        var lastResultsFlush = DispatchTime.now()
-        while idx < large.count {
-            let want = await self.promotionState.consumePromoted()
-            if let want, let pos = large[idx...].firstIndex(where: { $0.id == want }) {
-                if pos != idx { large.swapAt(idx, pos) }
-            }
-
-            let s = large[idx]
-            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-            if let parsed = await self.parseFullIfNeeded(session: s,
-                                                         threshold: threshold,
-                                                         allowDeepParse: true,
-                                                         allowLargePiParse: true) {
-                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-
-                if !FeatureFlags.disableSessionUpdatesDuringSearch {
-                    self.store.updateSession(parsed)
-                }
-
-                if textScope == .all {
-                    let cache = self.transcriptCache(for: parsed.source)
-                    if FilterEngine.sessionMatches(parsed,
-                                                  filters: filters,
-                                                  transcriptCache: cache,
-                                                  allowTranscriptGeneration: false,
-                                                  textScope: .all) {
-                        let parsedKey = SessionKey(parsed)
-                        let shouldAdd = !seen.contains(parsedKey)
-                        if shouldAdd {
-                            seen.insert(parsedKey)
-                            if FeatureFlags.coalesceSearchResults {
-                                staged.append(parsed)
-                                let now = DispatchTime.now()
-                                if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
-                                    let toFlush = staged
-                                    staged.removeAll(keepingCapacity: true)
-                                    lastResultsFlush = now
-                                    await MainActor.run {
-                                        guard self.runID == runID else { return }
-                                        self.results.append(contentsOf: toFlush)
-                                    }
-                                }
-                            } else {
-                                await MainActor.run {
-                                    guard self.runID == runID else { return }
-                                    self.results.append(parsed)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: nil, allowTranscriptGeneration: false, textScope: .toolOutputsOnly) {
-                        let parsedKey = SessionKey(parsed)
-                        let shouldAdd = !seen.contains(parsedKey)
-                        if shouldAdd {
-                            seen.insert(parsedKey)
-                            if FeatureFlags.coalesceSearchResults {
-                                staged.append(parsed)
-                                let now = DispatchTime.now()
-                                if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
-                                    let toFlush = staged
-                                    staged.removeAll(keepingCapacity: true)
-                                    lastResultsFlush = now
-                                    await MainActor.run {
-                                        guard self.runID == runID else { return }
-                                        self.results.append(contentsOf: toFlush)
-                                    }
-                                }
-                            } else {
-                                await MainActor.run {
-                                    guard self.runID == runID else { return }
-                                    self.results.append(parsed)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if FeatureFlags.throttleSearchUIUpdates {
-                let now = DispatchTime.now()
-                if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 {
-                    let currentIdx = idx
-                    await MainActor.run {
-                        if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 }
-                        self.progressThrottleLastFlush = now
-                    }
-                }
-            } else {
-                let currentIdx = idx
-                await MainActor.run { if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 } }
-            }
-            if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
-            idx += 1
-        }
-
-        if FeatureFlags.coalesceSearchResults && !staged.isEmpty {
-            let toFlush = staged
-            staged.removeAll()
-            await MainActor.run {
-                guard self.runID == runID else { return }
-                self.results.append(contentsOf: toFlush)
-            }
-        }
-
-        if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-        if finishWhenDone {
-            await MainActor.run {
-                guard self.runID == runID else { return }
-                self.isRunning = false
-                self.progress.phase = .idle
-            }
-        }
     }
 
     private func finishCanceled(runID expected: UUID) async {
@@ -1328,59 +578,6 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 self.progress.phase = .idle
             }
         }
-    }
-
-    private func searchBatch(batch: [Session],
-                             query: String,
-                             filters: Filters,
-                             threshold: Int,
-                             textScope: FilterEngine.TextScope,
-                             allowDeepParse: Bool,
-                             allowTranscriptGeneration: Bool) async -> [Session] {
-        var out: [Session] = []
-        out.reserveCapacity(batch.count / 4)
-        for var s in batch {
-            if Task.isCancelled { return out }
-            if s.events.isEmpty {
-                // For non-large sessions only, parse quickly if needed
-                let size = Self.sizeBytes(for: s)
-                if size < threshold,
-                   let parsed = await parseFullIfNeeded(session: s,
-                                                        threshold: threshold,
-                                                        allowDeepParse: allowDeepParse) {
-                    s = parsed
-                    if allowDeepParse, !FeatureFlags.disableSessionUpdatesDuringSearch {
-                        self.store.updateSession(parsed)
-                    }
-                }
-            }
-            let cache: TranscriptCache? = (textScope == .all) ? self.transcriptCache(for: s.source) : nil
-            if FilterEngine.sessionMatches(s,
-                                          filters: filters,
-                                          transcriptCache: cache,
-                                          allowTranscriptGeneration: allowTranscriptGeneration,
-                                          textScope: textScope) {
-                out.append(s)
-            }
-        }
-        return out
-    }
-
-    private func parseFullIfNeeded(session s: Session,
-                                   threshold: Int,
-                                   allowDeepParse: Bool,
-                                   allowLargePiParse: Bool = false) async -> Session? {
-        guard !Task.isCancelled else { return nil }
-        guard allowDeepParse else { return s }
-        if s.source == .pi,
-           Self.sizeBytes(for: s) >= threshold,
-           !allowLargePiParse {
-            return s
-        }
-        if s.source == .pi, allowLargePiParse {
-            return PiSessionParser.parseFileFull(at: URL(fileURLWithPath: s.filePath), allowLargeFile: true)
-        }
-        return await store.parseFull(session: s)
     }
 
     private static func sizeBytes(for s: Session) -> Int {

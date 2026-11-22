@@ -29,6 +29,18 @@ private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "Claude
 actor ClaudeUsageSourceManager {
     typealias SnapshotHandler = @Sendable (ClaudeLimitSnapshot) -> Void
     typealias AvailabilityHandler = @Sendable (ClaudeServiceAvailability) -> Void
+    typealias RefreshScheduler = @Sendable (TimeInterval, @escaping @Sendable () async -> Void) -> Task<Void, Never>?
+
+    nonisolated static func scheduleRefresh(delay: TimeInterval,
+                                            operation: @escaping @Sendable () async -> Void) -> Task<Void, Never>? {
+        Task {
+            if delay > 0 {
+                do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            await operation()
+        }
+    }
 
     enum OAuthRetryPlan: Equatable {
         case coldStart(delay: TimeInterval)
@@ -303,8 +315,76 @@ actor ClaudeUsageSourceManager {
         isAutoMode && webApiEnabled && !usingWebFallback
     }
 
-    init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
+    init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore(),
+         oauthOwnerResolver: (@Sendable () async -> String?)? = nil,
+         refreshScheduler: @escaping RefreshScheduler = ClaudeUsageSourceManager.scheduleRefresh) {
         self.store = store
+        self.oauthOwnerResolver = oauthOwnerResolver
+        self.refreshScheduler = refreshScheduler
+        credentialObservations.insert(NotificationCenter.default.addObserver(
+            forName: ClaudeCredentialService.didChange, object: nil, queue: nil
+        ) { [weak self] _ in
+            Task { await self?.manualCredentialChanged() }
+        })
+        credentialObservations.insert(NotificationCenter.default.addObserver(
+            forName: ClaudeCredentialService.legacyDidChange, object: nil, queue: nil
+        ) { [weak self] _ in
+            Task { await self?.legacyCredentialChanged() }
+        })
+        credentialObservations.insert(NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            let enabled = UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
+            Task { await self?.webPreferenceChanged(enabled) }
+        })
+    }
+
+    private let credentialObservations = CredentialNotificationObservations()
+    private let oauthOwnerResolver: (@Sendable () async -> String?)?
+    private let refreshScheduler: RefreshScheduler
+    private var currentOAuthOwner: String?
+    private let tmuxOwner = "tmux:" + UUID().uuidString
+    private var lifecycleGeneration: UInt64 = 0
+    private var webLifecycleGeneration: UInt64 = 0
+    private var webLease: ClaudeCredentialRequestLease?
+    private var lastWebPreference = UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
+
+    private func invalidateWebRequest() {
+        webLifecycleGeneration &+= 1
+        webLease?.cancel()
+        webRefreshTask?.cancel()
+        webFetchGeneration &+= 1
+        webFetchInFlight = false
+        webRefetchQueued = false
+    }
+
+    private func webPreferenceChanged(_ enabled: Bool) {
+        guard enabled != lastWebPreference else { return }
+        lastWebPreference = enabled
+        invalidateWebRequest()
+        if shouldRun, mode == .webOnly || (enabled && usingWebFallback) { scheduleWebRefresh(delay: 0) }
+    }
+
+    private func legacyCredentialChanged() {
+        guard let lease = webLease, !ClaudeCredentialService.shared.isCurrentWebOwner(lease.owner) else { return }
+        if lastOAuthSnapshot?.hasWebOwnership == true { lastOAuthSnapshot = nil }
+        invalidateWebRequest()
+        if shouldRun, mode == .webOnly || (webApiEnabled && usingWebFallback) { scheduleWebRefresh(delay: 0) }
+    }
+
+    private func manualCredentialChanged() async {
+        if lastOAuthSnapshot?.hasWebOwnership == true { lastOAuthSnapshot = nil }
+        invalidateWebRequest()
+        await webUsageClient.invalidateOrgId()
+        guard shouldRun, !ClaudeCredentialService.shared.isMutating else { return }
+        if usingWebFallback || mode == .webOnly { scheduleWebRefresh(delay: 0) }
+    }
+
+    private func snapshotIsCurrent(_ snapshot: ClaudeLimitSnapshot) -> Bool {
+        guard let owner = snapshot.ownership else { return false }
+        if snapshot.hasWebOwnership { return snapshot.webOwnershipIsCurrent }
+        if owner.hasPrefix("oauth:") { return owner == currentOAuthOwner }
+        return owner == tmuxOwner
     }
 
     private struct OAuthVisibilityContext {
@@ -384,6 +464,7 @@ actor ClaudeUsageSourceManager {
     /// tmux-handoff threshold in milliseconds (observed live: 3 failures in
     /// 350ms at launch).
     private var webFetchInFlight = false
+    private var webFetchGeneration: UInt64 = 0
     /// Set when a fetch request arrives while one is in flight (e.g. the user's
     /// manual refreshNow racing the scheduled poll). The in-flight guard must
     /// not silently swallow it — one follow-up fetch runs when the current one
@@ -405,12 +486,24 @@ actor ClaudeUsageSourceManager {
         self.snapshotHandler = handler
         self.availabilityHandler = availabilityHandler
         self.shouldRun = true
+        lifecycleGeneration &+= 1
         self.startedAt = Date()
+        let lifecycle = lifecycleGeneration
 
         os_log("ClaudeOAuth: source manager starting, mode=%{public}@", log: log, type: .info, mode.rawValue)
 
-        // Restore cached snapshot for cold-start display
-        if let cached = await store.load() {
+        // Resolve account ownership before restoring data, without waiting for a usage fetch.
+        if mode == .auto || mode == .oauthOnly {
+            if let oauthOwnerResolver {
+                currentOAuthOwner = await oauthOwnerResolver()
+            } else if let resolved = await tokenResolver.resolve() {
+                currentOAuthOwner = Self.oauthOwner(resolved.token)
+            }
+        }
+        guard shouldRun, lifecycleGeneration == lifecycle else { return }
+        // Legacy/unowned snapshots are deliberately not eligible for restoration.
+        if let cached = await store.load(), snapshotIsCurrent(cached) {
+            guard shouldRun, lifecycleGeneration == lifecycle else { return }
             let age = Date().timeIntervalSince(cached.fetchedAt)
             if age < Self.cacheHardExpire {
                 var serving = cached
@@ -421,6 +514,7 @@ actor ClaudeUsageSourceManager {
                 os_log("ClaudeOAuth: restored cached snapshot, age=%.0fs", log: log, type: .info, age)
             }
         }
+        guard shouldRun, lifecycleGeneration == lifecycle else { return }
 
         switch mode {
         case .auto, .oauthOnly:
@@ -435,6 +529,8 @@ actor ClaudeUsageSourceManager {
 
     func stop() async {
         shouldRun = false
+        lifecycleGeneration &+= 1
+        invalidateWebRequest()
         refreshTask?.cancel()
         refreshTask = nil
         credentialWatchTask?.cancel()
@@ -512,12 +608,8 @@ actor ClaudeUsageSourceManager {
         refreshTask?.cancel()
         guard shouldRun else { return }
 
-        refreshTask = Task {
-            if delay > 0 {
-                do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
-            }
-            guard self.shouldRun else { return }
-            await self.performOAuthFetch()
+        refreshTask = refreshScheduler(delay) { [weak self] in
+            await self?.performOAuthFetch()
         }
     }
 
@@ -529,6 +621,9 @@ actor ClaudeUsageSourceManager {
             await handleOAuthFailure(reason: "no token")
             return
         }
+        currentOAuthOwner = Self.oauthOwner(resolved.token)
+        let owner = currentOAuthOwner
+        if let previous = lastOAuthSnapshot, !snapshotIsCurrent(previous) { lastOAuthSnapshot = nil }
 
         do {
             let (raw, bodyHash, rawBody, fromCache, fetchedAt) = try await usageClient.fetch(token: resolved.token)
@@ -542,6 +637,8 @@ actor ClaudeUsageSourceManager {
                 await handleOAuthFailure(reason: "empty payload")
                 return
             }
+            guard owner == currentOAuthOwner else { return }
+            snapshot.ownership = owner
             // The network response already proved recovery. Retire the old
             // publication-only timer before the merge's first await; otherwise
             // it can advance authGeneration while store.load() is suspended and
@@ -701,7 +798,7 @@ actor ClaudeUsageSourceManager {
                 }
                 // Have cached data — just wait, don't fall back
                 scheduleOAuthRefresh(delay: delay)
-            } else if var persisted = await store.load(),
+            } else if var persisted = await store.load(), snapshotIsCurrent(persisted),
                       Date().timeIntervalSince(persisted.fetchedAt) < Self.cacheHardExpire {
                 // No in-memory snapshot but the persistent store has one within
                 // the hard-expire window. Serve it as stale rather than falling
@@ -1279,27 +1376,34 @@ actor ClaudeUsageSourceManager {
         webRefreshTask?.cancel()
         guard shouldRun else { return }
 
-        webRefreshTask = Task {
-            if delay > 0 {
-                do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
-            }
-            guard self.shouldRun else { return }
-            await self.performWebFetch()
+        webRefreshTask = refreshScheduler(delay) { [weak self] in
+            await self?.performWebFetch()
         }
     }
 
     private func performWebFetch() async {
         guard shouldRun, usingWebFallback || mode == .webOnly else { return }
+        let credentialOwner = ClaudeCredentialService.shared.currentOwner
+        var requestOwner = credentialOwner
+        let lifecycle = webLifecycleGeneration
         guard !webFetchInFlight else {
             webRefetchQueued = true
             return
         }
+        let webOnlyMode = mode == .webOnly
+        webLease = ClaudeCredentialRequestLease(owner: credentialOwner, isEnabled: {
+            webOnlyMode || UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
+        })
         webFetchInFlight = true
+        webFetchGeneration &+= 1
+        let fetchGeneration = webFetchGeneration
         defer {
-            webFetchInFlight = false
-            if webRefetchQueued {
-                webRefetchQueued = false
-                scheduleWebRefresh(delay: 0)
+            if fetchGeneration == webFetchGeneration {
+                webFetchInFlight = false
+                if webRefetchQueued {
+                    webRefetchQueued = false
+                    scheduleWebRefresh(delay: 0)
+                }
             }
         }
 
@@ -1310,12 +1414,22 @@ actor ClaudeUsageSourceManager {
         // still works for.
         let sessionKey: String
         let usingManualCookie: Bool
-        if let manual = ClaudeManualWebCookieStore.shared.currentSessionKey() {
+        let credential: ClaudeCredentialService.Credential
+        do { credential = try await ClaudeCredentialService.shared.read() }
+        catch {
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
+            publishWebTransientReason("The saved cookie could not be read from Keychain.", owner: requestOwner)
+            scheduleWebRefresh(delay: Self.refreshInterval)
+            return
+        }
+        guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
+        if let manual = credential.value {
             sessionKey = manual
             usingManualCookie = true
         } else {
             usingManualCookie = false
             let cookieOutcome = await webCookieResolver.resolveDetailed()
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
             switch cookieOutcome {
             case .found(let resolved):
                 sessionKey = resolved.sessionKey
@@ -1325,16 +1439,16 @@ actor ClaudeUsageSourceManager {
                 // caption, never an auth banner) instead of dying as a log line.
                 os_log("ClaudeOAuth: web API — Safari cookie read denied (needs Full Disk Access)",
                        log: log, type: .info)
-                publishWebTransientReason(Self.webNeedsFullDiskAccessReason)
-                await handleWebFailure(reason: "cookie read permission denied")
+                publishWebTransientReason(Self.webNeedsFullDiskAccessReason, owner: requestOwner)
+                await handleWebFailure(owner: requestOwner, manualOwner: credentialOwner, lifecycle: lifecycle, reason: "cookie read permission denied")
                 return
             case .cookieExpired:
                 // A claude.ai sessionKey WAS present but has expired — the user must
                 // sign in again (or paste a fresh cookie). Distinct remedy from a
                 // missing session, so it gets its own caption.
                 os_log("ClaudeOAuth: web API — Safari claude.ai session cookie expired", log: log, type: .info)
-                publishWebTransientReason(Self.webSessionExpiredReason)
-                await handleWebFailure(reason: "claude.ai session cookie expired")
+                publishWebTransientReason(Self.webSessionExpiredReason, owner: requestOwner)
+                await handleWebFailure(owner: requestOwner, manualOwner: credentialOwner, lifecycle: lifecycle, reason: "claude.ai session cookie expired")
                 return
             case .storeMissing, .validStoreNoCookie, .unsupportedFormat, .malformedRecord:
                 // No usable claude.ai session in Safari. On macOS 14/15 this is the
@@ -1343,25 +1457,39 @@ actor ClaudeUsageSourceManager {
                 // pasted session cookie — rather than telling them to sign in again.
                 os_log("ClaudeOAuth: web API — no readable claude.ai session (%{public}@)",
                        log: log, type: .info, String(describing: cookieOutcome))
-                publishWebTransientReason(Self.webNoSafariSessionReason)
-                await handleWebFailure(reason: "no claude.ai session available")
+                publishWebTransientReason(Self.webNoSafariSessionReason, owner: requestOwner)
+                await handleWebFailure(owner: requestOwner, manualOwner: credentialOwner, lifecycle: lifecycle, reason: "no claude.ai session available")
                 return
             }
         }
 
         do {
-            let (raw, bodyHash, fromCache, fetchedAt) = try await webUsageClient.fetch(sessionKey: sessionKey)
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
+            let owner = usingManualCookie ? credential.owner
+                : try ClaudeCredentialService.shared.registerLegacyCredential(sessionKey, after: credential.owner)
+            requestOwner = owner
+            let webOnly = mode == .webOnly
+            let lease = ClaudeCredentialRequestLease(owner: owner, isEnabled: {
+                webOnly || UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
+            })
+            webLease = lease
+            let (raw, bodyHash, fromCache, fetchedAt) = try await webUsageClient.fetch(sessionKey: sessionKey, owner: owner, lease: lease)
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
             guard var snapshot = ClaudeWebUsageNormalizer.normalize(raw, bodyHash: bodyHash, fetchedAt: fetchedAt) else {
                 os_log("ClaudeOAuth: web normalizer returned nil", log: log, type: .error)
-                await handleWebFailure(reason: "empty web payload")
+                await handleWebFailure(owner: requestOwner, manualOwner: credentialOwner, lifecycle: lifecycle, reason: "empty web payload")
                 return
             }
+            snapshot.ownership = owner
+            snapshot.requestLease = lease
             if fromCache { snapshot.source = .cachedWeb }
             snapshot = await mergeMissingFiveHourWindowIfNeeded(snapshot)
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
 
             webFailureCount = 0
             publish(snapshot)
             await store.save(snapshot)
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
             // Clear any lingering cause caption on a healthy web fetch — in
             // webOnly mode no OAuth emit ever would, and in auto mode a serving
             // web fallback supersedes stale degradation captions (it MAY also
@@ -1370,41 +1498,62 @@ actor ClaudeUsageSourceManager {
             // someone else's state.
             availabilityHandler?(ClaudeServiceAvailability(
                 cliUnavailable: false, tmuxUnavailable: false,
-                transientReason: nil, clearsTransientReason: true, captionOnly: true))
+                transientReason: nil, clearsTransientReason: true, captionOnly: true,
+                credentialOwner: owner, requestLease: lease))
             os_log("ClaudeOAuth: web API fetch succeeded (fromCache=%{public}@)",
                    log: log, type: .info, fromCache ? "true" : "false")
             scheduleWebRefresh(delay: Self.refreshInterval)
 
+        } catch is CancellationError {
+            return
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle),
+                  ClaudeCredentialService.shared.isCurrentWebOwner(requestOwner) else { return }
             let delay = retryAfter + 10
             os_log("ClaudeOAuth: web API rate limited, retry in %.0fs", log: log, type: .info, delay)
             scheduleWebRefresh(delay: delay)
         } catch ClaudeOAuthUsageClientError.unauthorized {
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle),
+                  ClaudeCredentialService.shared.isCurrentWebOwner(requestOwner) else { return }
             os_log("ClaudeOAuth: web API 401, invalidating cookie and org caches", log: log, type: .info)
             await webUsageClient.invalidateOrgId()
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
             if usingManualCookie {
                 // The pasted cookie no longer authenticates — it can't be
                 // refreshed, so tell the user to paste a fresh one rather than
                 // silently retrying the dead token.
-                publishWebTransientReason(Self.webSessionExpiredReason)
+                publishWebTransientReason(Self.webSessionExpiredReason, owner: requestOwner)
             } else {
                 await webCookieResolver.invalidateCache()
             }
-            await handleWebFailure(reason: "401 unauthorized")
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle) else { return }
+            await handleWebFailure(owner: requestOwner, manualOwner: credentialOwner, lifecycle: lifecycle, reason: "401 unauthorized")
         } catch {
+            guard webRequestIsCurrent(credentialOwner, lifecycle: lifecycle),
+                  ClaudeCredentialService.shared.isCurrentWebOwner(requestOwner) else { return }
             os_log("ClaudeOAuth: web API error: %{public}@", log: log, type: .error, error.localizedDescription)
-            await handleWebFailure(reason: error.localizedDescription)
+            await handleWebFailure(owner: requestOwner, manualOwner: credentialOwner, lifecycle: lifecycle, reason: error.localizedDescription)
         }
     }
 
-    private func handleWebFailure(reason: String) async {
+    private func webRequestIsCurrent(_ owner: String, lifecycle: UInt64) -> Bool {
+        shouldRun && !Task.isCancelled && lifecycle == webLifecycleGeneration
+            && ClaudeCredentialService.shared.isCurrent(owner)
+            && (mode == .webOnly || (usingWebFallback && webApiEnabled))
+    }
+
+    private func handleWebFailure(owner: String, manualOwner: String, lifecycle: UInt64, reason: String) async {
+        guard webRequestIsCurrent(manualOwner, lifecycle: lifecycle),
+              ClaudeCredentialService.shared.isCurrentWebOwner(owner) else { return }
         webFailureCount += 1
         os_log("ClaudeOAuth: web failure #%d: %{public}@", log: log, type: .info, webFailureCount, reason)
 
         if webFailureCount >= 3, mode == .auto, !usingTmuxFallback {
             os_log("ClaudeOAuth: web API failed %d times, activating tmux fallback",
                    log: log, type: .info, webFailureCount)
-            await activateTmuxFallback(reason: "web API failure #\(webFailureCount)")
+            await activateTmuxFallback(reason: "web API failure #\(webFailureCount)", webOwner: owner, lifecycle: lifecycle)
+            guard webRequestIsCurrent(manualOwner, lifecycle: lifecycle),
+                  ClaudeCredentialService.shared.isCurrentWebOwner(owner) else { return }
         }
         // Keep the web loop alive unless tmux ACTUALLY took over (activation is
         // usually suppressed: auth-gated or opt-in OFF). The old code stopped
@@ -1421,7 +1570,8 @@ actor ClaudeUsageSourceManager {
     /// A non-serving fallback cannot replace the active OAuth 429 cause. Web
     /// recovery is authoritative only after it publishes a usable live snapshot;
     /// until then Quota Meter must keep the server-directed rate-limit episode.
-    private func publishWebTransientReason(_ reason: String) {
+    private func publishWebTransientReason(_ reason: String, owner: String) {
+        guard ClaudeCredentialService.shared.isCurrentWebOwner(owner) else { return }
         if Self.shouldPreserveRateLimitRetry(deadline: oauthRateLimitRetryDeadline, now: Date()) {
             os_log("ClaudeOAuth: preserving OAuth rate-limit reason over failed web fallback",
                    log: log, type: .info)
@@ -1431,7 +1581,8 @@ actor ClaudeUsageSourceManager {
             cliUnavailable: false,
             tmuxUnavailable: false,
             transientReason: reason,
-            captionOnly: true
+            captionOnly: true,
+            credentialOwner: owner, requestLease: webLease
         ))
     }
 
@@ -1453,7 +1604,11 @@ actor ClaudeUsageSourceManager {
             clearsTransientReason: effective.isAlarming))
     }
 
-    private func activateTmuxFallback(reason: String) async {
+    private func activateTmuxFallback(reason: String, webOwner: String? = nil, lifecycle: UInt64? = nil) async {
+        let capturedLifecycle = lifecycle ?? lifecycleGeneration
+        let isWebRequest = webOwner != nil
+        guard shouldRun, capturedLifecycle == (isWebRequest ? webLifecycleGeneration : lifecycleGeneration), !Task.isCancelled,
+              webOwner.map({ ClaudeCredentialService.shared.isCurrentWebOwner($0) }) ?? true else { return }
         if Self.shouldSuppressTmuxFallback(currentAuthState) {
             os_log("ClaudeOAuth: suppressing tmux fallback (auth state %{public}@)",
                    log: log, type: .info, String(describing: currentAuthState))
@@ -1480,6 +1635,8 @@ actor ClaudeUsageSourceManager {
         // `.signedOut`, so suppressing on a definitive signed-out / cli-missing here is
         // safe. The debounce still governs only the loud banner.
         let cli = await throttledClaudeAuthStatus()
+        guard shouldRun, capturedLifecycle == (isWebRequest ? webLifecycleGeneration : lifecycleGeneration), !Task.isCancelled,
+              webOwner.map({ ClaudeCredentialService.shared.isCurrentWebOwner($0) }) ?? true else { return }
         if cli == .signedOut || cli == .cliMissing {
             os_log("ClaudeOAuth: suppressing tmux fallback (authoritative probe %{public}@)",
                    log: log, type: .info, String(describing: cli))
@@ -1596,12 +1753,20 @@ actor ClaudeUsageSourceManager {
     }
 
     private func recordExternalSnapshot(_ snapshot: ClaudeLimitSnapshot) async {
+        var snapshot = snapshot
+        if snapshot.source == .tmuxUsage { snapshot.ownership = tmuxOwner }
+        guard snapshotIsCurrent(snapshot) else { return }
         lastOAuthSnapshot = snapshot
         await store.save(snapshot)
     }
 
     private func publish(_ snapshot: ClaudeLimitSnapshot) {
+        guard shouldRun, snapshotIsCurrent(snapshot) else { return }
         snapshotHandler?(snapshot)
+    }
+
+    nonisolated static func oauthOwner(_ token: String) -> String {
+        "oauth:" + SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -1613,6 +1778,7 @@ extension ClaudeUsageSourceManager {
             return nil
         }
         guard let previous,
+              let owner = incoming.ownership, previous.ownership == owner,
               previous.fiveHourUsedRatio != nil,
               !previous.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               previous.health != .failed,

@@ -55,7 +55,9 @@ final class PresenceEngineRegressionTests: XCTestCase {
         func run(kind: PresenceEngine.ManagedProbeKind,
                  executable: URL,
                  arguments: [String],
-                 timeout: TimeInterval) async -> Data? {
+                 timeout: TimeInterval,
+                 shouldStart: @escaping @Sendable () -> Bool) async -> Data? {
+            guard shouldStart() else { return nil }
             calls.append(Call(kind: kind, executable: executable.lastPathComponent, arguments: arguments))
             for responder in responders {
                 if let data = responder.respond(executable.lastPathComponent, arguments) {

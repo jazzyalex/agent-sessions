@@ -101,53 +101,105 @@ final class ClaudeCloudSessionCatalog {
     private(set) var sessions: [ClaudeCloudSession] = []
 
     private let client: ClaudeCloudAPIClient
-    private let sessionKeyProvider: () -> String?
-    private let isEnabled: () -> Bool
+    private let credentials: ClaudeCredentialService
+    private let fetch: (String, String, ClaudeCredentialRequestLease) async throws -> [ClaudeCloudRawSession]
+    private let isEnabled: @Sendable () -> Bool
+    private var requestGeneration: UInt64 = 0
+    private var activeLease: ClaudeCredentialRequestLease?
 
     init(client: ClaudeCloudAPIClient = ClaudeCloudAPIClient(),
-         sessionKeyProvider: @escaping () -> String?,
-         isEnabled: @escaping () -> Bool) {
+         credentials: ClaudeCredentialService = .shared,
+         fetch: ((String, String, ClaudeCredentialRequestLease) async throws -> [ClaudeCloudRawSession])? = nil,
+         isEnabled: @escaping @Sendable () -> Bool) {
         self.client = client
-        self.sessionKeyProvider = sessionKeyProvider
+        self.credentials = credentials
+        self.fetch = fetch ?? { key, owner, lease in try await client.listSessions(sessionKey: key, owner: owner, lease: lease) }
         self.isEnabled = isEnabled
     }
 
+    func invalidate(disabled: Bool) {
+        activeLease?.cancel()
+        activeLease = nil
+        requestGeneration &+= 1
+        sessions = []
+        state = disabled ? .disabled : .notConnected
+    }
+
     func refresh() async {
+        activeLease?.cancel()
+        requestGeneration &+= 1
+        let generation = requestGeneration
+        let owner = credentials.currentOwner
+        let metrics = SearchResponsivenessMetrics.shared
+        let metricContext = SearchResponsivenessMetricContext.credentialOwner(owner)
+        let operationID = metrics.operation(source: "claude-cloud-catalog", sessionID: owner, start: true)
         guard isEnabled() else {
-            state = .disabled
-            sessions = []
+            invalidate(disabled: true)
             os_log("cloud: disabled (toggle off)", log: catalogLog, type: .info)
             return
         }
-        guard let key = sessionKeyProvider(), !key.isEmpty else {
-            state = .notConnected
-            sessions = []
-            os_log("cloud: no sessionKey — keychain read returned nil/empty",
-                   log: catalogLog, type: .error)
-            return
-        }
-
         do {
-            let raw = try await client.listSessions(sessionKey: key)
+            let credential = try await credentials.read()
+            guard isCurrent(generation, owner: owner) else {
+                metrics.record(.credentialPublicationRejected, operationID: operationID,
+                               context: metricContext, status: .rejected)
+                return
+            }
+            guard let key = credential.value, !key.isEmpty else {
+                state = .notConnected
+                sessions = []
+                metrics.record(.credentialPublicationAccepted, operationID: operationID,
+                               context: metricContext, status: .published)
+                return
+            }
+            let lease = ClaudeCredentialRequestLease(owner: credential.owner, credentials: credentials, isEnabled: isEnabled)
+            activeLease = lease
+            let raw = try await fetch(key, credential.owner, lease)
+            guard isCurrent(generation, owner: owner) else {
+                metrics.record(.credentialPublicationRejected, operationID: operationID,
+                               context: metricContext, status: .rejected)
+                return
+            }
             let cloud = ClaudeCloudFilter.cloudOnly(raw)
             let live = ClaudeCloudFilter.activeRows(cloud)
             sessions = live
             state = live.isEmpty ? .empty : .ok(count: live.count)
+            metrics.record(.credentialPublicationAccepted, operationID: operationID,
+                           context: metricContext, status: .published)
             // The three counts localise any future "nothing shows up" instantly:
             // raw=0 is fetch/auth, cloud=0 is the environment_kind filter,
             // live=0 is the active predicate.
             os_log("cloud: raw=%{public}d cloud=%{public}d live=%{public}d",
                    log: catalogLog, type: .info, raw.count, cloud.count, live.count)
         } catch let error as ClaudeCloudError {
+            guard isCurrent(generation, owner: owner) else {
+                metrics.record(.credentialPublicationRejected, operationID: operationID,
+                               context: metricContext, status: .rejected)
+                return
+            }
             apply(error)
+            metrics.record(.credentialPublicationAccepted, operationID: operationID,
+                           context: metricContext, status: .published)
             os_log("cloud: refresh failed — %{public}@", log: catalogLog, type: .error,
                    String(describing: error))
         } catch {
+            guard isCurrent(generation, owner: owner) else {
+                metrics.record(.credentialPublicationRejected, operationID: operationID,
+                               context: metricContext, status: .rejected)
+                return
+            }
             // Any unexpected error is treated as transport rather than swallowed.
             apply(.offline)
+            metrics.record(.credentialPublicationAccepted, operationID: operationID,
+                           context: metricContext, status: .published)
             os_log("cloud: refresh failed (unexpected) — %{public}@", log: catalogLog,
                    type: .error, String(describing: error))
         }
+    }
+
+    private func isCurrent(_ generation: UInt64, owner: String) -> Bool {
+        !Task.isCancelled && generation == requestGeneration && isEnabled()
+            && credentials.isCurrent(owner)
     }
 
     /// Degraded states that are expected to recover keep the rows already on screen

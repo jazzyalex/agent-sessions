@@ -14,8 +14,6 @@ extension Notification.Name {
     static let navigateToSessionFromCockpit = Notification.Name("AgentSessionsNavigateToSessionFromCockpit")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
     static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
-    static let collapseAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsCollapseAllUnifiedSessionGroupsFromMenu")
-    static let expandAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsExpandAllUnifiedSessionGroupsFromMenu")
     static let showImagesForInlineImage = Notification.Name("AgentSessionsShowImagesForInlineImage")
     static let selectImagesBrowserItem = Notification.Name("AgentSessionsSelectImagesBrowserItem")
     static let requestCoreIndexRebuild = Notification.Name("AgentSessionsRequestCoreIndexRebuild")
@@ -199,6 +197,7 @@ struct AgentSessionsApp: App {
     @StateObject private var updaterController = UpdaterController()
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
+    @FocusedObject private var sessionWindowCommands: SessionWindowCommands?
     @State private var analyticsToggleObserver: NSObjectProtocol?
     @State private var mainWindowCloseObserver: NSObjectProtocol?
     @State private var menuBarDefaultsObserver: NSObjectProtocol?
@@ -409,7 +408,15 @@ struct AgentSessionsApp: App {
                 .keyboardShortcut("f", modifiers: [.command])
                 .disabled(!showTranscriptWindow)
             }
-            // View menu with Saved Only toggle (stateful)
+            CommandMenu("Session") {
+                Button("Resume") { sessionWindowCommands?.resume?() }
+                    .keyboardShortcut("r", modifiers: [.command, .control])
+                    .disabled(sessionWindowCommands?.availability.resume != true)
+                Button("Continue in Codex Desktop") { sessionWindowCommands?.openInCodexDesktop?() }
+                    .disabled(sessionWindowCommands?.availability.openInCodexDesktop != true)
+                Button("Copy Resume Command") { sessionWindowCommands?.copyResumeCommand?() }
+                    .disabled(sessionWindowCommands?.availability.copyResumeCommand != true)
+            }
             CommandMenu("View") {
                 AgentCockpitMenu()
                 Button("Image Browser") {
@@ -420,17 +427,24 @@ struct AgentSessionsApp: App {
                 Divider()
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
+                Menu("Archived") {
+                    if let unified = sessionWindowCommands?.archiveIndexer {
+                        ArchivedScopeActions(unified: unified)
+                    }
+                }
+                .disabled(sessionWindowCommands?.archiveIndexer == nil)
                 Toggle("Transcript Window", isOn: $showTranscriptWindow)
                 Toggle("Session info", isOn: $showSessionInfo)
                     .keyboardShortcut("i", modifiers: [.command, .shift])
                     .disabled(!showTranscriptWindow)
                 Divider()
-                Button("Collapse All") {
-                    NotificationCenter.default.post(name: .collapseAllUnifiedSessionGroupsFromMenu, object: nil)
+                ViewUnhideProjectsMenu()
+                Menu("Group folding") {
+                    Button("Standard") { sessionWindowCommands?.setFolding?(.standard) }
+                    Button("Collapse All") { sessionWindowCommands?.setFolding?(.collapsed) }
+                    Button("Expand All") { sessionWindowCommands?.setFolding?(.expanded) }
                 }
-                Button("Expand All") {
-                    NotificationCenter.default.post(name: .expandAllUnifiedSessionGroupsFromMenu, object: nil)
-                }
+                .disabled(sessionWindowCommands?.availability.setFolding != true)
                 Button("Toggle Dark/Light") { indexer.toggleDarkLightUsingSystemAppearance() }
                 Button("Use System Appearance") { indexer.useSystemAppearance() }
                     .disabled((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .system)
@@ -505,6 +519,60 @@ struct AgentSessionsApp: App {
             }
         }
         .defaultSize(width: 644, height: 320)
+    }
+}
+
+/// One focused object per Sessions window. Changing a view's layout must not
+/// publish freshly allocated action closures as new scene focus preferences.
+@MainActor
+final class SessionWindowCommands: ObservableObject {
+    struct Availability: Equatable {
+        var resume = false
+        var copyResumeCommand = false
+        var openInCodexDesktop = false
+        var setFolding = false
+    }
+
+    let archiveIndexer: UnifiedSessionIndexer
+    @Published private(set) var availability = Availability()
+    private(set) var resume: (() -> Void)?
+    private(set) var copyResumeCommand: (() -> Void)?
+    private(set) var openInCodexDesktop: (() -> Void)?
+    private(set) var setFolding: ((SessionGroupFolding) -> Void)?
+
+    init(archiveIndexer: UnifiedSessionIndexer) {
+        self.archiveIndexer = archiveIndexer
+    }
+
+    func update(_ availability: Availability,
+                resume: (() -> Void)?,
+                copyResumeCommand: (() -> Void)?,
+                openInCodexDesktop: (() -> Void)?,
+                setFolding: ((SessionGroupFolding) -> Void)?) {
+        self.resume = resume
+        self.copyResumeCommand = copyResumeCommand
+        self.openInCodexDesktop = openInCodexDesktop
+        self.setFolding = setFolding
+        if self.availability != availability {
+            self.availability = availability
+        }
+    }
+
+    func clear() {
+        update(Availability(), resume: nil, copyResumeCommand: nil, openInCodexDesktop: nil, setFolding: nil)
+    }
+}
+
+private struct ViewUnhideProjectsMenu: View {
+    @State private var roots = HiddenProjects.roots()
+    @State private var observer = FilteredDefaultsObserver(keys: [HiddenProjects.defaultsKey])
+
+    var body: some View {
+        Menu("Unhide Projects") {
+            UnhideProjectItems(roots: roots)
+        }
+        .disabled(roots.isEmpty)
+        .onReceive(observer.mainPublisher) { _ in roots = HiddenProjects.roots() }
     }
 }
 
@@ -1399,7 +1467,6 @@ private struct OnboardingWindowState {
 
 private struct OnboardingWindowRoot: View {
     let state: OnboardingWindowState
-    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     @ViewBuilder
     private var presentedContent: some View {
@@ -1418,14 +1485,10 @@ private struct OnboardingWindowRoot: View {
     }
 
     var body: some View {
-        let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
-        Group {
-            switch appAppearance {
-            case .light: presentedContent.preferredColorScheme(.light)
-            case .dark: presentedContent.preferredColorScheme(.dark)
-            case .system: presentedContent
-            }
-        }
+        // Appearance comes only from `window.appearance` (see applyAppearance);
+        // a per-theme `preferredColorScheme` switch rebuilds the view and sticks
+        // on Dark → System. See PreferencesWindowRoot.
+        presentedContent
     }
 }
 
@@ -1460,6 +1523,8 @@ private extension OnboardingWindowPresenter {
 
     func applyAppearance(forceRedraw: Bool) {
         let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
+        // Keep the change-detection cache in sync (see PreferencesWindowController).
+        lastAppAppearanceRaw = raw
         let appAppearance = AppAppearance(rawValue: raw) ?? .system
         switch appAppearance {
         case .system:

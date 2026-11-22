@@ -24,6 +24,9 @@ actor ClaudeUsageSnapshotStore {
     }
 
     func save(_ snapshot: ClaudeLimitSnapshot) {
+        // Actor serialization prevents a delayed old save from overwriting a newer save.
+        // Epoch validation also rejects writes queued before a credential mutation.
+        guard !snapshot.hasWebOwnership || snapshot.webOwnershipIsCurrent else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         guard let data = try? encoder.encode(snapshot) else {
@@ -32,6 +35,7 @@ actor ClaudeUsageSnapshotStore {
         }
         let url = fileURL
         do {
+            guard !snapshot.hasWebOwnership || snapshot.webOwnershipIsCurrent else { return }
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
             os_log("ClaudeOAuth: snapshot saved to disk", log: log, type: .debug)

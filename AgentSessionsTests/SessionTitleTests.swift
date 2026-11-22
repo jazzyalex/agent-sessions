@@ -155,6 +155,21 @@ final class SessionTitleTests: XCTestCase {
         XCTAssertEqual(s.customTitle, "Named investigation")
     }
 
+    func testRowTitleRefreshesForSameSessionIDAndChangedProviderTitle() {
+        func session(named title: String) -> Session {
+            Session(id: "row-title-revision", source: .codex, startTime: nil, endTime: nil,
+                    model: nil, filePath: "/tmp/row-title-revision.jsonl", eventCount: 0, events: [],
+                    cwd: nil, repoName: nil, lightweightTitle: title)
+        }
+        let original = session(named: "Original prompt")
+        let updated = session(named: "Updated prompt")
+        XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: original), "Original prompt")
+        XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: original), "Original prompt")
+        XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: updated), "Updated prompt")
+        XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: updated, override: "Provider title"), "Provider title")
+        XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: updated), "Updated prompt")
+    }
+
     func testCodexColdRowWithLongPromptHasReadableTitle() {
         let prompt = "Investigate missing tournament dates " + String(repeating: "details ", count: 10_000)
         let s = Session(

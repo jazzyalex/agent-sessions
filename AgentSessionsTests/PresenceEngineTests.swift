@@ -55,7 +55,9 @@ final class PresenceEngineTests: XCTestCase {
         func run(kind: PresenceEngine.ManagedProbeKind,
                  executable: URL,
                  arguments: [String],
-                 timeout: TimeInterval) async -> Data? {
+                 timeout: TimeInterval,
+                 shouldStart: @escaping @Sendable () -> Bool) async -> Data? {
+            guard shouldStart() else { return nil }
             calls.append(Call(kind: kind, executable: executable.lastPathComponent, arguments: arguments))
             for responder in responders {
                 if let data = responder.respond(executable.lastPathComponent, arguments) {
@@ -72,6 +74,54 @@ final class PresenceEngineTests: XCTestCase {
         func cancelAll() async {
             cancelAllCount += 1
         }
+    }
+
+    actor DeferredStartProbeRunner: ProbeRunner {
+        private var firstStartContinuation: CheckedContinuation<Void, Never>?
+        private(set) var actualLaunchCount = 0
+
+        func run(kind: PresenceEngine.ManagedProbeKind,
+                 executable: URL,
+                 arguments: [String],
+                 timeout: TimeInterval,
+                 shouldStart: @escaping @Sendable () -> Bool) async -> Data? {
+            guard shouldStart() else { return nil }
+            await withCheckedContinuation { continuation in
+                firstStartContinuation = continuation
+            }
+            guard shouldStart() else { return nil }
+            actualLaunchCount += 1
+            return Data("started".utf8)
+        }
+
+        func waitUntilQueued() async {
+            while firstStartContinuation == nil {
+                await Task.yield()
+            }
+        }
+
+        func release() {
+            let continuation = firstStartContinuation
+            firstStartContinuation = nil
+            continuation?.resume()
+        }
+
+        func cancel(kind: PresenceEngine.ManagedProbeKind) async {}
+        func cancelAll() async {}
+    }
+
+    actor AlwaysFailProbeRunner: ProbeRunner {
+        func run(kind: PresenceEngine.ManagedProbeKind,
+                 executable: URL,
+                 arguments: [String],
+                 timeout: TimeInterval,
+                 shouldStart: @escaping @Sendable () -> Bool) async -> Data? {
+            guard shouldStart() else { return nil }
+            return nil
+        }
+
+        func cancel(kind: PresenceEngine.ManagedProbeKind) async {}
+        func cancelAll() async {}
     }
 
     /// Fake that returns a fixed lsof machine-format blob whenever the
@@ -621,7 +671,123 @@ final class PresenceEngineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(callsAfterFirst, 1)
     }
 
+    func testRefreshNowDuringScrollRetriesAfterQuietWithoutLosingManualIntent() async {
+        let runner = FakeProbeRunner()
+        let scrollSignal = TranscriptScrollSignal(quietInterval: 0.08)
+        let engine = PresenceEngine(
+            probeRunner: runner,
+            rootsResolver: FixedPresenceRootsResolver.hermetic(),
+            scrollSignal: scrollSignal
+        )
+        await engine.debugSetEnvironment(PresenceEnvironment())
+
+        _ = await engine.debugRefreshOnce()
+        let callsAfterPrime = await runner.calls.count
+
+        scrollSignal.noteScroll()
+        await engine.debugRefreshNow()
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        let callsDuringScroll = await runner.calls.count
+        XCTAssertEqual(callsDuringScroll, callsAfterPrime,
+                       "manual refresh must stay out of the active scroll window")
+
+        try? await Task.sleep(nanoseconds: 180_000_000)
+        let callsAfterQuiet = await runner.calls.count
+        XCTAssertGreaterThan(callsAfterQuiet, callsAfterPrime,
+                             "the coalesced retry must preserve the manual full-refresh request")
+    }
+
+    func testFailedITermBatchDoesNotConsumeFullProbeIntent() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var presence = CodexActivePresence()
+        presence.schemaVersion = 1
+        presence.publisher = "test"
+        presence.kind = "interactive"
+        presence.source = .codex
+        presence.sessionId = "full-probe"
+        presence.pid = Int(getpid())
+        presence.tty = "/dev/ttys001"
+        presence.lastSeenAt = Date()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(presence).write(to: root.appendingPathComponent("presence.json"))
+
+        var roots = FixedPresenceRootsResolver.hermetic()
+        roots.registry = [root]
+        let engine = PresenceEngine(probeRunner: AlwaysFailProbeRunner(), rootsResolver: roots)
+        var environment = PresenceEnvironment()
+        environment.hasVisibleConsumer = true
+        await engine.debugSetEnvironment(environment)
+        await engine.debugSetForceFullProbeNextRefresh(true)
+
+        _ = await engine.debugRefreshOnce()
+
+        let fullProbeStillPending = await engine.debugForceFullProbeNextRefresh()
+        XCTAssertTrue(fullProbeStillPending,
+                      "launch failure must leave the manual full-probe request pending")
+    }
+
+    func testScrollBeginningDuringProcessProbeStopsRemainingCommandsAndRetries() async {
+        let scrollSignal = TranscriptScrollSignal(quietInterval: 0.08)
+        let shouldBeginScroll = LockedBox(true)
+        let runner = FakeProbeRunner(responders: [.init { executable, arguments in
+            if executable == "ps", arguments.contains("pid=,tty=,command=") {
+                if shouldBeginScroll.get() {
+                    shouldBeginScroll.set(false)
+                    scrollSignal.noteScroll()
+                }
+                return Data()
+            }
+            return Data()
+        }])
+        let engine = PresenceEngine(
+            probeRunner: runner,
+            rootsResolver: FixedPresenceRootsResolver.hermetic(),
+            scrollSignal: scrollSignal
+        )
+        await engine.debugSetEnvironment(PresenceEnvironment())
+
+        _ = await engine.debugRefreshOnce()
+        let firstCycleCalls = await runner.calls
+        XCTAssertEqual(firstCycleCalls.map(\.executable), ["ps"],
+                       "a scroll that starts during ps must stop the lsof chain")
+
+        try? await Task.sleep(nanoseconds: 180_000_000)
+        let retryCalls = await runner.calls
+        XCTAssertGreaterThan(retryCalls.count, firstCycleCalls.count)
+        XCTAssertTrue(retryCalls.contains { $0.executable == "lsof" },
+                      "the deferred cycle must retry the skipped discovery after quiet")
+    }
+
     // MARK: - Generation guard / cancel-on-replace (debugRunManagedCommand)
+
+    func testStoppedGenerationCannotLaunchAQueuedProbe() async {
+        let runner = DeferredStartProbeRunner()
+        let engine = PresenceEngine(
+            probeRunner: runner,
+            rootsResolver: FixedPresenceRootsResolver.hermetic()
+        )
+
+        let command = Task {
+            await engine.debugRunManagedCommand(
+                executable: URL(fileURLWithPath: "/bin/echo"),
+                arguments: ["stale"],
+                timeout: 1
+            )
+        }
+        await runner.waitUntilQueued()
+        await engine.stop(clear: false)
+        await runner.release()
+
+        let result = await command.value
+        let actualLaunchCount = await runner.actualLaunchCount
+        XCTAssertNil(result)
+        XCTAssertEqual(actualLaunchCount, 0,
+                       "a stopped generation must fail the final pre-launch gate")
+    }
 
     func testDebugRunManagedCommand_returnsOutputBeforeTimeout() async {
         let engine = PresenceEngine()
@@ -641,6 +807,28 @@ final class PresenceEngineTests: XCTestCase {
             timeout: 0.1
         )
         XCTAssertNil(data)
+    }
+
+    func testDebugRunManagedCommand_returnsNilForNonzeroExit() async {
+        let engine = PresenceEngine()
+        let data = await engine.debugRunManagedCommand(
+            kind: .iTermBatchProbe,
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exit 7"],
+            timeout: 1
+        )
+        XCTAssertNil(data)
+    }
+
+    func testDebugRunManagedCommand_preservesPartialLsofOutputOnExitOne() async {
+        let engine = PresenceEngine()
+        let data = await engine.debugRunManagedCommand(
+            executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
+            arguments: ["-w", "-a", "-p", "\(getpid()),999999", "-u", NSUserName(), "-nP", "-F", "pftn"],
+            timeout: 2
+        )
+        XCTAssertFalse(data?.isEmpty ?? true,
+                       "macOS lsof exit 1 may still contain valid rows for surviving PIDs")
     }
 
     func testDebugRunManagedCommand_replacedProbeDropsEarlierResult() async {

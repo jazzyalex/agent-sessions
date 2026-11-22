@@ -453,6 +453,16 @@ enum TranscriptTelemetryPresentation {
             value?.reasoningEffortProvenance ?? value?.provenance, locale: locale))
     }
 
+    static func quickThinkingValue(_ field: SessionInfoField<String>,
+                                   telemetry: SessionTelemetry?,
+                                   locale: Locale = .current) -> Value {
+        if field.value == nil, telemetry?.source == .claude,
+           let observed = thinkingValue(telemetry?.currentConfiguration, locale: locale) {
+            return observed
+        }
+        return quickFactValue(field, locale: locale)
+    }
+
     static func tokenSharePercent(_ fraction: Double, locale: Locale = .current) -> String {
         guard fraction > 0 else { return fraction.formatted(.percent.precision(.fractionLength(0)).locale(locale)) }
         if fraction < 0.01 { return localized("<1%", locale: locale) }
@@ -596,6 +606,7 @@ enum TranscriptTelemetryPresentation {
     static func markers(changes: [ConfigurationChange],
                         blocks: [SessionTranscriptBuilder.LogicalBlock],
                         locale: Locale = .current) -> [Int: [String]] {
+        guard !changes.isEmpty else { return [:] }
         var result: [Int: [String]] = [:]
         let anchors = Self.anchors(blocks)
         for change in changes {
@@ -882,8 +893,8 @@ struct TranscriptTelemetryView: View {
                                 telemetryLoadState: telemetryLoadState,
                                 locale: locale))
                 SessionInfoRow(label: "Thinking",
-                               value: TranscriptTelemetryPresentation.quickFactValue(
-                                facts.reasoningEffort, locale: locale))
+                               value: TranscriptTelemetryPresentation.quickThinkingValue(
+                                facts.reasoningEffort, telemetry: telemetry, locale: locale))
                 SessionInfoRow(label: "Title",
                                value: TranscriptTelemetryPresentation.titleValue(
                                 facts.title, locale: locale))
@@ -921,7 +932,8 @@ struct TranscriptTelemetryView: View {
                     value: TranscriptTelemetryPresentation.modelValue(
                         telemetry.currentConfiguration, locale: locale))
             }
-            if let thinking = TranscriptTelemetryPresentation.thinkingValue(
+            if telemetry.source != .claude || quickFacts == nil || quickFacts?.reasoningEffort.value != nil,
+               let thinking = TranscriptTelemetryPresentation.thinkingValue(
                 telemetry.currentConfiguration, locale: locale) {
                 SessionInfoRow(
                     label: quickFacts == nil ? "Thinking" : "Transcript thinking",

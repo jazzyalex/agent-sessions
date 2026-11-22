@@ -1,6 +1,29 @@
 import Foundation
 
 enum SessionSearchTextBuilder {
+    /// Streaming bounded sample. The first and most recent semantic fields share a
+    /// fixed budget; retaining the tail never retains the provider's event array.
+    struct StreamSample {
+        private var head = ""
+        private var tail = ""
+        private(set) var toolIO = ""
+        var ordinary: String { head + "\n" + tail }
+        mutating func consume(_ segment: SearchTextSegment) {
+            guard segment.provenance == .source else { return }
+            let fieldLimit = segment.kind == .output || segment.kind == .error
+                ? FeatureFlags.instantToolOutputIndexMaxChars : 2_000
+            let text = sanitizeForIndexing(String(segment.text.prefix(max(0, fieldLimit))))
+            let field = text + "\n"
+            if head.count < 24_000 { head += String(field.prefix(24_000 - head.count)) }
+            else { tail = String((tail + field).suffix(23_999)) }
+            if [.toolName, .input, .output, .error].contains(segment.kind),
+               toolIO.count < FeatureFlags.toolIOIndexMaxCharsPerSession {
+                let value = sanitizeForIndexing(String(segment.text.prefix(FeatureFlags.toolIOIndexMaxCharsPerEvent))) + "\n"
+                toolIO += String(value.prefix(FeatureFlags.toolIOIndexMaxCharsPerSession - toolIO.count))
+            }
+        }
+    }
+
     // Redact embedded binary-ish blobs (base64, data: URLs) from search corpora.
     // This protects Instant search and Tool I/O FTS from ballooning DB size and from
     // indexing meaningless tokens (e.g., screenshots from Chrome MCP).
@@ -263,37 +286,12 @@ enum SessionSearchTextBuilder {
         }
 
         func appendEventFields(_ ev: SessionEvent, into out: inout [String], remaining: inout Int) {
-            // DSH preserves injected user/message context as transcript metadata,
-            // but it is not a direct user message and must not enter FTS.
-            if session.source == .deepseekHarness, ev.kind == .meta, ev.role == "user" { return }
-            let isToolEvent = ev.kind == .tool_call
-                || ev.kind == .tool_result
-                || (ev.kind == .error && (ev.toolName != nil || ev.toolOutput != nil))
-
-            if isToolEvent, let block = ToolTextBlockNormalizer.normalize(event: ev, source: session.source) {
-                let text = ToolTextBlockNormalizer.displayText(for: block)
-                if block.kind == .toolOutput {
-                    appendToolOutput(text, into: &out, remaining: &remaining)
+            for segment in SearchSourceText.segments(event: ev, source: session.source) {
+                if segment.kind == .output || segment.kind == .error {
+                    appendToolOutput(segment.text, into: &out, remaining: &remaining)
                 } else {
-                    appendSampledLargeText(text, maxOut: perFieldLimit, into: &out, remaining: &remaining)
+                    appendSampledLargeText(segment.text, maxOut: perFieldLimit, into: &out, remaining: &remaining)
                 }
-                return
-            }
-
-            // A mixed message's typed items go in first and whole: long injected context in the
-            // raw text must not push the user's own words out of the sample.
-            if ev.isProvenTyped, let typed = ev.messageDisplayText, !typed.isEmpty, typed != ev.text {
-                appendSampledLargeText(typed, maxOut: perFieldLimit, into: &out, remaining: &remaining)
-            }
-            if let t = ev.text, !t.isEmpty {
-                appendSampledLargeText(t, maxOut: perFieldLimit, into: &out, remaining: &remaining)
-            }
-            append(ev.toolName, into: &out, remaining: &remaining)
-            if let ti = ev.toolInput, !ti.isEmpty {
-                appendSampledLargeText(ti, maxOut: perFieldLimit, into: &out, remaining: &remaining)
-            }
-            if let toolOut = ev.toolOutput {
-                appendToolOutput(toolOut, into: &out, remaining: &remaining)
             }
         }
 
@@ -371,20 +369,9 @@ enum SessionSearchTextBuilder {
         var remaining = maxCharacters
         for ev in session.events {
             guard remaining > 0 else { break }
-            if let block = ToolTextBlockNormalizer.normalize(event: ev, source: session.source) {
-                let text = ToolTextBlockNormalizer.displayText(for: block)
-                append(text, into: &parts, remaining: &remaining)
-                continue
-            }
-            switch ev.kind {
-            case .tool_call:
-                append(ev.toolName, into: &parts, remaining: &remaining)
-                append(ev.toolInput, into: &parts, remaining: &remaining)
-            case .tool_result:
-                append(ev.toolName, into: &parts, remaining: &remaining)
-                append(ev.toolOutput ?? ev.text, into: &parts, remaining: &remaining)
-            default:
-                continue
+            guard ev.kind == .tool_call || ev.kind == .tool_result || ev.kind == .error else { continue }
+            for segment in SearchSourceText.segments(event: ev, source: session.source) {
+                append(segment.text, into: &parts, remaining: &remaining)
             }
         }
         return parts.joined(separator: "\n")

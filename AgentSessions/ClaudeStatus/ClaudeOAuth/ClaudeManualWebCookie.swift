@@ -60,6 +60,23 @@ protocol ClaudeSecretStore {
     func read() -> String?
     func write(_ value: String) -> Bool
     func delete()
+    func readSecret() throws -> String?
+    func writeSecret(_ value: String) throws
+    func deleteSecret() throws
+}
+
+enum ClaudeSecretStoreError: Error, Equatable {
+    case securityStatus(Int32)
+    case invalidData
+    case writeFailed
+}
+
+extension ClaudeSecretStore {
+    func readSecret() throws -> String? { read() }
+    func writeSecret(_ value: String) throws {
+        guard write(value) else { throw ClaudeSecretStoreError.writeFailed }
+    }
+    func deleteSecret() throws { delete() }
 }
 
 /// Persists (and validates) the user's pasted claude.ai session cookie.
@@ -107,32 +124,50 @@ struct KeychainSecretStore: ClaudeSecretStore {
     }
 
     func read() -> String? {
+        try? readSecret()
+    }
+
+    func readSecret() throws -> String? {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &out)
-        guard status == errSecSuccess,
-              let data = out as? Data,
-              let value = String(data: data, encoding: .utf8) else { return nil }
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw ClaudeSecretStoreError.securityStatus(status) }
+        guard let data = out as? Data,
+              let value = String(data: data, encoding: .utf8) else { throw ClaudeSecretStoreError.invalidData }
         return value
     }
 
     func write(_ value: String) -> Bool {
+        do { try writeSecret(value); return true } catch { return false }
+    }
+
+    func writeSecret(_ value: String) throws {
         let data = Data(value.utf8)
         let status = SecItemUpdate(baseQuery as CFDictionary,
                                    [kSecValueData as String: data] as CFDictionary)
-        if status == errSecSuccess { return true }
+        if status == errSecSuccess { return }
         if status == errSecItemNotFound {
             var add = baseQuery
             add[kSecValueData as String] = data
             add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+            let added = SecItemAdd(add as CFDictionary, nil)
+            guard added == errSecSuccess else { throw ClaudeSecretStoreError.securityStatus(added) }
+            return
         }
-        return false
+        throw ClaudeSecretStoreError.securityStatus(status)
     }
 
     func delete() {
-        SecItemDelete(baseQuery as CFDictionary)
+        try? deleteSecret()
+    }
+
+    func deleteSecret() throws {
+        let status = SecItemDelete(baseQuery as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ClaudeSecretStoreError.securityStatus(status)
+        }
     }
 }

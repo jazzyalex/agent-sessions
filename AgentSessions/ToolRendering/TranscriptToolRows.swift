@@ -52,9 +52,9 @@ struct ToolInvocationRowModel: Equatable {
 /// Full-stream ownership for duplicate message rows. Build once per block revision, source,
 /// Context toggle, telemetry markers and noncollapsible (for example inline-image) indices.
 /// Role filters do not affect ownership. Pass this index to every sliced `emit` call.
-struct TranscriptMessageGroupIndex {
+struct TranscriptMessageGroupIndex: Sendable {
     typealias Block = SessionTranscriptBuilder.LogicalBlock
-    struct Group {
+    struct Group: Sendable {
         var block: Block
         var representedBlockIndices: [Int]
 
@@ -66,7 +66,7 @@ struct TranscriptMessageGroupIndex {
     var groupsByID: [Int: Group] = [:]
     var groupIDByBlock: [Int: Int] = [:]
     /// The grouping state `build` holds before it reads a block: the open group and its body.
-    struct BuildState: Equatable {
+    struct BuildState: Equatable, Sendable {
         var owner: Int?
         var previous: MessagePresentation?
     }

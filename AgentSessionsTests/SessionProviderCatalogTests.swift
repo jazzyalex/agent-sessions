@@ -393,6 +393,22 @@ final class SessionProviderCatalogTests: XCTestCase {
                       "kimi never returned to .ready; got \(String(describing: unified.launchState.sourcePhases[.kimi]))")
     }
 
+    func testNewSessionMonitorStartsInactiveAndSurvivesActivationEdges() {
+        let unified = UnifiedSessionIndexer(handles: FakeProviderHandles.allReady())
+        TranscriptScrollSignal.shared.noteScroll()
+        defer { unified.debugCancelNewSessionMonitor() }
+
+        unified.setAppActive(false)
+        XCTAssertEqual(unified.debugNewSessionMonitorStartCount(), 1,
+                       "the initial inactive state still needs a background monitor")
+
+        unified.setAppActive(true)
+        unified.setAppActive(false)
+        unified.setAppActive(true)
+        XCTAssertEqual(unified.debugNewSessionMonitorStartCount(), 1,
+                       "activation edges must not restart and reset the monitor cadence")
+    }
+
     /// Runs the main run loop for `seconds` so every queued Combine delivery, debounced
     /// recompute and `publishAfterCurrentUpdate` hop lands before the next assertion.
     private func drain(seconds: TimeInterval) {

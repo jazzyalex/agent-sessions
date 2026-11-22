@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Combine
 @testable import AgentSessions
 
 private final class ToolbarTestSearchStore: SearchSessionStoring {
@@ -8,29 +9,29 @@ private final class ToolbarTestSearchStore: SearchSessionStoring {
     func parseFull(session: Session) async -> Session? { session }
 }
 
-/// Issue #92: on macOS 26 the session-list toolbar group ends at the
-/// list/transcript divider instead of floating over both panes.
+/// The session list owns its controls and reserves a separate row for feedback.
 final class SessionListToolbarLayoutTests: XCTestCase {
-    func testGroupEndsOneGutterShortOfTheDivider() {
-        let width = SessionListToolbarLayout.groupWidth(dividerX: 900, groupMinX: 150)
-        XCTAssertEqual(width, 900 - 150 - SessionListToolbarLayout.dividerGap)
-    }
+    @MainActor
+    func testFocusedCommandsPublishAvailabilityOnlyWhenItChanges() {
+        let unified = UnifiedSessionIndexer(catalog: SessionProviderCatalog())
+        let commands = SessionWindowCommands(archiveIndexer: unified)
+        var updates: [SessionWindowCommands.Availability] = []
+        let observation = commands.$availability.sink { updates.append($0) }
+        defer { observation.cancel() }
 
-    func testGroupTracksTheDividerWhenItMoves() {
-        let narrow = SessionListToolbarLayout.groupWidth(dividerX: 800, groupMinX: 150)
-        let wide = SessionListToolbarLayout.groupWidth(dividerX: 1100, groupMinX: 150)
-        XCTAssertEqual((wide ?? 0) - (narrow ?? 0), 300)
-    }
+        let enabled = SessionWindowCommands.Availability(resume: true)
+        var action = 0
+        commands.update(enabled, resume: { action = 1 }, copyResumeCommand: nil,
+                        openInCodexDesktop: nil, setFolding: nil)
+        commands.update(enabled, resume: { action = 2 }, copyResumeCommand: nil,
+                        openInCodexDesktop: nil, setFolding: nil)
+        commands.resume?()
 
-    func testNarrowListNeverPushesTheGroupPastTheDivider() throws {
-        let minX: CGFloat = 150
-        let dividerX: CGFloat = 400
-        let width = try XCTUnwrap(SessionListToolbarLayout.groupWidth(dividerX: dividerX, groupMinX: minX))
-        XCTAssertLessThanOrEqual(minX + width, dividerX - SessionListToolbarLayout.dividerGap)
-    }
-
-    func testGroupStartingPastTheDividerGetsNoWidth() {
-        XCTAssertEqual(SessionListToolbarLayout.groupWidth(dividerX: 100, groupMinX: 150), 0)
+        XCTAssertEqual(action, 2)
+        XCTAssertEqual(updates, [.init(), enabled])
+        commands.clear()
+        XCTAssertNil(commands.resume)
+        XCTAssertEqual(updates, [.init(), enabled, .init()])
     }
 
     func testPreTahoeListSizingIsUnchanged() {
@@ -41,26 +42,11 @@ final class SessionListToolbarLayoutTests: XCTestCase {
         }
     }
 
-    // MARK: - Real control budget (review of 20a1bbbb)
-
-    /// Space for the group above the narrowest macOS 26 list pane. The list
-    /// starts at window x = 0 and the divider sits one gutter past its minimum
-    /// width. The group's leading edge is assumed at x = 86 (traffic lights end
-    /// near 78, plus the toolbar's leading inset); that is an estimate, not a
-    /// Tahoe measurement.
-    private var narrowestAvailableWidth: CGFloat {
-        SessionListToolbarLayout.groupWidth(
-            dividerX: SessionListToolbarLayout.tahoeListMinWidth + LayoutTokens.sm,
-            groupMinX: 86
-        ) ?? 0
-    }
-
-    /// Hierarchy browsing (both collapse/expand buttons), every agent enabled,
-    /// an empty query (⌥⌘F hint shown) and a long disambiguated project filter.
+    /// Every agent enabled, hidden projects, and a long disambiguated project.
     @MainActor
-    private func worstCaseRow(fillsWidth: Bool) -> SessionListToolbarRow {
+    private func header(query: String = "", showsScope: Bool = false) -> SessionListHeader {
         let unified = UnifiedSessionIndexer(catalog: SessionProviderCatalog())
-        unified.queryDraft = ""
+        unified.queryDraft = query
         unified.projectSelection = ProjectSelection(
             identity: ProjectIdentity(canonicalRootPath: "/Users/t/Repository/an-unusually-long-project-name"),
             displayName: "an-unusually-long-project-name",
@@ -75,67 +61,91 @@ final class SessionListToolbarLayoutTests: XCTestCase {
             liveFeatureEnabled: true,
             hierarchy: .constant(true),
             isHierarchyBrowsing: true,
-            canCollapseAll: true,
-            canExpandAll: true,
-            collapseAll: {},
-            expandAll: {},
+            folding: .constant(.collapsed),
+            hasGroups: true,
             pinnedAgents: [spec("Codex", "1"), spec("Claude", "2")],
             otherAgents: others,
             isMonochrome: false,
-            clearProject: {}
+            hiddenProjectRoots: ["/tmp/automation-project"]
         )
-        return SessionListToolbarRow(unified: unified,
-                                     search: SearchCoordinator(store: ToolbarTestSearchStore()),
-                                     focus: WindowFocusCoordinator(),
-                                     searchState: UnifiedSearchState(),
-                                     filters: model,
-                                     fillsWidth: fillsWidth)
+        var scope = SessionScope()
+        if showsScope {
+            scope.add("Archived Codex sessions only", "Show current Codex sessions") {}
+            scope.add("An unusually long agent filter name", "Show other agents") {}
+            scope.hiddenRoots = ["/tmp/automation-project"]
+        }
+        return SessionListHeader(unified: unified,
+                                 search: SearchCoordinator(store: ToolbarTestSearchStore()),
+                                 focus: WindowFocusCoordinator(),
+                                 searchState: UnifiedSearchState(),
+                                 filters: model, scope: scope, runSearch: { _ in })
     }
 
     @MainActor
-    func testWorstCaseRowFitsAboveTheNarrowestListWithoutClipping() {
-        // The Archived chip reads these preferences directly, not the fixture's
-        // agent specs. Pin them on so the chip is always measured.
-        let defaults = UserDefaults.standard
-        let keys = [PreferencesKey.Agents.codexEnabled, PreferencesKey.Agents.claudeEnabled]
-        let saved = keys.map { defaults.object(forKey: $0) }
-        defer {
-            for (key, value) in zip(keys, saved) {
-                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
-            }
+    private func controlRow(for header: SessionListHeader) -> SessionListToolbarRow {
+        SessionListToolbarRow(unified: header.unified, search: header.search,
+                              focus: header.focus, searchState: header.searchState,
+                              filters: header.filters, runSearch: header.runSearch,
+                              searchDebouncer: .constant(nil))
+    }
+
+    @MainActor
+    private func measure(_ view: some View, width: CGFloat) -> CGSize {
+        NSHostingController(rootView: view).sizeThatFits(in: CGSize(width: width, height: 200))
+    }
+
+    @MainActor
+    func testControlsFitInNarrowListPane() {
+        let available = SessionListToolbarLayout.sideBySideListMinWidth - 2 * LayoutTokens.sm
+        let row = controlRow(for: header())
+        XCTAssertGreaterThan(measure(row, width: .infinity).width, available)
+        XCTAssertLessThanOrEqual(measure(row, width: available).width, available)
+        XCTAssertLessThanOrEqual(measure(row, width: 0).width, available)
+    }
+
+    @MainActor
+    func testControlsFitAtClassicMinimumWidth() {
+        let available: CGFloat = 320 - 2 * LayoutTokens.sm
+        let row = controlRow(for: header(query: "build failed"))
+        XCTAssertLessThanOrEqual(measure(row, width: available).width, available)
+    }
+
+    @MainActor
+    func testSearchAndScopeFeedbackReserveHeightBelowControlRow() {
+        for width in [SessionListToolbarLayout.sideBySideListMinWidth, 960] {
+            let idle = header()
+            let scoped = header(showsScope: true)
+            let searching = header(query: "build failed", showsScope: true)
+            let idleControls = measure(controlRow(for: idle), width: width - 2 * LayoutTokens.sm)
+            let searchingControls = measure(controlRow(for: searching), width: width - 2 * LayoutTokens.sm)
+            XCTAssertEqual(idleControls.height, searchingControls.height, accuracy: 1)
+            XCTAssertGreaterThan(measure(scoped, width: width).height, measure(idle, width: width).height)
+            XCTAssertGreaterThan(measure(searching, width: width).height, measure(scoped, width: width).height)
+            XCTAssertLessThanOrEqual(measure(searching, width: width).width, width)
         }
-        keys.forEach { defaults.set(true, forKey: $0) }
-
-        let available = narrowestAvailableWidth
-        let host = NSHostingController(rootView: worstCaseRow(fillsWidth: true))
-
-        // Positive control: the regular controls genuinely do not fit, so the
-        // assertion below depends on the fallbacks, not on generous geometry.
-        let ideal = NSHostingController(rootView: worstCaseRow(fillsWidth: false))
-            .sizeThatFits(in: CGSize(width: CGFloat.infinity, height: 60)).width
-        XCTAssertGreaterThan(ideal, available, "worst case must overflow at full size")
-
-        // Proposed exactly the available width, the row must not need more:
-        // anything wider would be clipped, hiding the project clear button.
-        let fitted = host.sizeThatFits(in: CGSize(width: available, height: 60)).width
-        // Proposed nothing, the row reports the least it can take (minimal tier,
-        // icon chips, compact project button). Measured 359 pt on Sequoia 15.8.
-        let minimum = host.sizeThatFits(in: CGSize(width: 0, height: 60)).width
-        XCTAssertLessThanOrEqual(fitted, available, "ideal \(ideal), minimum \(minimum), available \(available)")
-        XCTAssertLessThanOrEqual(minimum, available, "ideal \(ideal), minimum \(minimum), available \(available)")
     }
 
-    func testNoDividerMeansNaturalWidth() {
-        XCTAssertNil(SessionListToolbarLayout.groupWidth(dividerX: nil, groupMinX: 150),
-                     "stacked layout or hidden transcript has nothing to align to")
-        XCTAssertNil(SessionListToolbarLayout.groupWidth(dividerX: 900, groupMinX: nil),
-                     "not measured yet")
-    }
+    @MainActor
+    func testNativeSearchFieldRendersInsideListHeader() throws {
+        let width = SessionListToolbarLayout.sideBySideListMinWidth
+        let content = header(query: "build failed", showsScope: true)
+        let size = measure(content, width: width)
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.frame = CGRect(origin: .zero, size: CGSize(width: width, height: size.height))
+        hostingView.layoutSubtreeIfNeeded()
 
-    func testSubPointJitterDoesNotCountAsMovement() {
-        XCTAssertTrue(SessionListToolbarLayout.hasMoved(nil, to: 10))
-        XCTAssertFalse(SessionListToolbarLayout.hasMoved(10, to: 10.3))
-        XCTAssertTrue(SessionListToolbarLayout.hasMoved(10, to: 11))
+        func searchInput(in view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.isEditable { return field }
+            return view.subviews.lazy.compactMap { searchInput(in: $0) }.first
+        }
+
+        let field = try XCTUnwrap(searchInput(in: hostingView))
+        let frame = field.convert(field.bounds, to: hostingView)
+        XCTAssertGreaterThan(frame.minX, 0)
+        XCTAssertLessThan(frame.maxX, width)
+        let top = hostingView.isFlipped ? frame.minY : hostingView.bounds.maxY - frame.maxY
+        XCTAssertGreaterThanOrEqual(top, 0)
+        XCTAssertLessThan(top, LayoutTokens.xl)
     }
 
     func testSearchPlaceholderIsTranslated() throws {

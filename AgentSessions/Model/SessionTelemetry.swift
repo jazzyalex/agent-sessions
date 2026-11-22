@@ -480,7 +480,7 @@ public struct TelemetryWeeklyQuotaEstimate: Equatable, Codable, Sendable {
 /// an already-running child's history.
 public struct SessionTelemetry: Equatable, Codable, Sendable {
     /// Bump when accumulator semantics change; caches key on it.
-    public static let parserVersion = 15
+    public static let parserVersion = 16
 
     public let source: SessionSource
     public let initialConfiguration: SessionConfiguration?

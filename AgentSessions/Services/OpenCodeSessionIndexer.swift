@@ -45,7 +45,9 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var refreshToken = UUID()
+    private var refreshTask: Task<Void, Never>?
     private var reloadingSessionIDs: Set<String> = []
+    private var reloadGenerationBySessionID: [String: UUID] = [:]
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
     private var detectedBackend: OpenCodeStorageBackend = .none
@@ -91,7 +93,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
         return FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
     }
 
-    func refresh() {
+    func refresh(trigger: IndexRefreshTrigger = .manual) {
         if !AgentEnablement.isEnabled(.opencode) { return }
 
         let customRoot = sessionsRootOverride.isEmpty ? nil : sessionsRootOverride
@@ -120,6 +122,8 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
 
         let token = UUID()
         refreshToken = token
+        refreshTask?.cancel()
+        refreshTask = nil
         launchPhase = .hydrating
         isIndexing = true
         isProcessingTranscripts = false
@@ -134,10 +138,18 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
         switch backend {
         case .sqlite:
             let capturedCustomRoot = customRoot
-            Task.detached(priority: prio) { [weak self, token] in
+            refreshTask = Task.detached(priority: prio) { [weak self, token, trigger] in
                 guard let self else { return }
+                if trigger == .monitor {
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                }
                 LaunchProfiler.log("OpenCode.refresh: reading SQLite sessions")
                 let readResult = OpenCodeSqliteReader.listSessionsIfReadable(customRoot: capturedCustomRoot)
+                if trigger == .monitor {
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                }
                 let sessions = readResult ?? []
                 let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 let merged = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: .opencode)
@@ -146,21 +158,34 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                     SearchIngestService.IdentitySnapshot(storagePaths: [dbPath],
                                                          sessionIDs: Set($0.map(\.id)))
                 }
-                await MainActor.run {
-                    guard self.refreshToken == token else { return }
-                    LaunchProfiler.log("OpenCode.refresh: SQLite sessions loaded (total=\(merged.count))")
-                    self.allSessions = merged
-                    self.searchIdentitySnapshot = identitySnapshot
-                    self.isIndexing = false
-                    self.hasEmptyDirectory = merged.isEmpty
-                    self.progressText = "Ready"
-                    self.launchPhase = .ready
+                while !Task.isCancelled {
+                    if trigger == .monitor {
+                        await TranscriptScrollSignal.shared.waitUntilQuiet()
+                        guard !Task.isCancelled else { return }
+                    }
+                    let committed = await MainActor.run { () -> Bool? in
+                        guard self.refreshToken == token else { return nil }
+                        guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else { return false }
+                        LaunchProfiler.log("OpenCode.refresh: SQLite sessions loaded (total=\(merged.count))")
+                        self.allSessions = merged
+                        self.searchIdentitySnapshot = identitySnapshot
+                        self.isIndexing = false
+                        self.hasEmptyDirectory = merged.isEmpty
+                        self.progressText = "Ready"
+                        self.launchPhase = .ready
+                        return true
+                    }
+                    if committed != false { return }
                 }
             }
 
         case .json:
-            Task.detached(priority: prio) { [weak self, token] in
+            refreshTask = Task.detached(priority: prio) { [weak self, token, trigger] in
                 guard let self else { return }
+                if trigger == .monitor {
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                }
 
                 let config = SessionIndexingEngine.ScanConfig(
                     source: .opencode,
@@ -183,37 +208,73 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                 )
 
                 let result = await SessionIndexingEngine.hydrateOrScan(config: config)
-                await MainActor.run {
-                    guard self.refreshToken == token else { return }
-                    LaunchProfiler.log("OpenCode.refresh: JSON sessions merged (total=\(result.sessions.count))")
-                    self.allSessions = result.sessions
-                    self.searchIdentitySnapshot = configuredDBExists
-                        ? nil
-                        : SearchIngestService.IdentitySnapshot.authoritativeAbsence(ofDatabaseAt: configuredDBURL)
-                    self.isIndexing = false
-                    if FeatureFlags.throttleIndexingUIUpdates {
-                        self.filesProcessed = self.totalFiles
-                        if self.totalFiles > 0 {
-                            self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
-                        }
+                if trigger == .monitor {
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                }
+                while !Task.isCancelled {
+                    if trigger == .monitor {
+                        await TranscriptScrollSignal.shared.waitUntilQuiet()
+                        guard !Task.isCancelled else { return }
                     }
-                    self.progressText = "Ready"
-                    self.launchPhase = .ready
+                    let committed = await MainActor.run { () -> Bool? in
+                        guard self.refreshToken == token else { return nil }
+                        guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else { return false }
+                        LaunchProfiler.log("OpenCode.refresh: JSON sessions merged (total=\(result.sessions.count))")
+                        self.allSessions = result.sessions
+                        self.searchIdentitySnapshot = configuredDBExists
+                            ? nil
+                            : SearchIngestService.IdentitySnapshot.authoritativeAbsence(ofDatabaseAt: configuredDBURL)
+                        self.isIndexing = false
+                        if FeatureFlags.throttleIndexingUIUpdates {
+                            self.filesProcessed = self.totalFiles
+                            if self.totalFiles > 0 {
+                                self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
+                            }
+                        }
+                        self.progressText = "Ready"
+                        self.launchPhase = .ready
+                        return true
+                    }
+                    if committed != false { return }
                 }
             }
 
         case .none:
-            Task { @MainActor [weak self, token] in
-                guard let self, self.refreshToken == token else { return }
-                self.allSessions = []
-                self.searchIdentitySnapshot = configuredDBExists
-                    ? nil
-                    : SearchIngestService.IdentitySnapshot.authoritativeAbsence(ofDatabaseAt: configuredDBURL)
-                self.isIndexing = false
-                self.hasEmptyDirectory = true
-                self.progressText = "Ready"
-                self.launchPhase = .ready
+            refreshTask = Task { @MainActor [weak self, token] in
+                while !Task.isCancelled {
+                    if trigger == .monitor {
+                        await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    }
+                    guard let self, self.refreshToken == token else { return }
+                    guard trigger != .monitor || !TranscriptScrollSignal.shared.isScrolling else { continue }
+                    self.allSessions = []
+                    self.searchIdentitySnapshot = configuredDBExists
+                        ? nil
+                        : SearchIngestService.IdentitySnapshot.authoritativeAbsence(ofDatabaseAt: configuredDBURL)
+                    self.isIndexing = false
+                    self.hasEmptyDirectory = true
+                    self.progressText = "Ready"
+                    self.launchPhase = .ready
+                    return
+                }
             }
+        }
+    }
+
+    func cancelCoreRefreshAndWait() async {
+        let task = await MainActor.run { () -> Task<Void, Never>? in
+            self.refreshToken = UUID()
+            let task = self.refreshTask
+            task?.cancel()
+            self.refreshTask = nil
+            return task
+        }
+        await task?.value
+        await MainActor.run {
+            self.isIndexing = false
+            self.isProcessingTranscripts = false
+            if self.launchPhase != .error { self.launchPhase = .ready }
         }
     }
 
@@ -260,6 +321,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
             return
         }
         reloadingSessionIDs.insert(id)
+        let reloadGeneration = UUID()
         reloadLock.unlock()
 
         let existingSnapshot: Session? = {
@@ -283,8 +345,19 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                 self.reloadLock.unlock()
             }
 
+            if reason == .focusedSessionMonitor, TranscriptScrollSignal.shared.isScrolling {
+                Task.detached(priority: .utility) { [weak self] in
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                    self?.reloadSession(id: id, force: force, reason: reason)
+                }
+                return
+            }
+
             guard let existing = existingSnapshot else { return }
             let hasLoadedEvents = !existing.events.isEmpty
+            let existingContentRevision = SearchIngestService.contentRevision(for: existing)
+            let existingEventCount = existing.events.count
 
             if capturedBackend == .sqlite {
                 // A hydrated snapshot is frozen at first open; OpenCode keeps appending parts
@@ -300,8 +373,12 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                     }()
                     if !isNewer { return }
                 }
+                self.reloadLock.withLock {
+                    self.reloadGenerationBySessionID[id] = reloadGeneration
+                }
                 // SQLite path: no file on disk, load from DB directly
-                let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
+                let shouldSurfaceLoadingState = reason != .focusedSessionMonitor
+                    && (reason == .manualRefresh || !hasLoadedEvents)
                 if shouldSurfaceLoadingState {
                     Task { @MainActor [weak self] in
                         self?.isLoadingSession = true
@@ -312,13 +389,26 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                 let parsed = OpenCodeSqliteReader.loadFullSession(customRoot: capturedCustomRoot, sessionID: id) ?? existing
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    if reason == .focusedSessionMonitor {
+                        while TranscriptScrollSignal.shared.isScrolling {
+                            await TranscriptScrollSignal.shared.waitUntilQuiet()
+                            guard !Task.isCancelled else { return }
+                        }
+                    }
+                    let ownsReload = self.reloadLock.withLock {
+                        self.reloadGenerationBySessionID[id] == reloadGeneration
+                    }
+                    guard ownsReload else { return }
                     defer {
                         if shouldSurfaceLoadingState, self.loadingSessionID == id {
                             self.isLoadingSession = false
                             self.loadingSessionID = nil
                         }
                     }
-                    if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+                    if let idx = self.allSessions.firstIndex(where: { $0.id == id }),
+                       self.allSessions[idx].filePath == existing.filePath,
+                       SearchIngestService.contentRevision(for: self.allSessions[idx]) == existingContentRevision,
+                       self.allSessions[idx].events.count == existingEventCount {
                         let current = self.allSessions[idx]
                         let merged = Session(
                             id: parsed.id,
@@ -364,7 +454,12 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
+            self.reloadLock.withLock {
+                self.reloadGenerationBySessionID[id] = reloadGeneration
+            }
+
+            let shouldSurfaceLoadingState = reason != .focusedSessionMonitor
+                && (reason == .manualRefresh || !hasLoadedEvents)
             if shouldSurfaceLoadingState {
                 Task { @MainActor [weak self] in
                     self?.isLoadingSession = true
@@ -372,15 +467,17 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
             }
 
+            if reason == .focusedSessionMonitor, TranscriptScrollSignal.shared.isScrolling {
+                Task.detached(priority: .utility) { [weak self] in
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { return }
+                    self?.reloadSession(id: id, force: force, reason: reason)
+                }
+                return
+            }
+
             let parsed = OpenCodeSessionParser.parseFileFull(at: url) ?? existing
             let postParseStat = Self.fileStat(for: url)
-            self.reloadLock.lock()
-            if let preParseStat {
-                self.lastFullReloadFileStatsBySessionID[id] = preParseStat
-            } else {
-                self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
-            }
-            self.reloadLock.unlock()
             if preParseStat != postParseStat {
                 #if DEBUG
                 print("ℹ️ OpenCode file changed during reload; next monitor tick will retry")
@@ -389,6 +486,16 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
 
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                if reason == .focusedSessionMonitor {
+                    while TranscriptScrollSignal.shared.isScrolling {
+                        await TranscriptScrollSignal.shared.waitUntilQuiet()
+                        guard !Task.isCancelled else { return }
+                    }
+                }
+                let ownsReload = self.reloadLock.withLock {
+                    self.reloadGenerationBySessionID[id] == reloadGeneration
+                }
+                guard ownsReload else { return }
                 defer {
                     if shouldSurfaceLoadingState, self.loadingSessionID == id {
                         self.isLoadingSession = false
@@ -396,7 +503,10 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                     }
                 }
 
-                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+                if let idx = self.allSessions.firstIndex(where: { $0.id == id }),
+                   self.allSessions[idx].filePath == existing.filePath,
+                   SearchIngestService.contentRevision(for: self.allSessions[idx]) == existingContentRevision,
+                   self.allSessions[idx].events.count == existingEventCount {
                     let current = self.allSessions[idx]
                     let merged = Session(
                         id: parsed.id,
@@ -417,6 +527,13 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                         customTitle: parsed.customTitle
                     )
                     self.allSessions[idx] = merged
+                    self.reloadLock.withLock {
+                        if let preParseStat {
+                            self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+                        } else {
+                            self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
+                        }
+                    }
                 }
                 self.recomputeNow()
             }

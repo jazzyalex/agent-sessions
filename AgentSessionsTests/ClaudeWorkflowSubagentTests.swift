@@ -70,7 +70,7 @@ final class ClaudeWorkflowSubagentTests: XCTestCase {
         try write(#"{"agentType":"workflow-subagent","spawnDepth":1}"#,
                   to: agentDir.appendingPathComponent("agent-a0a3e832029606953.meta.json"))
 
-        let (parent, type) = ClaudeSessionParser.detectSubagentInfo(from: agentFile)
+        let (parent, type, _) = ClaudeSessionParser.detectSubagentInfo(from: agentFile)
 
         XCTAssertEqual(parent, parentUUID)
         XCTAssertEqual(type, "workflow-subagent")
@@ -88,7 +88,7 @@ final class ClaudeWorkflowSubagentTests: XCTestCase {
         try write(#"{"agentType":"Explore"}"#,
                   to: subagentsDir.appendingPathComponent("agent-cafef00d.meta.json"))
 
-        let (parent, type) = ClaudeSessionParser.detectSubagentInfo(from: agentFile)
+        let (parent, type, _) = ClaudeSessionParser.detectSubagentInfo(from: agentFile)
 
         XCTAssertEqual(parent, parentUUID)
         XCTAssertEqual(type, "Explore")
@@ -103,7 +103,7 @@ final class ClaudeWorkflowSubagentTests: XCTestCase {
             .appendingPathComponent("agent-x.jsonl")
         try write("{}\n", to: agentFile)
 
-        let (parent, type) = ClaudeSessionParser.detectSubagentInfo(from: agentFile)
+        let (parent, type, _) = ClaudeSessionParser.detectSubagentInfo(from: agentFile)
 
         XCTAssertNil(parent)
         XCTAssertNil(type)
@@ -116,10 +116,51 @@ final class ClaudeWorkflowSubagentTests: XCTestCase {
             .appendingPathComponent("\(parentUUID).jsonl")
         try write("{}\n", to: topLevel)
 
-        let (parent, type) = ClaudeSessionParser.detectSubagentInfo(from: topLevel)
+        let (parent, type, _) = ClaudeSessionParser.detectSubagentInfo(from: topLevel)
 
         XCTAssertNil(parent)
         XCTAssertNil(type)
+    }
+
+    func testSubagentTitleUsesClaudeMetadataAndPreservesExplicitRename() throws {
+        let root = try makeUniqueTempDir()
+        let agent = root.appendingPathComponent("\(parentUUID)/subagents/agent-plant.jsonl")
+        let assistant = #"{"type":"assistant","isSidechain":true,"agentId":"plant","message":{"role":"assistant","model":"claude-fable-5-2","content":[{"type":"text","text":"Working on the task."}]}}"#
+        try write(assistant + "\n", to: agent)
+        try write(#"{"agentType":"general-purpose","description":"Build Plant (Fable) theme"}"#,
+                  to: agent.deletingPathExtension().appendingPathExtension("meta.json"))
+
+        for parsed in [ClaudeSessionParser.parseFile(at: agent), ClaudeSessionParser.parseFileFull(at: agent)] {
+            let session = try XCTUnwrap(parsed)
+            XCTAssertNil(session.customTitle)
+            XCTAssertEqual(session.title, "Build Plant (Fable) theme")
+            XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: session), "Build Plant (Fable) theme")
+            XCTAssertEqual(SessionInfoQuickFacts(session: session).title.value, "Build Plant (Fable) theme")
+        }
+
+        let rename = #"{"type":"custom-title","customTitle":"My explicit title"}"#
+        try write(assistant + "\n" + rename + "\n", to: agent)
+        for parsed in [ClaudeSessionParser.parseFile(at: agent), ClaudeSessionParser.parseFileFull(at: agent)] {
+            XCTAssertEqual(try XCTUnwrap(parsed).title, "My explicit title")
+        }
+    }
+
+    func testSubagentWithoutSidecarUsesMatchingParentLaunchResult() throws {
+        let root = try makeUniqueTempDir()
+        let agent = root.appendingPathComponent("\(parentUUID)/subagents/agent-plant.jsonl")
+        let parent = root.appendingPathComponent("\(parentUUID).jsonl")
+        try write(#"{"type":"user","isSidechain":true,"agentId":"plant","message":{"role":"user","content":"Build a new theme."}}"# + "\n", to: agent)
+        let results = [
+            #"{"type":"user","toolUseResult":{"agentId":"plant","description":"Build Plant (Fable) theme"}}"#,
+            #"{"type":"user","toolUseResult":{"agentId":"another-agent","description":"Unrelated title"}}"#
+        ]
+        try write(results.joined(separator: "\n") + "\n", to: parent)
+
+        for parsed in [ClaudeSessionParser.parseFile(at: agent), ClaudeSessionParser.parseFileFull(at: agent)] {
+            let session = try XCTUnwrap(parsed)
+            XCTAssertEqual(session.title, "Build Plant (Fable) theme")
+            XCTAssertEqual(SessionInfoQuickFacts(session: session).title.value, "Build Plant (Fable) theme")
+        }
     }
 
     // MARK: - Hierarchy nesting (consequence of the detection fix)

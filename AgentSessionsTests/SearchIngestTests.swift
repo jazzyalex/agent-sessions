@@ -376,6 +376,12 @@ final class SearchIngestTests: XCTestCase {
         return SearchIngestService.FileRef(path: url.path, mtime: mtime, size: size)
     }
 
+    private func currentISOTimestamp() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: Date())
+    }
+
     override func setUp() async throws {
         try await super.setUp()
         ingestTempDir = FileManager.default.temporaryDirectory
@@ -470,6 +476,42 @@ final class SearchIngestTests: XCTestCase {
     /// concrete eligible set — the production path always does. Exact mode pushes the
     /// ineligible ids into SQL as `NOT IN`, so the LIMIT bounds the *filtered* ranking and
     /// the top-N is exact; the Swift-side fallback keeps a widened but bounded LIMIT.
+    func testProductionFileRefIngestStoresScannerCountsInsteadOfDiscoveryEstimate() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = ingestTempDir.appendingPathComponent("estimated-counts.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"q"}]}}"#,
+            #"{"timestamp":"2026-01-01T00:00:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"a"}]}}"#,
+            #"{"timestamp":"2026-01-01T00:00:02.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"true\"}","call_id":"call1"}}"#
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+
+        let discoveryRow = try XCTUnwrap(SessionIndexer().parseFile(at: url))
+        XCTAssertTrue(discoveryRow.events.isEmpty, "FileRef metadata must be the lightweight discovery row")
+        XCTAssertNil(discoveryRow.lightweightCommands)
+        let ref = try fileRef(for: url)
+        let productionRef = SearchIngestService.FileRef(
+            path: ref.path, mtime: ref.mtime, size: ref.size, metadata: discoveryRow)
+
+        let scanned = SearchSourceScanner.scanSegments(session: discoveryRow) { _ in }
+        XCTAssertTrue(scanned.complete)
+        XCTAssertEqual(scanned.messages, 3, "one user, one assistant and one tool call are semantic messages")
+        XCTAssertEqual(scanned.commands, 1)
+        XCTAssertNotEqual(discoveryRow.eventCount, scanned.messages,
+                          "the lightweight event count is an estimate, not an ingest count")
+
+        let progress = try await SearchIngestService(db: db).ingest(
+            source: .codex, files: [productionRef], toolIOEnabled: false, quietSeconds: 0)
+        XCTAssertEqual(progress.processed, 1)
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        let stored = try XCTUnwrap(rows.first { $0.sessionID == discoveryRow.id })
+        XCTAssertEqual(stored.messages, scanned.messages)
+        XCTAssertEqual(stored.commands, scanned.commands)
+        XCTAssertNotEqual(stored.messages, discoveryRow.eventCount)
+    }
+
     func testSearchSessionIDsFTSAppliesSQLLimitWithEligibleIDs() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }
@@ -515,12 +557,12 @@ final class SearchIngestTests: XCTestCase {
         let capped = try await search(limit: 2, eligible: allSet)
         XCTAssertEqual(capped, Array(all.prefix(2)))
 
-        // Swift-side fallback (no ineligible set supplied): rows ranked beyond the bound
-        // are truncated by SQLite before the filter ever sees them.
+        // Eligibility is now installed in SQLite even without an exclusion set, so
+        // rows outside the selected scope cannot consume the result capacity.
         let tail = Set(all.suffix(3))
         let fallback = try await search(limit: 2, eligible: tail)
-        XCTAssertTrue(fallback.isEmpty,
-                      "SQL LIMIT must truncate before Swift-side filtering; got \(fallback)")
+        XCTAssertEqual(fallback, Array(all.suffix(3).prefix(2)),
+                       "SQL LIMIT must apply after eligible membership")
 
         // Exact mode: the same query, told which ids are ineligible, returns the true
         // top-2 *of the eligible rows* — the LIMIT now bounds the filtered ranking.
@@ -1106,6 +1148,213 @@ final class SearchIngestTests: XCTestCase {
 
         let toolIOReadyAfter = try await db.fetchToolIOReadyPaths(for: "codex")
         XCTAssertTrue(toolIOReadyAfter.contains(url.path), "file must now have a tool-IO row")
+    }
+
+    func testOldSearchFormatMigrationBypassesQuietAndCooldownAfterServiceRestart() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "old-search-format.jsonl",
+                                       userText: "before version migration lynxcerulean",
+                                       assistantText: "ack lynxcerulean",
+                                       in: ingestTempDir,
+                                       isoTimestamp: currentISOTimestamp())
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-2 * 3600)], ofItemAtPath: url.path)
+        let oldRef = try fileRef(for: url)
+        let first = try await SearchIngestService(db: db).ingest(
+            source: .codex, files: [oldRef], toolIOEnabled: false,
+            quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(first.processed, 1)
+
+        let sessionID = try XCTUnwrap(SessionIndexer().parseFileFull(at: url)?.id)
+        try makeCodexFixture(named: url.lastPathComponent,
+                             userText: "after migration otterindigo",
+                             assistantText: "ack otterindigo",
+                             in: ingestTempDir,
+                             isoTimestamp: currentISOTimestamp())
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        let hotRef = try fileRef(for: url)
+        XCTAssertNotEqual(hotRef.mtime, oldRef.mtime, "sanity: source changed after the first ingest")
+
+        try await db.begin()
+        try await db.upsertSessionSearch(sessionID: sessionID, source: "codex",
+                                         mtime: oldRef.mtime, size: oldRef.size,
+                                         text: "old-format lynxcerulean",
+                                         formatVersion: FeatureFlags.sessionSearchFormatVersion - 1)
+        try await db.commit()
+
+        // A fresh actor models app restart: the format migration must still outrank both
+        // the hot-file quiet period and the persisted search-row cooldown.
+        let restarted = SearchIngestService(db: db)
+        let migrated = try await restarted.ingest(
+            source: .codex, files: [hotRef], toolIOEnabled: false,
+            quietSeconds: 3600, reingestCooldownOverride: 3600)
+        XCTAssertEqual(migrated.processed, 1, "old search format must be rebuilt through both time gates")
+        XCTAssertEqual(migrated.skipped, 0)
+
+        let currentReady = try await db.fetchSearchReadyPaths(for: "codex")
+        XCTAssertTrue(currentReady.contains(url.path), "successful migration must write the current search format")
+        let oldMatches = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "lynxcerulean", includeSystemProbes: true, limit: 10)
+        let newMatches = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "otterindigo", includeSystemProbes: true, limit: 10)
+        XCTAssertTrue(oldMatches.isEmpty, "old content must be replaced during migration")
+        XCTAssertEqual(newMatches, [sessionID], "new source content must be indexed during migration")
+    }
+
+    func testRecentMissingAndOldToolIOFormatsBackfillAfterServiceRestart() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let timestamp = currentISOTimestamp()
+        let missingURL = try makeCodexFixture(named: "missing-toolio.jsonl",
+                                              userText: "recent missing tool io ibisblue",
+                                              assistantText: "ack ibisblue",
+                                              in: ingestTempDir,
+                                              isoTimestamp: timestamp)
+        let oldURL = try makeCodexFixture(named: "old-toolio.jsonl",
+                                          userText: "recent old tool io heronumber",
+                                          assistantText: "ack heronumber",
+                                          in: ingestTempDir,
+                                          isoTimestamp: timestamp)
+        let missingRef = try fileRef(for: missingURL)
+        let oldRef = try fileRef(for: oldURL)
+        let first = try await SearchIngestService(db: db).ingest(
+            source: .codex, files: [missingRef, oldRef], toolIOEnabled: false,
+            quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(first.processed, 2)
+
+        let oldSessionID = try XCTUnwrap(SessionIndexer().parseFileFull(at: oldURL)?.id)
+        try await db.begin()
+        try await db.upsertSessionToolIO(
+            sessionID: oldSessionID, source: "codex", mtime: oldRef.mtime, size: oldRef.size,
+            refTS: Int64(Date().timeIntervalSince1970), text: "old tool io format",
+            formatVersion: FeatureFlags.sessionToolIOFormatVersion - 1)
+        try await db.commit()
+
+        let oldVersionPaths = try await db.fetchToolIOReadyPaths(
+            for: "codex", formatVersion: FeatureFlags.sessionToolIOFormatVersion - 1)
+        let currentBefore = try await db.fetchToolIOReadyPaths(for: "codex")
+        XCTAssertTrue(oldVersionPaths.contains(oldURL.path), "sanity: old-version tool-IO row is present")
+        XCTAssertFalse(currentBefore.contains(missingURL.path), "sanity: the second path has no tool-IO row")
+
+        // Both sessions are recent, so missing or obsolete tool-IO format is a required
+        // migration and must bypass the quiet/cooldown windows on the new service actor.
+        let restarted = SearchIngestService(db: db)
+        let backfilled = try await restarted.ingest(
+            source: .codex, files: [missingRef, oldRef], toolIOEnabled: true,
+            quietSeconds: 3600, reingestCooldownOverride: 3600)
+        XCTAssertEqual(backfilled.processed, 2, "recent missing/old tool-IO rows must be rebuilt")
+        XCTAssertEqual(backfilled.skipped, 0)
+
+        let currentAfter = try await db.fetchToolIOReadyPaths(for: "codex")
+        let oldAfter = try await db.fetchToolIOReadyPaths(
+            for: "codex", formatVersion: FeatureFlags.sessionToolIOFormatVersion - 1)
+        XCTAssertTrue(currentAfter.contains(missingURL.path))
+        XCTAssertTrue(currentAfter.contains(oldURL.path))
+        XCTAssertFalse(oldAfter.contains(oldURL.path), "backfill must replace the old format version")
+    }
+
+    func testFailedSearchFormatMigrationStaysPendingUntilSourceIsFixed() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "retry-search-migration.jsonl",
+                                       userText: "before failure retry walruscopper",
+                                       assistantText: "ack walruscopper",
+                                       in: ingestTempDir,
+                                       isoTimestamp: currentISOTimestamp())
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-2 * 3600)], ofItemAtPath: url.path)
+        let originalRef = try fileRef(for: url)
+        let initial = try await SearchIngestService(db: db).ingest(
+            source: .codex, files: [originalRef], toolIOEnabled: false,
+            quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(initial.processed, 1)
+        let sessionID = try XCTUnwrap(SessionIndexer().parseFileFull(at: url)?.id)
+
+        try await db.begin()
+        try await db.upsertSessionSearch(
+            sessionID: sessionID, source: "codex", mtime: originalRef.mtime, size: originalRef.size,
+            text: "old-format walruscopper",
+            formatVersion: FeatureFlags.sessionSearchFormatVersion - 1)
+        try await db.commit()
+
+        try "not valid json\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        let malformedRef = try fileRef(for: url)
+        let failed = try await SearchIngestService(db: db).ingest(
+            source: .codex, files: [malformedRef], toolIOEnabled: false,
+            quietSeconds: 3600, reingestCooldownOverride: 3600)
+        XCTAssertEqual(failed.processed, 0)
+        XCTAssertEqual(failed.skipped, 1, "malformed source must fail the required migration")
+
+        let cutoff = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 86_400).timeIntervalSince1970)
+        let pendingAfterFailure = try await db.requiredSearchMigrations(
+            source: "codex", includeToolIO: false, toolIOCutoff: cutoff)
+        XCTAssertTrue(pendingAfterFailure.paths.contains(url.path), "failed migration must remain pending")
+
+        try makeCodexFixture(named: url.lastPathComponent,
+                             userText: "fixed retry narwhalplum",
+                             assistantText: "ack narwhalplum",
+                             in: ingestTempDir,
+                             isoTimestamp: currentISOTimestamp())
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        let fixedRef = try fileRef(for: url)
+        let retried = try await SearchIngestService(db: db).ingest(
+            source: .codex, files: [fixedRef], toolIOEnabled: false,
+            quietSeconds: 3600, reingestCooldownOverride: 3600)
+        XCTAssertEqual(retried.processed, 1, "fixed source must retry without waiting out either gate")
+
+        let pendingAfterRetry = try await db.requiredSearchMigrations(
+            source: "codex", includeToolIO: false, toolIOCutoff: cutoff)
+        XCTAssertFalse(pendingAfterRetry.paths.contains(url.path), "successful retry must clear the migration obligation")
+        let newMatches = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "narwhalplum", includeSystemProbes: true, limit: 10)
+        XCTAssertEqual(newMatches, [sessionID])
+    }
+
+    func testIngestSkipsUnchangedIncompleteTranscriptAndRetriesSameSizeRepair() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let url = try makeCodexFixture(named: "unchanged-incomplete.jsonl",
+                                       userText: "repaired fixture",
+                                       assistantText: "response",
+                                       in: ingestTempDir,
+                                       isoTimestamp: currentISOTimestamp())
+        let metadata = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
+        let modificationDate = Date(timeIntervalSince1970: 1_720_000_000)
+
+        func rewriteFirstByte(_ byte: UInt8) throws {
+            let handle = try FileHandle(forWritingTo: url)
+            defer { try? handle.close() }
+            try handle.write(contentsOf: Data([byte]))
+            try FileManager.default.setAttributes([.modificationDate: modificationDate], ofItemAtPath: url.path)
+        }
+        try rewriteFirstByte(0x21) // An invalid leading character.
+        let baseline = try fileRef(for: url)
+        let ref = SearchIngestService.FileRef(path: baseline.path, mtime: baseline.mtime,
+                                              size: baseline.size, metadata: metadata)
+        let service = SearchIngestService(db: db)
+        let first = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false)
+        XCTAssertEqual(first.processed, 0)
+        XCTAssertEqual(first.unchangedIncomplete, 0)
+
+        let second = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false)
+        XCTAssertEqual(second.processed, 0)
+        XCTAssertEqual(second.unchangedIncomplete, 1)
+
+        try rewriteFirstByte(0x7B) // Restore the opening brace with the same size and mtime.
+        let repaired = try fileRef(for: url)
+        XCTAssertEqual(repaired.size, ref.size)
+        XCTAssertEqual(repaired.mtime, ref.mtime)
+        let third = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false)
+        XCTAssertEqual(third.processed, 1)
+        XCTAssertEqual(third.unchangedIncomplete, 0)
     }
 
     // MARK: - SearchIngestCoordinator (pure single-flight + coalesce state machine)

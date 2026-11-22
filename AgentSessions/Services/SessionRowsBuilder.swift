@@ -101,6 +101,7 @@ enum SessionRowsBuilder {
         /// The previous `cachedRows`, used to detect a large wholesale reorder.
         let previousCachedRows: [Session]
         let collapsedParents: Set<String>
+        let folding: SessionGroupFolding
         let showSubagentHierarchy: Bool
         /// True when a search query is active — hierarchy nesting is suppressed
         /// while searching (matches must be shown flat).
@@ -122,6 +123,7 @@ enum SessionRowsBuilder {
              allSessions: [Session],
              previousCachedRows: [Session],
              collapsedParents: Set<String>,
+             folding: SessionGroupFolding = .standard,
              showSubagentHierarchy: Bool,
              searchActive: Bool,
              isHierarchyBrowsing: Bool,
@@ -131,6 +133,7 @@ enum SessionRowsBuilder {
             self.allSessions = allSessions
             self.previousCachedRows = previousCachedRows
             self.collapsedParents = collapsedParents
+            self.folding = folding
             self.showSubagentHierarchy = showSubagentHierarchy
             self.searchActive = searchActive
             self.isHierarchyBrowsing = isHierarchyBrowsing
@@ -177,7 +180,8 @@ enum SessionRowsBuilder {
         let hierarchyResult = SubagentHierarchyBuilder.build(
             sessions: input.nextRows,
             collapsedParents: input.collapsedParents,
-            hierarchyEnabled: input.showSubagentHierarchy && !input.searchActive
+            hierarchyEnabled: input.showSubagentHierarchy && !input.searchActive,
+            folding: input.folding
         )
         let newRows = hierarchyResult.sessions
 

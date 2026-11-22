@@ -16,33 +16,28 @@ enum ClaudeProbeConfig {
         return home.appendingPathComponent("Library/Application Support/AgentSessions/ClaudeProbeProject")
     }
 
-    /// Returns true if the given session appears to be an Agent Sessions probe session.
-    /// Heuristics (ordered, conservative to avoid false positives):
-    /// - Source must be `.claude`.
-    /// - Path-based: if the file lives inside the discovered probe project under ~/.claude/projects,
-    ///   it is a probe session (fast and definitive when project discovery works).
-    /// - Fast path: if lightweight `cwd` matches the Probe WD, treat as probe.
-    ///
-    /// Note: Probe sessions send no user messages to preserve usage limits.
-    /// Identification relies solely on working directory matching.
-    static func isProbeSession(_ session: Session) -> Bool {
-        guard session.source == .claude else { return false }
-
-        // 1) Path-based classification via discovered probe project id
-        if let projectID = ClaudeProbeProject.discoverProbeProjectId(), !projectID.isEmpty {
-            let root = (NSHomeDirectory() as NSString)
+    /// Resolve the verified probe project once for a batch, even when none is
+    /// present. A later batch discovers again so it can see a new marker.
+    static func makeSessionClassifier(
+        discoverProjectID: () -> String? = ClaudeProbeProject.discoverProbeProjectId,
+        workingDirectory: String = probeWorkingDirectory()
+    ) -> (Session) -> Bool {
+        let probePath: String?
+        if let projectID = discoverProjectID(), !projectID.isEmpty {
+            probePath = (NSHomeDirectory() as NSString)
                 .appendingPathComponent(".claude/projects/\(projectID)")
-            if session.filePath.hasPrefix(root + "/") || session.filePath == root {
+        } else {
+            probePath = nil
+        }
+        let normalizedWorkingDirectory = normalizePath(workingDirectory)
+        return { session in
+            guard session.source == .claude else { return false }
+            if let probePath, session.filePath == probePath || session.filePath.hasPrefix(probePath + "/") {
                 return true
             }
+            guard let cwd = session.lightweightCwd, !cwd.isEmpty else { return false }
+            return normalizePath(cwd) == normalizedWorkingDirectory
         }
-
-        // 2) Fast path: cwd match for lightweight sessions
-        if let cwd = session.lightweightCwd, !cwd.isEmpty {
-            if normalizePath(cwd) == normalizePath(probeWorkingDirectory()) { return true }
-        }
-
-        return false
     }
 
     /// Returns true if the given path is the Claude probe working directory.

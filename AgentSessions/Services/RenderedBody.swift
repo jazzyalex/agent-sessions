@@ -49,6 +49,7 @@ struct RenderedBody: Equatable {
     /// Source ranges that rendered into a non-highlightable region (table cell,
     /// group annotation). A match here → pill/count only, never a paint.
     var unmappableSourceRanges: [NSRange]
+    var syntaxSnippets: [TranscriptSyntaxSnippet] = []
 
     static func == (lhs: RenderedBody, rhs: RenderedBody) -> Bool {
         lhs.renderedLength == rhs.renderedLength

@@ -30,6 +30,11 @@ struct ClaudeTelemetryAccumulator {
     private var seenMessageIDs = Set<String>()
     private var sawAssistantRecord = false
     private var sawUsageRecord = false
+    private let subagentID: String?
+
+    init(subagentID: String? = nil) {
+        self.subagentID = subagentID
+    }
 
     mutating func consume(line: String, index: Int) {
         // Only assistant records can carry Claude configuration or usage. Keep
@@ -54,8 +59,15 @@ struct ClaudeTelemetryAccumulator {
         // Nested subagents run on their own model. Their tokens are real spend, but
         // letting their model into the timeline rewrites the parent's configuration
         // history with a subagent's settings.
-        let isSidechain = (obj["isSidechain"] as? Bool) ?? false
-        if !isSidechain {
+        let isDescendant: Bool
+        if let subagentID {
+            // Claude marks a dedicated child transcript's own records as side-chain.
+            // Legacy child records can omit agentId. A different ID names delegated work.
+            isDescendant = (obj["agentId"] as? String).map { $0 != subagentID } ?? false
+        } else {
+            isDescendant = (obj["isSidechain"] as? Bool) ?? false
+        }
+        if !isDescendant {
             timeline.observe(model: rawModel,
                              effort: effort,
                              observedAt: ClaudeRunwayLog.date(obj["timestamp"]),
@@ -97,10 +109,7 @@ struct ClaudeTelemetryAccumulator {
                          model: rawModel,
                          // A record that omits effort belongs to the effort still in
                          // force, not to a separate "unknown effort" slice. Note the
-                         // carried value comes from the PARENT timeline, which
-                         // excludes sidechains — so a subagent record with no effort
-                         // of its own is attributed the parent's. That is the best
-                         // available answer, not a measured one.
+                         // carried value comes from the selected session's timeline.
                          effort: effectiveEffort,
                          speed: speed,
                          inferenceGeo: inferenceGeo)
@@ -113,7 +122,7 @@ struct ClaudeTelemetryAccumulator {
                 observedAt: ClaudeRunwayLog.date(obj["timestamp"]),
                 anchorLine: index,
                 usageFamily: "message.usage",
-                ownership: isSidechain ? .descendant : .session,
+                ownership: isDescendant ? .descendant : .session,
                 model: rawModel,
                 reasoningEffort: effectiveEffort,
                 speed: speed,

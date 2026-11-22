@@ -104,6 +104,10 @@ final class ClaudeUsageModel: ObservableObject {
     /// Observer for an explicit refresh request (e.g. the no-CLI banner enabling
     /// Web API mode) — on NotificationCenter.default, removed separately. (P4)
     private var refreshRequestObserver: NSObjectProtocol?
+    private var credentialChangeObserver: NSObjectProtocol?
+    private var legacyCredentialChangeObserver: NSObjectProtocol?
+    private var currentSnapshotOwnership: String?
+    private var currentTransientCredentialOwner: String?
 
 #if DEBUG
     static var projectionDiagnosticsDefaultsForTesting: UserDefaults?
@@ -225,15 +229,20 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func applyAvailability(_ availability: ClaudeServiceAvailability) {
+        if let lease = availability.requestLease, !lease.isValid { return }
+        if let owner = availability.credentialOwner,
+           !ClaudeCredentialService.shared.isCurrentWebOwner(owner) { return }
         // A nil transient reason means "this availability producer has no
         // opinion", not "clear another producer's active failure". OAuth, Web,
         // and tmux all share this channel; treating every legacy nil as a global
         // clear let fallback startup erase an OAuth 429 before Quota Meter drew
         // it. Recovery must be explicit, or arrive as a live usage snapshot.
         if let reason = availability.transientReason {
+            currentTransientCredentialOwner = availability.credentialOwner
             if transientReason != reason { transientReason = reason }
         } else if availability.clearsTransientReason, transientReason != nil {
             transientReason = nil
+            currentTransientCredentialOwner = nil
         }
         // A caption-only emit (a transient blip: 429 / pre-escalation) carries no
         // meaningful legacy bools or authState — leave the orthogonal setup/CLI/login
@@ -274,6 +283,7 @@ final class ClaudeUsageModel: ObservableObject {
                 // or strip visibility flips and the service immediately delivers a snapshot).
                 await Task.yield()
                 guard model.sourceManagerGeneration == generation else { return }
+                guard !snapshot.hasWebOwnership || snapshot.webOwnershipIsCurrent else { return }
                 model.applyLimitSnapshot(snapshot)
             }
         }
@@ -363,6 +373,16 @@ final class ClaudeUsageModel: ObservableObject {
                 Task { @MainActor [weak self] in self?.refreshNow() }
             }
         }
+        credentialChangeObserver = NotificationCenter.default.addObserver(
+            forName: ClaudeCredentialService.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.clearObsoleteWebSnapshot() }
+        }
+        legacyCredentialChangeObserver = NotificationCenter.default.addObserver(
+            forName: ClaudeCredentialService.legacyDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.clearObsoleteWebSnapshot() }
+        }
     }
 
     private func removeWakeObservers() {
@@ -375,6 +395,45 @@ final class ClaudeUsageModel: ObservableObject {
             NotificationCenter.default.removeObserver(obs)
             refreshRequestObserver = nil
         }
+        if let credentialChangeObserver {
+            NotificationCenter.default.removeObserver(credentialChangeObserver)
+            self.credentialChangeObserver = nil
+        }
+        if let legacyCredentialChangeObserver {
+            NotificationCenter.default.removeObserver(legacyCredentialChangeObserver)
+            self.legacyCredentialChangeObserver = nil
+        }
+    }
+
+    private func clearObsoleteWebSnapshot() {
+        if let owner = currentTransientCredentialOwner,
+           !ClaudeCredentialService.shared.isCurrentWebOwner(owner) {
+            currentTransientCredentialOwner = nil
+            transientReason = nil
+        }
+        guard let owner = currentSnapshotOwnership,
+              owner.hasPrefix("web:") || owner.hasPrefix("legacy:"),
+              !ClaudeCredentialService.shared.isCurrentWebOwner(owner) else { return }
+        currentSnapshotOwnership = nil
+        sessionRemainingPercent = 0
+        weekAllModelsRemainingPercent = 0
+        weekOpusRemainingPercent = nil
+        sessionResetText = ""
+        weekAllModelsResetText = ""
+        weekOpusResetText = nil
+        weekScopedLabel = nil
+        lastUpdate = nil
+        lastSuccessAt = nil
+        currentSource = nil
+        currentSourceLabel = ""
+        currentHealthLabel = ""
+        unavailableMessage = "Waiting for current account usage"
+        fiveHourProjectionTracker.reset()
+        fiveHourProjectedRunoutAt = nil
+        fiveHourProjectionObservedAt = nil
+        fiveHourOnTrackObservedAt = nil
+        weeklyBurnRateTracker.reset()
+        weeklyBurnRateEstimate = nil
     }
 
     private func handleWake() {
@@ -568,6 +627,8 @@ final class ClaudeUsageModel: ObservableObject {
 
     /// Apply a normalized ClaudeLimitSnapshot from the source manager.
     private func applyLimitSnapshot(_ s: ClaudeLimitSnapshot) {
+        guard !s.hasWebOwnership || s.webOwnershipIsCurrent else { return }
+        currentSnapshotOwnership = s.ownership
         let now = Date()
         let freshness = Self.alertFreshness(for: s, now: now)
         // A serving source is authoritative recovery. Failed fallback
@@ -888,4 +949,7 @@ struct ClaudeServiceAvailability {
     /// and the banner untouched, so a rate-limit/transient blip can't clobber an
     /// unrelated state. Set by the pure-caption emits (429 + pre-escalation).
     var captionOnly: Bool = false
+    /// Web callbacks retain this identity through the asynchronous UI hop.
+    var credentialOwner: String? = nil
+    var requestLease: ClaudeCredentialRequestLease? = nil
 }

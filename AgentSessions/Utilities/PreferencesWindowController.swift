@@ -95,26 +95,23 @@ private struct PreferencesWindowRoot: View {
     let initialTab: PreferencesTab
     let indexer: SessionIndexer
     let updaterController: UpdaterController
-    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some View {
         // `.id(initialTab)` so reopening the already-open window at a different
         // tab actually switches: without it SwiftUI preserves PreferencesView's
         // @State selection across the rootView swap and stays on the last pane.
-        let content = PreferencesView(initialTab: initialTab)
+        //
+        // Appearance comes only from `window.appearance` (see applyAppearance).
+        // Do not wrap this in a per-theme `preferredColorScheme` switch: each
+        // branch is a different view identity, so changing the theme rebuilt
+        // PreferencesView (sidebar selection jumped), and removing
+        // `preferredColorScheme` never resets the scheme, so Dark → System
+        // left the content dark while only the title bar changed.
+        PreferencesView(initialTab: initialTab)
             .id(initialTab)
             .environmentObject(indexer)
             .environmentObject(indexer.columnVisibility)
             .environmentObject(updaterController)
-
-        let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
-        Group {
-            switch appAppearance {
-            case .light: content.preferredColorScheme(.light)
-            case .dark: content.preferredColorScheme(.dark)
-            case .system: content
-            }
-        }
     }
 }
 
@@ -148,6 +145,10 @@ private extension PreferencesWindowController {
 
     func applyAppearance(forceRedraw: Bool) {
         let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
+        // Keep the change-detection cache in sync: the defaults observer is
+        // removed while the window is closed, so a theme change made then
+        // would otherwise leave a stale value that swallows the next change.
+        lastAppAppearanceRaw = raw
         let appAppearance = AppAppearance(rawValue: raw) ?? .system
         switch appAppearance {
         case .system:

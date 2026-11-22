@@ -453,6 +453,7 @@ extension PreferencesView {
                     .help("Exclude sessions that contain no recorded tool/command calls. Strict: Claude and Antigravity are excluded unless tool calls are present in the parsed transcript.")
                 }
 
+                HiddenProjectsRow()
                 Divider()
                 Toggle("Skip preambles when parsing (Codex + Claude)", isOn: Binding(
                     get: {
@@ -577,4 +578,37 @@ private func isTerminalInstalled(bundleId: String) -> Bool {
     process.waitForExit()
     let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+private struct HiddenProjectsRow: View {
+    @State private var roots = HiddenProjects.roots()
+
+    var body: some View {
+        Group {
+            if !roots.isEmpty {
+                PreferenceKeyValueRow(label: "Hidden projects") {
+                    VStack(alignment: .leading, spacing: LayoutTokens.xs) {
+                        ForEach(roots.sorted(), id: \.self) { root in
+                            HStack(spacing: LayoutTokens.sm) {
+                                Text(verbatim: root)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .help(Text(verbatim: root))
+                                Spacer()
+                                Button("Unhide") {
+                                    HiddenProjects.unhide(root)
+                                    roots = HiddenProjects.roots()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification, object: UserDefaults.standard)
+            .receive(on: RunLoop.main)) { _ in
+                let current = HiddenProjects.roots()
+                if current != roots { roots = current }
+            }
+    }
 }

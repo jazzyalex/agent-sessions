@@ -189,7 +189,7 @@ final class CursorSessionParser {
 
     /// Parse a single JSONL line into one or more SessionEvents.
     /// Splits `message.content[]` blocks into separate events following Claude parser pattern.
-    private static func parseLineEvents(_ obj: [String: Any], baseEventID: String) -> [SessionEvent] {
+    static func parseLineEvents(_ obj: [String: Any], baseEventID: String, forSearch: Bool = false) -> [SessionEvent] {
         let rawJSON = rawJSONBase64(sanitizeLargeStrings(in: obj))
 
         // Cursor lines have role at top level
@@ -316,7 +316,7 @@ final class CursorSessionParser {
                 flushTextIfNeeded()
                 seq += 1
                 let toolName = (block["name"] as? String) ?? (block["tool"] as? String)
-                let toolInput = block["input"].flatMap(stringifyJSON)
+                let toolInput = block["input"].flatMap { stringifyJSON($0, forSearch: forSearch) }
                 out.append(
                     SessionEvent(
                         id: makeID(String(format: "-t%02d", seq)),
@@ -337,7 +337,7 @@ final class CursorSessionParser {
             case "tool_result", "tool-result":
                 flushTextIfNeeded()
                 seq += 1
-                let toolOutput = extractToolResultContent(from: block)
+                let toolOutput = extractToolResultContent(from: block, forSearch: forSearch)
                 out.append(
                     SessionEvent(
                         id: makeID(String(format: "-r%02d", seq)),
@@ -546,19 +546,19 @@ final class CursorSessionParser {
         return nil
     }
 
-    private static func extractToolResultContent(from block: [String: Any]) -> String? {
+    private static func extractToolResultContent(from block: [String: Any], forSearch: Bool = false) -> String? {
         if let content = block["content"] as? String { return content }
         if let output = block["output"] as? String { return output }
         if let content = block["content"] {
-            return stringifyJSON(content)
+            return stringifyJSON(content, forSearch: forSearch)
         }
         return nil
     }
 
-    private static func stringifyJSON(_ any: Any) -> String? {
+    private static func stringifyJSON(_ any: Any, forSearch: Bool = false) -> String? {
         if let str = any as? String { return str }
         if let str = ToolJSON.string(from: any, pretty: true) {
-            if str.utf8.count > maxRawJSONFieldBytes {
+            if !forSearch, str.utf8.count > maxRawJSONFieldBytes {
                 return "[OMITTED large JSON bytes=\(str.utf8.count)]"
             }
             return str
@@ -1005,6 +1005,39 @@ enum CursorACPStoreReader {
         }
     }
 
+    private final class SearchExpansionBudget {
+        let maximum: Int
+        var used = 0
+        var nodes = 0
+        var exceeded = false
+        init(_ maximum: Int) { self.maximum = maximum }
+        func visit() -> Bool {
+            nodes += 1
+            if nodes > 65_536 || Task.isCancelled { exceeded = true; return false }
+            return true
+        }
+        func retain(_ text: String) -> Bool {
+            let next = used + text.utf8.count * 24 + 2048
+            if next > maximum { exceeded = true; return false }
+            used = next
+            return true
+        }
+    }
+
+    static func parseSearchSnapshot(at url: URL, expectedSessionID: String, remainingPayloadBytes: Int, reportPayload: (Int) -> Void = { _ in }) throws -> Session? {
+        guard expectedSessionID.hasPrefix(idPrefix) else { throw SearchSourceScanner.Failure.unsupported }
+        let uuid = String(expectedSessionID.dropFirst(idPrefix.count))
+        guard UUID(uuidString: uuid) != nil else { throw SearchSourceScanner.Failure.unsupported }
+        let budget = SearchExpansionBudget(remainingPayloadBytes)
+        defer { reportPayload(budget.used) }
+        let result = parseSnapshot(storeURL: url, outputURL: url, expectedUUID: uuid,
+            sessionID: expectedSessionID, logicalStat: nil, searchBudget: budget)
+        try Task.checkCancellation()
+        if budget.exceeded { throw SearchSourceScanner.Failure.resourceLimit }
+        if case .valid(let session) = result { return session }
+        throw SearchSourceScanner.Failure.malformed
+    }
+
     private enum SnapshotParseResult {
         case valid(Session)
         case invalid
@@ -1015,7 +1048,8 @@ enum CursorACPStoreReader {
                                       outputURL: URL,
                                       expectedUUID: String,
                                       sessionID: String,
-                                      logicalStat parsedLogicalStat: SessionFileStat?) -> SnapshotParseResult {
+                                      logicalStat parsedLogicalStat: SessionFileStat?,
+                                      searchBudget: SearchExpansionBudget? = nil) -> SnapshotParseResult {
         let sidecar: [String: Any]
         switch readSidecar(storeURL.deletingLastPathComponent().appendingPathComponent("meta.json")) {
         case .value(let value):
@@ -1056,7 +1090,9 @@ enum CursorACPStoreReader {
         }
 
         var events: [SessionEvent] = []
+        var hasOmissions = false
         for (turnIndex, turnIDData) in rootMessage.dataFields(number: 8).enumerated() {
+            if let searchBudget, !searchBudget.visit() { return .invalid }
             guard turnIDData.count == 32,
                   case .value(let turnData) = store.blob(id: turnIDData.hexString),
                   let turnMessage = ProtoMessage(turnData) else {
@@ -1078,6 +1114,7 @@ enum CursorACPStoreReader {
             }
             if let shellTurnData = shellTurnFields.first {
                 guard ProtoMessage(shellTurnData) != nil else { return .invalid }
+                hasOmissions = true
                 continue
             }
 
@@ -1091,9 +1128,11 @@ enum CursorACPStoreReader {
                   !userText.isEmpty else {
                 return storeFailure()
             }
+            if let searchBudget, !searchBudget.retain(userText) { return .invalid }
             events.append(event(id: sessionID, turn: turnIndex, kind: .user, text: userText))
 
             for (stepIndex, stepID) in agentTurn.dataFields(number: 2).enumerated() {
+                if let searchBudget, !searchBudget.visit() { return .invalid }
                 guard stepID.count == 32,
                       case .value(let stepData) = store.blob(id: stepID.hexString),
                       let stepMessage = ProtoMessage(stepData) else { return storeFailure() }
@@ -1113,11 +1152,13 @@ enum CursorACPStoreReader {
                           let assistantMessage = ProtoMessage(assistantData),
                           let assistantText = assistantMessage.firstString(number: 1),
                           !assistantText.isEmpty else { return storeFailure() }
+                    if let searchBudget, !searchBudget.retain(assistantText) { return .invalid }
                     events.append(event(id: sessionID,
                                         turn: turnIndex * 10_000 + stepIndex,
                                         kind: .assistant,
                                         text: assistantText))
                 case 2, 3:
+                    hasOmissions = true
                     continue
                 default:
                     return .invalid
@@ -1131,7 +1172,7 @@ enum CursorACPStoreReader {
         let size = logicalStat?.size
         let cwd = sidecar["cwd"] as? String
         let name = rootJSON["name"] as? String
-        return .valid(Session(id: sessionID,
+        var session = Session(id: sessionID,
                               source: .cursor,
                               startTime: created,
                               endTime: modified ?? created,
@@ -1146,7 +1187,9 @@ enum CursorACPStoreReader {
                               customTitle: name,
                               originator: "cursor-agent",
                               originSource: "acp-persisted",
-                              surface: .acp))
+                              surface: .acp)
+        session.sourceSearchHasOmissions = hasOmissions
+        return .valid(session)
     }
 
     /// Combines the SQLite store and its sidecar/WAL companions so focused reload
@@ -2396,10 +2439,14 @@ private struct ProtoMessage {
     private let fields: [(number: Int, data: Data)]
 
     init?(_ data: Data) {
+        guard data.count <= 8 * 1024 * 1024 else { return nil }
         let bytes = Array(data)
         var offset = 0
         var parsed: [(number: Int, data: Data)] = []
+        var nodeCount = 0
         while offset < bytes.count {
+            nodeCount += 1
+            guard nodeCount <= 65_536, !Task.isCancelled else { return nil }
             guard let key = Self.readVarint(bytes, &offset), key >> 3 > 0 else { return nil }
             let field = Int(key >> 3)
             switch key & 7 {
@@ -2460,4 +2507,8 @@ private extension Data {
     }
 
     var hexString: String { map { String(format: "%02x", $0) }.joined() }
+}
+
+extension CursorACPStoreReader {
+    static func searchBlobIsBounded(_ data: Data) -> Bool { ProtoMessage(data) != nil }
 }

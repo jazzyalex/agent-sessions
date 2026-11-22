@@ -119,9 +119,47 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     }
 }
 
+/// Keep the mapped transcript in bytes. Only records with quota fields need
+/// text decoding or a Foundation JSON object.
+private struct WeeklyQuotaJSONLLines: Sequence, IteratorProtocol {
+    private static let lf = Data([0x0A])
+    private let data: Data
+    private let separator: Data
+    private var start: Data.Index
+
+    init(_ data: Data) {
+        self.data = data
+        separator = data.range(of: Self.lf) == nil ? Data([0x0D]) : Self.lf
+        start = data.startIndex
+    }
+
+    mutating func next() -> Data? {
+        guard start < data.endIndex else { return nil }
+        let delimiter = data.range(of: separator, in: start..<data.endIndex)
+        let line = data[start..<(delimiter?.lowerBound ?? data.endIndex)]
+        start = delimiter?.upperBound ?? data.endIndex
+        return line
+    }
+
+    static func object(in line: Data) -> [String: Any]? {
+        if let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] {
+            return object
+        }
+        // Preserve the replacement decoding used by the old whole-file reader.
+        guard String(data: line, encoding: .utf8) == nil else { return nil }
+        let repaired = Data(String(decoding: line, as: UTF8.self).utf8)
+        return (try? JSONSerialization.jsonObject(with: repaired)) as? [String: Any]
+    }
+}
+
 /// Streams the local Codex transcripts that overlap the current weekly window and
 /// sums their priced activity.
 enum CodexWeeklyQuotaBootstrapScanner {
+
+    private static let accountMetadata = Data("session_meta".utf8)
+    private static let accountStart = Data("session_start".utf8)
+    private static let tokenCount = Data("token_count".utf8)
+    private static let turnContext = Data("turn_context".utf8)
 
     /// Integer quantization makes a small numerator imprecise (±50% at 1pp, ~±17%
     /// at 3pp), but a rough number now beats "n/a" for an hour: a freshly
@@ -216,14 +254,6 @@ enum CodexWeeklyQuotaBootstrapScanner {
                 return nil
             }
 
-            // Decode once, then enumerate lines without materializing a second
-            // full-file array. The per-line stop flag makes an obsolete scope
-            // cooperatively cancellable during the expensive transcript walk.
-            let text = String(decoding: data, as: UTF8.self)
-            guard !shouldCancel() else {
-                debugLog("scan CANCELLED after decoding \(url.lastPathComponent)")
-                return nil
-            }
             var identity = CodexTranscriptAccountIdentity()
             // Model attribution is chronological. A later turn_context must not
             // price earlier token records in the same file.
@@ -237,28 +267,20 @@ enum CodexWeeklyQuotaBootstrapScanner {
             var fileSeenAnchors: Set<Int> = []
             var fileMatchedTurns = 0
             var fileIncomplete = false
-            var lineIndex = 0
-            var cancelled = false
-            withoutActuallyEscaping(shouldCancel) { cancellable in
-                text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .byLines) {
-                    substring, _, _, stop in
-                    guard let line = substring else { return }
-                    let lineSlice = line[...]
-                    if lineIndex.isMultiple(of: 1024), cancellable() {
-                        cancelled = true
-                        stop = true
-                        return
-                    }
-                    defer { lineIndex += 1 }
+            for (lineIndex, line) in WeeklyQuotaJSONLLines(data).enumerated() {
+                if lineIndex.isMultiple(of: 1024), shouldCancel() {
+                    debugLog("scan CANCELLED in \(url.lastPathComponent)")
+                    return nil
+                }
+                autoreleasepool {
                     if expectedAccountHash != nil,
-                       (line.contains("session_meta") || line.contains("session_started")
-                        || line.contains("session_start")) {
-                        identity.consume(line: String(line))
+                       (line.range(of: accountMetadata) != nil || line.range(of: accountStart) != nil) {
+                        identity.consume(line: String(decoding: line, as: UTF8.self))
                     }
-                    let isTokenCount = line.contains("token_count")
-                    let isTurnContext = line.contains("turn_context")
+                    let isTokenCount = line.range(of: tokenCount) != nil
+                    let isTurnContext = line.range(of: turnContext) != nil
                     guard isTokenCount || isTurnContext else { return }
-                    let complete = ingest(line: lineSlice,
+                    let complete = ingest(line: line,
                            isTokenCount: isTokenCount,
                            isTurnContext: isTurnContext,
                            currentModel: &currentModel,
@@ -277,10 +299,6 @@ enum CodexWeeklyQuotaBootstrapScanner {
                            matchedTurns: &fileMatchedTurns)
                     fileIncomplete = fileIncomplete || !complete
                 }
-            }
-            if cancelled {
-                debugLog("scan CANCELLED in \(url.lastPathComponent)")
-                return nil
             }
             if identity.hasConflictingDurableAccounts {
                 hadIncompleteCandidate = true
@@ -304,6 +322,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
             hadIncompleteCandidate = hadIncompleteCandidate || fileIncomplete
         }
 
+        guard !shouldCancel() else { return nil }
         let totalVolume = pricedVolume + unpricedVolume
         debugLog("scan done files=\(seenFiles) anchorsSeen=\(seenAnchors.sorted()) matched=\(matchedTurns) dollars=\(dollars) priced=\(pricedVolume) unpriced=\(unpricedVolume)")
         guard !hadIncompleteCandidate else {
@@ -374,7 +393,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
     }
 
     @discardableResult
-    private static func ingest(line: Substring,
+    private static func ingest(line: Data,
                                isTokenCount: Bool,
                                isTurnContext: Bool,
                                currentModel: inout String?,
@@ -393,8 +412,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
                                matchedTurns: inout Int) -> Bool {
         // The caller already prefiltered; only relevant lines are ever JSON-parsed,
         // which is what keeps a multi-megabyte transcript cheap to walk.
-        guard let lineData = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+        guard let object = WeeklyQuotaJSONLLines.object(in: line) else {
             return false
         }
         let payload = (object["payload"] as? [String: Any]) ?? object
@@ -552,6 +570,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
 ///    cumulative diffing, deduped by message id exactly as the runway parser does.
 enum ClaudeWeeklyQuotaBootstrapScanner {
 
+    private static let usageKey = Data("\"usage\"".utf8)
     static let defaultProjectsRoot: URL = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent(".claude/projects", isDirectory: true)
 
@@ -561,6 +580,7 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                      usedPercentPoints: Double,
                      priceTable: RunwayPriceTable,
                      now: Date,
+                     shouldCancel: @Sendable () -> Bool = { false },
                      fileManager: FileManager = .default) -> WeeklyQuotaBootstrapResult? {
         CodexWeeklyQuotaBootstrapScanner.debugLog(
             "claude scan start used=\(usedPercentPoints)pp resetsAt=\(resetsAt.timeIntervalSince1970)")
@@ -576,7 +596,8 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
         let priceSnapshot = priceTable.snapshot()
 
         let urls = CodexWeeklyQuotaBootstrapScanner.candidateFiles(
-            root: root, modifiedAfter: windowStart, fileManager: fileManager)
+            root: root, modifiedAfter: windowStart, shouldCancel: shouldCancel, fileManager: fileManager)
+        guard !shouldCancel() else { return nil }
 
         // Claude's week is an order of magnitude larger than Codex's (~680 MB vs
         // ~44 MB here), enough that a serial walk blew straight through the 60s
@@ -591,63 +612,64 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
         // Stored as hashes so a week's worth of ids stays small.
         var seenMessageIDs: Set<Int> = []
 
-        // Bounded fan-out. Each worker decodes a whole file into a String, and the
-        // largest transcripts here are ~44 MB (so ~2x that live per worker); an
-        // unbounded `concurrentPerform` over every core peaked near a gigabyte,
-        // which is not an acceptable cost for a background convenience scan.
-        let workers = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
+        // Limit background concurrency so startup indexing and the UI have cores
+        // available while calibration walks several large files.
+        let workers = min(2, max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
         DispatchQueue.concurrentPerform(iterations: workers) { worker in
+            let timestampParser = ClaudeRunwayLog.TimestampParser()
             var index = worker
             while index < urls.count {
+                guard !shouldCancel() else { return }
                 defer { index += workers }
                 let url = urls[index]
                 guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
                 var localEntries: [(id: Int?, dollars: Double, volume: Double, priced: Bool)] = []
 
-                let text = String(decoding: data, as: UTF8.self)
-                for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-                    guard line.contains("\"usage\"") else { continue }
-                    guard let lineData = line.data(using: .utf8),
-                          let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                          let message = object["message"] as? [String: Any],
-                          let usage = message["usage"] as? [String: Any] else { continue }
-                    guard let at = ClaudeRunwayLog.date(object["timestamp"]), at >= windowStart, at <= now else { continue }
+                for (lineIndex, line) in WeeklyQuotaJSONLLines(data).enumerated() {
+                    if lineIndex.isMultiple(of: 1024), shouldCancel() { return }
+                    guard line.range(of: usageKey) != nil else { continue }
+                    autoreleasepool {
+                        guard let object = WeeklyQuotaJSONLLines.object(in: line),
+                              let message = object["message"] as? [String: Any],
+                              let usage = message["usage"] as? [String: Any] else { return }
+                        guard let at = timestampParser.date(object["timestamp"]), at >= windowStart, at <= now else { return }
 
-                    func value(_ key: String) -> Double { ClaudeRunwayLog.double(usage[key]) ?? 0 }
-                    // Claude reports fresh input separately from cache reads already, so
-                    // unlike Codex there is nothing to subtract.
-                    let input = value("input_tokens")
-                    let cacheRead = value("cache_read_input_tokens")
-                    // Cache writes bill by TTL — 1.25× input at 5 minutes, 2× at one
-                    // hour. Resolved by the shared helper so this scan and the live
-                    // runway price the same record identically.
-                    let writes = ClaudeRunwayLog.cacheCreation(usage: usage)
-                    let output = value("output_tokens")
-                    let volume = input + cacheRead + writes.fiveMinute + writes.oneHour + output
-                    guard volume > 0 else { continue }
+                        func value(_ key: String) -> Double { ClaudeRunwayLog.double(usage[key]) ?? 0 }
+                        // Claude reports fresh input separately from cache reads already, so
+                        // unlike Codex there is nothing to subtract.
+                        let input = value("input_tokens")
+                        let cacheRead = value("cache_read_input_tokens")
+                        // Cache writes bill by TTL — 1.25× input at 5 minutes, 2× at one
+                        // hour. Resolved by the shared helper so this scan and the live
+                        // runway price the same record identically.
+                        let writes = ClaudeRunwayLog.cacheCreation(usage: usage)
+                        let output = value("output_tokens")
+                        let volume = input + cacheRead + writes.fiveMinute + writes.oneHour + output
+                        guard volume > 0 else { return }
 
-                    let id = (message["id"] as? String).map { $0.hashValue }
-                    let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                    // A tier with no rates counts as unpriced for the same reason an
-                    // unknown model does — better an honest gap than a halved cost.
-                    // Claude rows only: a Claude Code log routed to a third-party
-                    // model (Z.ai, Kimi) is not Claude quota spend.
-                    // The request's prompt size selects a long-context tier (Haiku 5.5
-                    // bills 5x above 100k), the same sum ClaudeTelemetryAccumulator uses.
-                    let contextInput = input + cacheRead + writes.fiveMinute + writes.oneHour
-                    guard let price = priceSnapshot.price(forModel: model, provider: "claude")?.effective(at: at),
-                          let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"]),
-                                                  contextInputTokens: Double(contextInput),
-                                                  inferenceGeo: ClaudeRunwayLog.inferenceGeo(usage: usage)) else {
-                        localEntries.append((id, 0, volume, false))
-                        continue
+                        let id = (message["id"] as? String).map { $0.hashValue }
+                        let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                        // A tier with no rates counts as unpriced for the same reason an
+                        // unknown model does — better an honest gap than a halved cost.
+                        // Claude rows only: a Claude Code log routed to a third-party
+                        // model (Z.ai, Kimi) is not Claude quota spend.
+                        // The request's prompt size selects a long-context tier (Haiku 5.5
+                        // bills 5x above 100k), the same sum ClaudeTelemetryAccumulator uses.
+                        let contextInput = input + cacheRead + writes.fiveMinute + writes.oneHour
+                        guard let price = priceSnapshot.price(forModel: model, provider: "claude")?.effective(at: at),
+                              let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"]),
+                                                      contextInputTokens: Double(contextInput),
+                                                      inferenceGeo: ClaudeRunwayLog.inferenceGeo(usage: usage)) else {
+                            localEntries.append((id, 0, volume, false))
+                            return
+                        }
+                        let cost = rates.dollars(input: input,
+                                                 cachedInput: cacheRead,
+                                                 output: output,
+                                                 cacheWrite5m: writes.fiveMinute,
+                                                 cacheWrite1h: writes.oneHour)
+                        localEntries.append((id, cost, volume, true))
                     }
-                    let cost = rates.dollars(input: input,
-                                             cachedInput: cacheRead,
-                                             output: output,
-                                             cacheWrite5m: writes.fiveMinute,
-                                             cacheWrite1h: writes.oneHour)
-                    localEntries.append((id, cost, volume, true))
                 }
                 accumulator.lock()
                 for entry in localEntries {
@@ -665,6 +687,7 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                 accumulator.unlock()
             }
         }
+        guard !shouldCancel() else { return nil }
         let files = urls.count
 
         let totalVolume = pricedVolume + unpricedVolume

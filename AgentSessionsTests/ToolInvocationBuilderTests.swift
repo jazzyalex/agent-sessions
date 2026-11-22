@@ -62,6 +62,142 @@ final class ToolInvocationBuilderTests: XCTestCase {
 
     private let scriptHeader = "Script completed\nWall time 1.2 seconds\nOutput:\n"
 
+    func testCodexSyntaxRequiresLiteralCommandAndProvenCompleteResult() {
+        let literal = #"text(await tools.exec_command({cmd:"sed -n '246,320p' AgentSessions/Utilities/CodexSessionImagePayload.swift",max_output_tokens:1400}));"#
+        let source = "let é = 1\nfunc greet() {}"
+        let ok = chunk("read", exit: 0, output: source)
+        func actions(_ script: String, _ output: [String]) -> [ToolAction] {
+            session([F.block(.toolCall, id: "t", toolName: "exec", toolInput: script),
+                     codeModeOutput(id: "t", [scriptHeader] + output)], source: .codex).invocation(at: 0).actions
+        }
+        XCTAssertEqual(actions(literal, [ok]).first?.outputSyntax?.language, .swift)
+        let invalid = [
+            #"text(await tools.exec_command({cmd:"cat a.swift",...options}));"#,
+            #"text(await tools.exec_command({cmd:"cat a.swift",["cmd"]:"cat b.py"}));"#,
+            #"text(await tools.exec_command({cmd:"cat a.swift",cmd:"cat b.py"}));"#,
+            #"text(await tools.exec_command({cmd:"cat " + file}));"#,
+            #"text(await tools.exec_command({cmd:"cat a.swift""#,
+            #"text(await tools.exec_command({cmd:"cat a.swift; cat b.py"}));"#,
+            #"text(await tools.exec_command({cmd:"cat $FILE.swift"}));"#,
+        ]
+        for script in invalid {
+            XCTAssertTrue(actions(script, [ok]).allSatisfy { $0.outputSyntax == nil }, script)
+        }
+        for output in [
+            [chunk("read", exit: nil, output: source)],
+            [chunk("read", exit: 1, output: source)],
+            [chunk("read", exit: 0, output: "Warning: truncated output (original token count: 100)\nTotal output lines: 5\n\n" + source)],
+            ["Warning: truncated output (original token count: 100)\nTotal output lines: 5\n\n", ok],
+            [ok, ok],
+        ] {
+            XCTAssertNil(actions(literal, output).first?.outputSyntax)
+        }
+        let ordered = literal + #"text(await tools.exec_command({cmd:"cat b.py"}));"#
+        let reversed = #"let a = await tools.exec_command({cmd:"cat a.swift"}); let b = await tools.exec_command({cmd:"cat b.py"}); text(b); text(a);"#
+        let other = chunk("other", exit: 0, output: "def f(): pass")
+        XCTAssertTrue(actions(ordered, [ok, other]).allSatisfy { $0.outputSyntax == nil })
+        XCTAssertTrue(actions(reversed, [other, ok]).allSatisfy { $0.outputSyntax == nil })
+        XCTAssertTrue(actions(ordered, [ok, "Warning: truncated output (original token count: 100)\nTotal output lines: 5\n\n", other])
+            .allSatisfy { $0.outputSyntax == nil })
+    }
+
+    func testToolSyntaxUsesKnownFileResultsAndExplicitShellExit() throws {
+        let numbered = "     1\tlet é = 1\n     2\tfunc greet() {}"
+        for command in ["cat a.swift", "nl -ba a.swift", "nl -ba a.swift | sed -n '1,2p'"] {
+            let s = session([
+                F.block(.toolCall, id: "t", toolName: "exec_command", toolInput: json(["cmd": command])),
+                F.block(.toolOut, id: "t", text: numbered, toolName: "exec_command", sidecar: ToolSidecar(exitCode: 0)),
+            ], source: .codex)
+            XCTAssertEqual(s.invocation(at: 0).actions.first?.outputSyntax?.language, .swift, command)
+        }
+        let claude = session([
+            F.block(.toolCall, id: "t", toolName: "Read", toolInput: json(["file_path": "/repo/a.swift"])),
+            F.block(.toolOut, id: "t", text: numbered, toolName: "Read"),
+        ], source: .claude)
+        XCTAssertEqual(claude.invocation(at: 0).actions.first?.outputSyntax?.language, .swift)
+
+        let openCode = session([
+            F.block(.toolCall, id: "t", toolName: "read", toolInput: json(["filePath": "/repo/a.py"])),
+            F.block(.toolOut, id: "t", text: "<path>/repo/a.py</path>\n<type>file</type>\n<content>\n1: def f():\n2:     pass\n\n(End of file - total 2 lines)\n</content>", toolName: "read"),
+        ], source: .opencode)
+        let action = try XCTUnwrap(openCode.invocation(at: 0).actions.first)
+        let snippet = try XCTUnwrap(action.outputSyntax?.snippets(in: try XCTUnwrap(action.output)).first)
+        XCTAssertEqual(snippet.key.language, .python)
+        XCTAssertFalse(snippet.key.text.contains("<content>"))
+        XCTAssertFalse(snippet.key.text.contains("1:"))
+    }
+
+    func testBlameSyntaxRequiresPairedSuccessfulOutputAndKeepsOtherCommandsPlain() throws {
+        let command = "git log --oneline; git blame -L 26,28 a.swift; git blame -L 46,48 'a.swift'"
+        for source: SessionSource in [.claude, .codex] {
+            let tool = source == .claude ? "Bash" : "exec_command"
+            let arguments = source == .claude ? ["command": command] : ["cmd": command]
+            for exit in [0, 1] {
+                let s = session([
+                    F.block(.toolCall, id: "t", toolName: tool, toolInput: json(arguments)),
+                    F.block(.toolOut, id: "t", text: "blame", toolName: tool,
+                            sidecar: ToolSidecar(exitCode: exit)),
+                ], source: source)
+                let hint = s.invocation(at: 0).actions.first?.outputSyntax
+                if exit == 0 { XCTAssertTrue(try XCTUnwrap(hint).blameSource) }
+                else { XCTAssertNil(hint) }
+            }
+        }
+        let scriptCommand = command + "; python3 - <<'PY'\nprint('done')\nPY"
+        for script in [
+            "text(await tools.exec_command(" + json(["cmd": scriptCommand]) + "));",
+            "text(await tools.exec_command({cmd:`" + scriptCommand + "`}));",
+        ] {
+            let s = session([
+                F.block(.toolCall, id: "t", toolName: "exec", toolInput: script),
+                codeModeOutput(id: "t", ["Script completed\nWall time 0.1 seconds\nOutput:\n",
+                                            chunk("blame", exit: 0, output: "blame")]),
+            ], source: .codex)
+            let action = try XCTUnwrap(s.invocation(at: 0).actions.first)
+            XCTAssertTrue(try XCTUnwrap(action.outputSyntax).blameSource)
+            XCTAssertEqual(ToolOutputSyntax.heredocLanguage(command: try XCTUnwrap(action.command)), .python)
+        }
+        let dynamic = "text(await tools.exec_command({cmd:`git blame \u{24}{file}.swift`}));"
+        XCTAssertNil(ToolOutputSyntax.literalSingleton(dynamic, script: try XCTUnwrap(CodexExecScript.parse(dynamic))))
+    }
+
+    func testBlameSyntaxRejectsUnprovenCommandAndFileBoundaries() {
+        let commands = [
+            "git blame a.swift\ngit blame b.py",
+            "git blame a.swift\ngit blame b.swift",
+            "git blame a.swift\r\ngit blame b.py",
+            "git blame a.swift\rgit blame b.py",
+            "git blame a.swift\nprintf 'other output'",
+            "git blame -L 1,1 a.swift; git blame -L 2,3 b.swift",
+            "git blame -L 1,1 'one/a.swift'; git blame -L 2,3 \"two/a.swift\"",
+            "cd one; git blame -L 1,1 a.swift; cd ../two; git blame -L 2,3 a.swift",
+            "git blame a.swift; git -C other blame a.swift",
+            "git blame a.swift; sh -c 'git blame b.py'",
+            "git blame a.swift\npython3 - <<'PY'\nprint('done')\nPY",
+            "git blame a.swift; python3 - <<'PY'\nprint('done')",
+            "git blame a.swift; python3 - <<'PY'\nprint('done')\nPY\ngit blame b.py",
+            "git blame a.swift; python3 - <<'PY'\nprint('done')\nPY\n# comment\ngit blame b.py",
+        ]
+        for command in commands {
+            for source: SessionSource in [.claude, .codex] {
+                let tool = source == .claude ? "Bash" : "exec_command"
+                let key = source == .claude ? "command" : "cmd"
+                let s = session([
+                    F.block(.toolCall, id: "t", toolName: tool, toolInput: json([key: command])),
+                    F.block(.toolOut, id: "t", text: "blame", toolName: tool, sidecar: ToolSidecar(exitCode: 0)),
+                ], source: source)
+                XCTAssertNil(s.invocation(at: 0).actions.first?.outputSyntax, command)
+            }
+            let script = "text(await tools.exec_command(" + json(["cmd": command]) + "));"
+            let s = session([
+                F.block(.toolCall, id: "t", toolName: "exec", toolInput: script),
+                codeModeOutput(id: "t", ["Script completed\nWall time 0.1 seconds\nOutput:\n",
+                                            chunk("blame", exit: 0, output: "blame")]),
+            ], source: .codex)
+            XCTAssertNil(s.invocation(at: 0).actions.first?.outputSyntax, command)
+        }
+    }
+
     // MARK: - Q1 objects
 
     func testClaudeBashUsesDescriptionAsObject() {

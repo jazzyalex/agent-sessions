@@ -515,16 +515,37 @@ struct HermesStateDBReader {
 
         var events: [SessionEvent] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let rowID = sqlite3_column_int64(stmt, 0)
-            let role = text(stmt, 1).lowercased()
-            let content = optionalText(stmt, 2)
-            let toolCallID = optionalText(stmt, 3)
-            let toolCalls = optionalText(stmt, 4)
-            let toolName = optionalText(stmt, 5)
-            let timestamp = sqlite3_column_double(stmt, 6)
-            let finishReason = optionalText(stmt, 7)
-            let reasoning = optionalText(stmt, 8) ?? optionalText(stmt, 9)
-            let codexReasoning = optionalText(stmt, 10)
+            events.append(contentsOf: searchEvents(statement: stmt))
+        }
+
+        return Session(id: base.id,
+                       source: base.source,
+                       startTime: base.startTime,
+                       endTime: base.endTime,
+                       model: base.model,
+                       filePath: base.filePath,
+                       fileSizeBytes: base.fileSizeBytes,
+                       eventCount: events.filter { $0.kind != .meta }.count,
+                       events: events,
+                       cwd: base.cwd,
+                       repoName: base.repoName,
+                       lightweightTitle: base.lightweightTitle,
+                       lightweightCommands: base.lightweightCommands,
+                       customTitle: base.customTitle)
+    }
+
+    static func searchEvents(statement: OpaquePointer?) -> [SessionEvent] {
+        var events: [SessionEvent] = []
+            let rowID = sqlite3_column_int64(statement, 0)
+            let role = text(statement, 1).lowercased()
+            let content = optionalText(statement, 2)
+            let toolCallID = optionalText(statement, 3)
+            let toolCalls = optionalText(statement, 4)
+            let toolName = optionalText(statement, 5)
+            let timestamp = sqlite3_column_double(statement, 6)
+            let finishReason = optionalText(statement, 7)
+            let reasoning = optionalText(statement, 8) ?? optionalText(statement, 9)
+            let codexReasoning = optionalText(statement, 10)
             let date = timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil
             let raw = rawJSONBase64([
                 "id": rowID,
@@ -606,22 +627,7 @@ struct HermesStateDBReader {
                                                rawJSON: raw))
                 }
             }
-        }
-
-        return Session(id: base.id,
-                       source: base.source,
-                       startTime: base.startTime,
-                       endTime: base.endTime,
-                       model: base.model,
-                       filePath: base.filePath,
-                       fileSizeBytes: base.fileSizeBytes,
-                       eventCount: events.filter { $0.kind != .meta }.count,
-                       events: events,
-                       cwd: base.cwd,
-                       repoName: base.repoName,
-                       lightweightTitle: base.lightweightTitle,
-                       lightweightCommands: base.lightweightCommands,
-                       customTitle: base.customTitle)
+        return events
     }
 
     private static func event(id: String, timestamp: Date?, kind: SessionEventKind, role: String, text: String, rawJSON: String) -> SessionEvent {

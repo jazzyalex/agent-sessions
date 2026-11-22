@@ -34,6 +34,7 @@ final class TranscriptOriginLineCell: NSTableCellView, TranscriptRowCell {
         disclosure.isHidden = row.bodyText.isEmpty
         bodyText.isHidden = !isOpen || row.bodyText.isEmpty
         bodyText.clearFindHighlights()
+        bodyText.syntaxSnippets = renderedBody?.syntaxSnippets ?? []
         bodyText.textStorage?.setAttributedString(renderedBody?.attributed ?? NSAttributedString(string: row.bodyText))
         needsLayout = true
     }

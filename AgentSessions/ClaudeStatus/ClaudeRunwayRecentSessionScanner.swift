@@ -80,9 +80,14 @@ enum ClaudeRunwayRecentSessionScanner {
             candidates.append((url, modifiedAt, signature))
         }
 
-        // Unchanged files (same mtime+size) reuse their head/tail parse; only the
-        // now-dependent active window is recomputed below. Prune to the current
-        // in-window set so the cache tracks the recent-file set, not history.
+        let rootKey = rootURL.standardizedFileURL.path as NSString
+        guard !candidates.isEmpty else {
+            fileCaches.object(forKey: rootKey)?.retain(paths: [])
+            return []
+        }
+        let fileCache = Self.fileCache(for: rootKey)
+        // Prune only this root. A Claude Desktop root can be empty while the
+        // standard Claude projects root still contains many recent sessions.
         fileCache.retain(paths: Set(candidates.map { $0.url.path }))
 
         var byID: [String: (displayName: String, logPaths: [String], hasPrimaryName: Bool, isIdle: Bool)] = [:]
@@ -94,7 +99,8 @@ enum ClaudeRunwayRecentSessionScanner {
         // applied to distinct sessions, not raw files, so subagents can't crowd
         // out other sessions.
         for entry in candidates.sorted(by: { $0.modifiedAt > $1.modifiedAt }) {
-            guard let candidate = candidate(for: entry.url, now: now, signature: entry.signature, options: options) else { continue }
+            guard let candidate = candidate(for: entry.url, now: now, signature: entry.signature,
+                                            options: options, fileCache: fileCache) else { continue }
             if var existing = byID[candidate.id] {
                 existing.logPaths.append(candidate.logPath)
                 // A non-subagent (parent) transcript's name beats a subagent's
@@ -130,17 +136,30 @@ enum ClaudeRunwayRecentSessionScanner {
     // The parse struct lives at file scope (not nested): a static stored
     // property whose generic argument is a type nested in the same declaration
     // trips a circular-reference error in the type checker.
-    private static let fileCache = RunwayFileParseCache<ClaudeScannerFileParse>()
+    private static let fileCaches = NSCacheMemo<RunwayFileParseCache<ClaudeScannerFileParse>>(countLimit: 128)
+    private static let fileCacheCreationLock = NSLock()
+
+    private static func fileCache(for rootKey: NSString) -> RunwayFileParseCache<ClaudeScannerFileParse> {
+        fileCacheCreationLock.lock()
+        defer { fileCacheCreationLock.unlock() }
+        if let cache = fileCaches.object(forKey: rootKey) { return cache }
+        let cache = RunwayFileParseCache<ClaudeScannerFileParse>(coalescesConcurrentParses: true)
+        fileCaches.setObject(cache, forKey: rootKey)
+        return cache
+    }
 
     #if DEBUG
-    static var fileCacheMissCountForTesting: Int { fileCache.missCount }
-    static func resetFileCacheForTesting() { fileCache.removeAllForTesting() }
+    static func fileCacheMissCountForTesting(root: URL) -> Int {
+        fileCaches.object(forKey: root.standardizedFileURL.path as NSString)?.missCount ?? 0
+    }
+    static func resetFileCacheForTesting() { fileCaches.removeAll() }
     #endif
 
     private static func candidate(for url: URL,
                                   now: Date,
                                   signature: RunwayFileSignature,
-                                  options: ScanOptions) -> ScannedCandidate? {
+                                  options: ScanOptions,
+                                  fileCache: RunwayFileParseCache<ClaudeScannerFileParse>) -> ScannedCandidate? {
         let parse = fileCache.value(path: url.path, signature: signature) {
             // Self-qualified: the unqualified name would bind to the local
             // `metadata` below and cycle the type checker.
@@ -197,11 +216,12 @@ enum ClaudeRunwayRecentSessionScanner {
             return []
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(200)
+        let dates = ClaudeRunwayLog.TimestampParser()
         var result: [ClaudeScannerActiveStateLine] = []
         result.reserveCapacity(lines.count)
         for line in lines {
             guard let obj = ClaudeRunwayLog.jsonObject(String(line)),
-                  let capturedAt = ClaudeRunwayLog.date(obj["timestamp"]) else {
+                  let capturedAt = dates.date(obj["timestamp"]) else {
                 continue
             }
             result.append(ClaudeScannerActiveStateLine(capturedAt: capturedAt, idle: isIdleMarker(obj)))

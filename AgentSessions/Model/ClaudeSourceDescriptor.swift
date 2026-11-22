@@ -99,6 +99,9 @@ extension SessionSourceAdapter {
                     refresh: { mode, trigger, profile in
                         indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
                     },
+                    cancelRefreshAndWait: {
+                        await indexer.cancelCoreRefreshAndWait()
+                    },
                     reloadFocusedSession: { id, force, trigger in
                         let reason: ClaudeSessionIndexer.ReloadReason
                         switch trigger {

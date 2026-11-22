@@ -440,6 +440,13 @@ final class ZstdStreamDecoder {
         case empty
     }
 
+    private let maximumWindowLog: Int32?
+    private let inputChunkSize: Int
+    init(maximumWindowLog: Int32? = nil, inputChunkSize: Int = 128 * 1024) {
+        self.maximumWindowLog = maximumWindowLog
+        self.inputChunkSize = inputChunkSize
+    }
+    var physicalBytesRead: UInt64 { bytesReadFromHandle }
     private var stream: OpaquePointer?
     private var input: [UInt8] = []
     private var inputPosition = 0
@@ -467,13 +474,18 @@ final class ZstdStreamDecoder {
             stream = created
             let result = ZSTD_initDStream(created)
             guard ZSTD_isError(result) == 0 else { throw DecodeError.corrupt(Self.errorName(result)) }
+            if let maximumWindowLog {
+                let limit = ZSTD_DCtx_setParameter(created, ZSTD_d_windowLogMax, maximumWindowLog)
+                guard ZSTD_isError(limit) == 0 else { throw DecodeError.limitExceeded }
+            }
         }
 
         var output = [UInt8](repeating: 0, count: count)
         var produced = 0
         while produced < count {
+            try Task.checkCancellation()
             if inputPosition >= input.count, !reachedEndOfInput {
-                let chunk = try handle.read(upToCount: 128 * 1024) ?? Data()
+                let chunk = try handle.read(upToCount: inputChunkSize) ?? Data()
                 if chunk.isEmpty {
                     reachedEndOfInput = true
                 } else {

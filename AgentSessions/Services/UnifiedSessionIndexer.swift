@@ -31,8 +31,73 @@ struct DirectorySignatureSnapshot: Equatable {
     }
 }
 
+/// Keeps the frequent OpenCode monitor on metadata reads after the database
+/// schema has been validated once. A valid database stays cached across normal
+/// WAL appends; an invalid database also keys on WAL metadata so a schema first
+/// created in WAL is rechecked before its eventual checkpoint.
+private final class OpenCodeDatabaseValidationCache: @unchecked Sendable {
+    private struct FileToken: Equatable {
+        let modifiedAt: Date
+        let size: Int
+        let resourceIdentifier: String
+    }
+
+    private struct Entry {
+        let database: FileToken
+        let wal: FileToken?
+        let isValid: Bool
+    }
+
+    private let lock = NSLock()
+    private var entriesByPath: [String: Entry] = [:]
+
+    func isValid(database: URL, customRoot: String?) -> Bool {
+        guard let databaseToken = token(for: database) else { return false }
+        let walToken = token(for: URL(fileURLWithPath: database.path + "-wal"))
+
+        lock.lock()
+        if let cached = entriesByPath[database.path], cached.database == databaseToken {
+            if cached.isValid || cached.wal == walToken {
+                lock.unlock()
+                return cached.isValid
+            }
+        }
+        lock.unlock()
+
+        let valid = OpenCodeBackendDetector.isSQLiteAvailable(customRoot: customRoot)
+        lock.lock()
+        if valid {
+            entriesByPath[database.path] = Entry(database: databaseToken, wal: walToken, isValid: true)
+        } else {
+            // The boolean detector also reports SQLite BUSY/IO/prepare errors as
+            // false. Do not pin a transient read failure to unchanged metadata.
+            entriesByPath.removeValue(forKey: database.path)
+        }
+        lock.unlock()
+        return valid
+    }
+
+    private func token(for url: URL) -> FileToken? {
+        let values = try? url.resourceValues(forKeys: [
+            .contentModificationDateKey,
+            .fileSizeKey,
+            .fileResourceIdentifierKey,
+            .isRegularFileKey
+        ])
+        guard values?.isRegularFile == true,
+              let modifiedAt = values?.contentModificationDate,
+              let size = values?.fileSize else { return nil }
+        return FileToken(
+            modifiedAt: modifiedAt,
+            size: size,
+            resourceIdentifier: String(describing: values?.fileResourceIdentifier)
+        )
+    }
+}
+
 /// Aggregates all agent sessions into a single list with unified filters and search.
 final class UnifiedSessionIndexer: ObservableObject {
+    private static let openCodeDatabaseValidationCache = OpenCodeDatabaseValidationCache()
     enum CoreIndexingDisplayMode: Equatable {
         case idle
         case indexing
@@ -180,6 +245,10 @@ final class UnifiedSessionIndexer: ObservableObject {
         /// source owes the same contract, so set the flag synchronously the way
         /// `SessionIndexer.refresh` does rather than inside a deferred publish.
         let refresh: @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void
+        /// Cancels the provider's current core refresh and waits for its detached worker
+        /// to exit. Explicit work uses this only when replacing a monitor lease, so stale
+        /// persistence cannot race the replacement generation.
+        let cancelRefreshAndWait: @Sendable () async -> Void
         /// Maps the trigger onto this indexer's own nominal `ReloadReason` internally.
         /// NO enablement guard here — callers guard (SPEC §3.4).
         let reloadFocusedSession: @MainActor (_ sessionID: String, _ force: Bool, _ trigger: FocusedReloadTrigger) -> Void
@@ -197,6 +266,7 @@ final class UnifiedSessionIndexer: ObservableObject {
              searchIdentitySnapshots: SearchIdentitySnapshots,
              searchLivePathSnapshots: SearchLivePathSnapshots = .notApplicable,
              refresh: @escaping @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void,
+             cancelRefreshAndWait: @escaping @Sendable () async -> Void = {},
              reloadFocusedSession: @escaping @MainActor (String, Bool, FocusedReloadTrigger) -> Void) {
             self.allSessions = allSessions
             self.isIndexing = isIndexing
@@ -211,6 +281,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             self.searchIdentitySnapshots = searchIdentitySnapshots
             self.searchLivePathSnapshots = searchLivePathSnapshots
             self.refresh = refresh
+            self.cancelRefreshAndWait = cancelRefreshAndWait
             self.reloadFocusedSession = reloadFocusedSession
         }
     }
@@ -242,21 +313,40 @@ final class UnifiedSessionIndexer: ObservableObject {
             return true
         }
 
+        func tryAcquire() -> Bool {
+            guard active < maximumConcurrent else { return false }
+            active += 1
+            return true
+        }
+
         func release() {
             active = max(0, active - 1)
         }
     }
 
-    private actor ProviderRefreshCoordinator {
-        enum RequestResult {
-            case startNow
-            case scheduleAfter(TimeInterval)
+    @MainActor
+    final class ProviderRefreshCoordinator {
+        enum RequestResult: Equatable {
+            case startNow(UUID)
+            case scheduleAfter(TimeInterval, UUID)
             case queued
+            /// A higher-priority explicit request receives a new lease and starts now.
+            /// Every continuation of the displaced monitor carries its old lease, so it
+            /// can neither launch, ingest, nor finish the replacement.
+            case replaceMonitor(UUID)
+        }
+
+        enum FinishResult: Equatable {
+            case stale
+            case idle
+            case followUp(delay: TimeInterval, trigger: IndexRefreshTrigger, lease: UUID)
         }
 
         private struct State {
             var inFlight: Bool = false
-            var pending: Bool = false
+            var activeLease: UUID?
+            var activeTrigger: IndexRefreshTrigger?
+            var pendingTrigger: IndexRefreshTrigger?
             var lastStartedAt: Date? = nil
         }
 
@@ -267,10 +357,21 @@ final class UnifiedSessionIndexer: ObservableObject {
             self.coalesceWindowSeconds = max(0, coalesceWindowSeconds)
         }
 
-        func request(source: SessionSource, now: Date = Date()) -> RequestResult {
+        func request(source: SessionSource,
+                     trigger: IndexRefreshTrigger,
+                     now: Date = Date()) -> RequestResult {
             var state = states[source] ?? State()
             if state.inFlight {
-                state.pending = true
+                if state.activeTrigger == .monitor,
+                   trigger == .manual || trigger == .cleanup {
+                    let replacementLease = UUID()
+                    state.pendingTrigger = Self.higherPriority(state.pendingTrigger, .monitor)
+                    state.activeLease = replacementLease
+                    state.activeTrigger = trigger
+                    states[source] = state
+                    return .replaceMonitor(replacementLease)
+                }
+                state.pendingTrigger = Self.higherPriority(state.pendingTrigger, trigger)
                 states[source] = state
                 return .queued
             }
@@ -279,35 +380,84 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let elapsed = now.timeIntervalSince(last)
                 if elapsed < coalesceWindowSeconds {
                     let delay = max(0, coalesceWindowSeconds - elapsed)
+                    let lease = UUID()
                     state.inFlight = true
-                    state.pending = false
-                    state.lastStartedAt = now.addingTimeInterval(delay)
+                    state.activeLease = lease
+                    state.activeTrigger = trigger
+                    state.pendingTrigger = nil
                     states[source] = state
-                    return .scheduleAfter(delay)
+                    return .scheduleAfter(delay, lease)
                 }
             }
 
+            let lease = UUID()
             state.inFlight = true
-            state.pending = false
-            state.lastStartedAt = now
+            state.activeLease = lease
+            state.activeTrigger = trigger
+            state.pendingTrigger = nil
             states[source] = state
-            return .startNow
+            return .startNow(lease)
         }
 
-        func finish(source: SessionSource, now: Date = Date()) -> TimeInterval? {
+        func activeTrigger(source: SessionSource, lease: UUID) -> IndexRefreshTrigger? {
+            guard let state = states[source], state.activeLease == lease else { return nil }
+            return state.activeTrigger
+        }
+
+        func owns(source: SessionSource, lease: UUID) -> Bool {
+            states[source]?.activeLease == lease
+        }
+
+        /// Records an actual provider launch, not a coalescing reservation. This keeps
+        /// a monitor abandoned by scrolling from moving the next eligible start time.
+        func beginProviderLaunch(source: SessionSource,
+                                 lease: UUID,
+                                 now: Date = Date()) -> IndexRefreshTrigger? {
+            guard var state = states[source], state.inFlight,
+                  state.activeLease == lease,
+                  let trigger = state.activeTrigger else { return nil }
+            state.lastStartedAt = now
+            states[source] = state
+            return trigger
+        }
+
+        func finish(source: SessionSource,
+                    lease: UUID,
+                    now: Date = Date()) -> FinishResult {
             var state = states[source] ?? State()
+            guard state.activeLease == lease else { return .stale }
             state.inFlight = false
-            let shouldRunAgain = state.pending
-            state.pending = false
+            state.activeLease = nil
+            state.activeTrigger = nil
+            let pendingTrigger = state.pendingTrigger
+            state.pendingTrigger = nil
             states[source] = state
 
-            guard shouldRunAgain else { return nil }
+            guard let pendingTrigger else { return .idle }
             let elapsed = now.timeIntervalSince(state.lastStartedAt ?? .distantPast)
             let delay = max(0, coalesceWindowSeconds - elapsed)
+            let nextLease = UUID()
             state.inFlight = true
-            state.lastStartedAt = now.addingTimeInterval(delay)
+            state.activeLease = nextLease
+            state.activeTrigger = pendingTrigger
             states[source] = state
-            return delay
+            return .followUp(delay: delay, trigger: pendingTrigger, lease: nextLease)
+        }
+
+        static func higherPriority(_ existing: IndexRefreshTrigger?,
+                                   _ incoming: IndexRefreshTrigger) -> IndexRefreshTrigger {
+            guard let existing else { return incoming }
+            return priority(incoming) > priority(existing) ? incoming : existing
+        }
+
+        private static func priority(_ trigger: IndexRefreshTrigger) -> Int {
+            switch trigger {
+            case .monitor: return 0
+            case .providerEnabled: return 1
+            case .launch: return 2
+            case .manual: return 3
+            case .cleanup: return 4
+            }
         }
     }
 
@@ -437,6 +587,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var selectedModel: String? = nil
     @Published var selectedKinds: Set<SessionEventKind> = Set(SessionEventKind.allCases)
     @Published var projectSelection: ProjectSelection? = nil
+    @Published private(set) var hiddenProjectRoots = HiddenProjects.roots()
     @Published var hasCommandsOnly: Bool = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly") {
         didSet {
             UserDefaults.standard.set(hasCommandsOnly, forKey: "UnifiedHasCommandsOnly")
@@ -609,7 +760,15 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var sortDescriptor: SessionSortDescriptor = .init(key: .modified, ascending: false)
 
     // Indexing state aggregation
-    @Published private(set) var isIndexing: Bool = false
+    @Published private(set) var isIndexing: Bool = false {
+        didSet {
+            guard oldValue != isIndexing else { return }
+            let metrics = SearchResponsivenessMetrics.shared
+            if isIndexing { discoveryMetricSpan = metrics.beginSpan(.discovery) }
+            else if let span = discoveryMetricSpan { metrics.end(span); discoveryMetricSpan = nil }
+        }
+    }
+    private var discoveryMetricSpan: SearchResponsivenessSpan?
     @Published private(set) var isProcessingTranscripts: Bool = false
     @Published private(set) var coreIndexingProgress: CoreIndexingProgress = .empty
     @Published private(set) var coreIndexingDisplayMode: CoreIndexingDisplayMode = .idle
@@ -672,7 +831,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private static let analyticsSupportedSources = AnalyticsSourceSupport.rawValues
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private static let analyticsLastBuiltAtDefaultsKey = "AnalyticsLastBuiltAt"
-    private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
+    private let providerRefreshCoordinator: ProviderRefreshCoordinator
     private let providerRefreshLimiter = ProviderRefreshLimiter(maximumConcurrent: 2)
     /// Sources requested by the current unified refresh that are waiting for a bounded
     /// provider slot or are already refreshing. This keeps the footer in an indexing state
@@ -694,6 +853,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let openCodeForegroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 10
     private let openCodeBackgroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 60
     private var newSessionMonitorTask: Task<Void, Never>? = nil
+#if DEBUG
+    private var newSessionMonitorStartCount: Int = 0
+#endif
     private var focusedSessionMonitorTask: Task<Void, Never>? = nil
     private var lastSeenCodexSnapshot: DirectorySignatureSnapshot? = nil
     private var lastSeenClaudeSnapshot: DirectorySignatureSnapshot? = nil
@@ -703,7 +865,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var consecutiveMissingFocusedSignatureCountBySource: [SessionSource: Int] = [:]
     private var lastMonitorRefreshBySource: [SessionSource: Date] = [:]
     private var pendingMonitorRefreshSnapshotBySource: [SessionSource: DirectorySignatureSnapshot] = [:]
-    private var pendingRefreshSourcesWhileInactive: Set<SessionSource> = []
+    private var pendingRefreshTriggersWhileInactive: [SessionSource: IndexRefreshTrigger] = [:]
     private var pendingManualFocusedReloadSources: Set<SessionSource> = []
     private var hasInitializedNewSessionMonitorBaseline: Bool = false
     private var appIsActive: Bool = false
@@ -734,6 +896,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         precondition(Set(handles.keys) == Set(SessionSource.allCases),
                      "UnifiedSessionIndexer needs a handle for every SessionSource; missing \(Set(SessionSource.allCases).subtracting(handles.keys))")
         self.handles = handles
+        self.providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
         self.searchIngestService = (try? IndexDB()).map { SearchIngestService(db: $0) }
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
@@ -916,7 +1079,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                                       archivedClaudeDesktopOnly: self.showArchivedClaudeDesktopOnly,
                                       archivedClaudeSessionIDs: self.archivedClaudeSessionIDs,
                                       sideChatsOnly: false,
-                                      selectedProjectIdentity: self.projectSelection?.identity)
+                                      selectedProjectIdentity: self.projectSelection?.identity,
+                                      hiddenProjectRoots: self.hiddenProjectRoots)
                 var results = FilterEngine.filterSessions(base, filters: filters)
 
                 if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
@@ -971,20 +1135,23 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // recomputeNow() -> applyFiltersAndSort() consults @AppStorage-backed
-        // prefs (hideZeroMessageSessionsPref/hideLowMessageSessionsPref/
-        // showHousekeepingSessionsPref) that read these three keys; the rest
-        // of the filter state is already tracked via @Published properties
-        // with their own change handling, not raw defaults reads.
+        // Refresh list filters when their stored preferences change.
         let recomputeObserver = FilteredDefaultsObserver(keys: [
             "HideZeroMessageSessions",
             "HideLowMessageSessions",
-            PreferencesKey.showHousekeepingSessions
+            PreferencesKey.showHousekeepingSessions,
+            HiddenProjects.defaultsKey
         ])
         self.recomputeDefaultsObserver = recomputeObserver
-        recomputeObserver.publisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.recomputeNow() }
+        recomputeObserver.mainPublisher
+            .sink { [weak self] in
+                guard let self else { return }
+                let hiddenRoots = HiddenProjects.roots()
+                if hiddenRoots != self.hiddenProjectRoots {
+                    self.hiddenProjectRoots = hiddenRoots
+                }
+                self.recomputeNow()
+            }
             .store(in: &cancellables)
 
         // SPEC §8.1: this fold covers every registered provider. The pyramid it replaces combined
@@ -1067,6 +1234,18 @@ final class UnifiedSessionIndexer: ObservableObject {
     ///
     /// Lives on the indexer rather than in a view because all three production call sites need
     /// it and `UnifiedSearchFiltersView` cannot reach a helper private to `UnifiedSessionsView`.
+    func searchCandidates() -> [Session] {
+        allSessions.filter { session in
+            if showFavoritesOnly, !session.isFavorite { return false }
+            if hasCommandsOnly, !Self.passesHasCommandsFilter(session) { return false }
+            if !showHousekeepingSessionsPref, session.isHousekeeping { return false }
+            if hideZeroMessageSessionsPref, !session.isSideChat, session.messageCount == 0,
+               session.source != .opencode, !CursorSessionIndexer.isDBOnlySession(session) { return false }
+            if hideLowMessageSessionsPref, !Self.passesLowMessageVisibilityFilter(session) { return false }
+            return true
+        }
+    }
+
     func allowedSearchSources() -> Set<SessionSource> {
         Self.activeSources(included: includedBySource, enabled: enablementBySource)
     }
@@ -1246,22 +1425,30 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     @MainActor
     func setAppActive(_ active: Bool) {
+        let stateChanged = appIsActive != active
         appIsActive = active
-        newSessionMonitorTask?.cancel()
-        newSessionMonitorTask = nil
-        if active {
-            // Foreground: keep lightweight monitor loop running at low cadence.
+        if newSessionMonitorTask == nil {
+            // One long-lived loop reads the current foreground/background cadence
+            // before every sleep. Restarting it on every activation edge reset the
+            // elapsed directory-scan budget and could starve a full scan forever.
             let task = Task.detached(priority: .utility) { [weak self] in
                 guard let self else { return }
                 await self.runNewSessionMonitorLoop()
             }
             newSessionMonitorTask = task
+#if DEBUG
+            newSessionMonitorStartCount += 1
+#endif
+        }
 
-            let pending = pendingRefreshSourcesWhileInactive
-            pendingRefreshSourcesWhileInactive.removeAll()
+        guard stateChanged else { return }
+        if active {
+
+            let pending = pendingRefreshTriggersWhileInactive
+            pendingRefreshTriggersWhileInactive.removeAll()
             if !pending.isEmpty {
-                for source in pending {
-                    requestProviderRefresh(source: source, reason: "deferred-foreground", trigger: .monitor)
+                for (source, trigger) in pending {
+                    requestProviderRefresh(source: source, reason: "deferred-foreground", trigger: trigger)
                 }
             }
 
@@ -1271,15 +1458,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                 focusedSessionMonitorTask = Task.detached(priority: .utility) { [weak self, context] in
                     await self?.runFocusedSessionMonitorLoop(context: context)
                 }
-                scheduleImmediateFocusedSessionCheck(context: context, trigger: .monitor)
             }
         } else {
-            // Background: restart monitor loop with background cadence immediately.
-            let task = Task.detached(priority: .utility) { [weak self] in
-                guard let self else { return }
-                await self.runNewSessionMonitorLoop()
-            }
-            newSessionMonitorTask = task
             if focusedSessionMonitorTask == nil,
                let context = focusedSessionContext,
                Self.supportsFocusedSessionMonitoring(source: context.source) {
@@ -1291,37 +1471,107 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     private func runNewSessionMonitorLoop() async {
-        await checkForNewSessions(establishBaselineIfNeeded: true)
-        var secondsSinceDirectoryScan: UInt64 = 0
+        let needsBaseline = await MainActor.run { [weak self] in
+            self?.hasInitializedNewSessionMonitorBaseline == false
+        }
+        if needsBaseline {
+            var baselineWasDeferred = false
+            while !Task.isCancelled {
+                baselineWasDeferred = await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    || baselineWasDeferred
+                guard !Task.isCancelled else { return }
+                if await checkForNewSessions(establishBaselineIfNeeded: true) {
+                    if baselineWasDeferred {
+                        // A session may have appeared after the launch refresh but
+                        // before this delayed baseline. Reconcile once after quiet so
+                        // that file is not silently absorbed into the baseline.
+                        for source in [SessionSource.codex, .claude, .opencode] {
+                            requestProviderRefresh(
+                                source: source,
+                                reason: "deferred-monitor-baseline-catchup",
+                                trigger: .monitor
+                            )
+                        }
+                    }
+                    break
+                }
+                baselineWasDeferred = true
+            }
+        }
+        let monitorClock = ContinuousClock()
+        var lastFullScanCompletedAt = monitorClock.now
         while !Task.isCancelled {
-            let (intervalSeconds, tickSeconds) = await MainActor.run { [weak self] () -> (UInt64, UInt64) in
-                guard let self else { return (60, 30) }
+            let tickSeconds = await MainActor.run { [weak self] () -> UInt64 in
+                guard let self else { return 30 }
                 // OpenCode's small DB/WAL stat check keeps Quota Meter current without
                 // walking the Codex/Claude directory trees on the live cadence. In the
                 // background its refresh is capped at once a minute, so wake less often.
-                return self.appIsActive
-                    ? (self.foregroundNewSessionMonitorIntervalSeconds, 10)
-                    : (self.backgroundNewSessionMonitorIntervalSeconds, 30)
+                return self.appIsActive ? 10 : 30
             }
             try? await Task.sleep(nanoseconds: tickSeconds * 1_000_000_000)
             if Task.isCancelled { break }
-            await checkForNewOpenCodeSessions()
-            secondsSinceDirectoryScan += tickSeconds
-            if secondsSinceDirectoryScan >= intervalSeconds {
-                await checkForNewSessions()
-                secondsSinceDirectoryScan = 0
+            while !Task.isCancelled {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { break }
+                if await checkForNewOpenCodeSessions() { break }
+            }
+            let intervalSeconds = await MainActor.run { [weak self] () -> UInt64 in
+                guard let self else { return 60 }
+                return self.appIsActive
+                    ? self.foregroundNewSessionMonitorIntervalSeconds
+                    : self.backgroundNewSessionMonitorIntervalSeconds
+            }
+            if monitorClock.now - lastFullScanCompletedAt >= .seconds(Int64(intervalSeconds)) {
+                // Once due, wait on the actual quiet deadline instead of going
+                // back to the 10/30-second timer. Otherwise short bursts around
+                // every timer tick can starve a scan despite long quiet gaps.
+                while !Task.isCancelled,
+                      monitorClock.now - lastFullScanCompletedAt >= .seconds(Int64(intervalSeconds)) {
+                    await TranscriptScrollSignal.shared.waitUntilQuiet()
+                    guard !Task.isCancelled else { break }
+                    if await checkForNewSessions() {
+                        lastFullScanCompletedAt = monitorClock.now
+                    }
+                }
             }
         }
     }
 
-    private func checkForNewOpenCodeSessions() async {
+#if DEBUG
+    @MainActor
+    func debugNewSessionMonitorStartCount() -> Int {
+        newSessionMonitorStartCount
+    }
+
+    @MainActor
+    func debugCancelNewSessionMonitor() {
+        newSessionMonitorTask?.cancel()
+        newSessionMonitorTask = nil
+    }
+#endif
+
+    @discardableResult
+    private func checkForNewOpenCodeSessions() async -> Bool {
+        guard !TranscriptScrollSignal.shared.isScrolling else { return false }
         let customRoot = UserDefaults.standard.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
-        let snapshot = Self.openCodeDirectorySnapshot(customRoot: customRoot?.isEmpty == false ? customRoot : nil)
-        guard !Task.isCancelled else { return }
-        await MainActor.run { [weak self] in
-            guard let self else { return }
+        let resolvedRoot = customRoot?.isEmpty == false ? customRoot : nil
+        let snapshot: DirectorySignatureSnapshot
+        if let databaseSnapshot = Self.openCodeDatabaseSnapshot(customRoot: resolvedRoot) {
+            snapshot = databaseSnapshot
+        } else {
+            // Legacy JSON discovery recursively enumerates the root. Keep that
+            // fallback out of an active transcript scroll; the SQLite stat path
+            // above remains cheap enough for the live cadence.
+            guard !TranscriptScrollSignal.shared.isScrolling else { return false }
+            snapshot = Self.openCodeLegacyDirectorySnapshot(customRoot: resolvedRoot)
+        }
+        guard !Task.isCancelled else { return false }
+        guard !TranscriptScrollSignal.shared.isScrolling else { return false }
+        return await MainActor.run { [weak self] in
+            guard let self, !TranscriptScrollSignal.shared.isScrolling else { return false }
             self.processSnapshotDelta(source: .opencode, snapshot: snapshot,
                                       lastSnapshot: &self.lastSeenOpenCodeSnapshot)
+            return true
         }
     }
 
@@ -1343,13 +1593,26 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
-    private func checkForNewSessions(establishBaselineIfNeeded: Bool = false) async {
+    @discardableResult
+    private func checkForNewSessions(establishBaselineIfNeeded: Bool = false) async -> Bool {
+        guard !TranscriptScrollSignal.shared.isScrolling else { return false }
         let codexSnapshot = detectCodexDirectorySnapshot()
+        guard !TranscriptScrollSignal.shared.isScrolling else { return false }
         let claudeSnapshot = detectClaudeDirectorySnapshot()
+        guard !TranscriptScrollSignal.shared.isScrolling else { return false }
         let customRoot = UserDefaults.standard.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
-        let openCodeSnapshot = Self.openCodeDirectorySnapshot(customRoot: customRoot?.isEmpty == false ? customRoot : nil)
-        await MainActor.run { [weak self] in
-            guard let self else { return }
+        let resolvedOpenCodeRoot = customRoot?.isEmpty == false ? customRoot : nil
+        let openCodeSnapshot: DirectorySignatureSnapshot
+        if let databaseSnapshot = Self.openCodeDatabaseSnapshot(customRoot: resolvedOpenCodeRoot) {
+            openCodeSnapshot = databaseSnapshot
+        } else {
+            guard !TranscriptScrollSignal.shared.isScrolling else { return false }
+            openCodeSnapshot = Self.openCodeLegacyDirectorySnapshot(customRoot: resolvedOpenCodeRoot)
+        }
+        guard !Task.isCancelled else { return false }
+        guard !TranscriptScrollSignal.shared.isScrolling else { return false }
+        return await MainActor.run { [weak self] in
+            guard let self, !TranscriptScrollSignal.shared.isScrolling else { return false }
             if establishBaselineIfNeeded && !self.hasInitializedNewSessionMonitorBaseline {
                 self.lastSeenCodexSnapshot = codexSnapshot
                 self.lastSeenClaudeSnapshot = claudeSnapshot
@@ -1358,7 +1621,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 self.pendingMonitorRefreshSnapshotBySource[.codex] = nil
                 self.pendingMonitorRefreshSnapshotBySource[.claude] = nil
                 self.hasInitializedNewSessionMonitorBaseline = true
-                return
+                return true
             }
             if !self.hasInitializedNewSessionMonitorBaseline {
                 self.hasInitializedNewSessionMonitorBaseline = true
@@ -1370,6 +1633,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                                       lastSnapshot: &self.lastSeenClaudeSnapshot)
             self.processSnapshotDelta(source: .opencode, snapshot: openCodeSnapshot,
                                       lastSnapshot: &self.lastSeenOpenCodeSnapshot)
+            return true
         }
     }
 
@@ -1467,17 +1731,28 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     /// Watch SQLite's WAL as well as the database: live writes need not checkpoint.
-    static func openCodeDirectorySnapshot(customRoot: String?) -> DirectorySignatureSnapshot {
+    static func openCodeDatabaseSnapshot(customRoot: String?) -> DirectorySignatureSnapshot? {
         let discovery = OpenCodeSessionDiscovery(customRoot: customRoot)
-        if let database = discovery.databaseURL() {
-            let signatures = ["", "-wal"].compactMap { suffix -> (path: String, modifiedAt: Date)? in
-                let url = URL(fileURLWithPath: database.path + suffix)
-                guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
-                      values.isRegularFile == true, let modifiedAt = values.contentModificationDate else { return nil }
-                return (url.path, modifiedAt)
-            }
-            return DirectorySignatureSnapshot.from(signatures)
+        guard let database = discovery.databaseURL(),
+              openCodeDatabaseValidationCache.isValid(database: database, customRoot: customRoot) else { return nil }
+        let signatures = ["", "-wal"].compactMap { suffix -> (path: String, modifiedAt: Date)? in
+            let url = URL(fileURLWithPath: database.path + suffix)
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true, let modifiedAt = values.contentModificationDate else { return nil }
+            return (url.path, modifiedAt)
         }
+        return DirectorySignatureSnapshot.from(signatures)
+    }
+
+    static func openCodeDirectorySnapshot(customRoot: String?) -> DirectorySignatureSnapshot {
+        if let databaseSnapshot = openCodeDatabaseSnapshot(customRoot: customRoot) {
+            return databaseSnapshot
+        }
+        return openCodeLegacyDirectorySnapshot(customRoot: customRoot)
+    }
+
+    static func openCodeLegacyDirectorySnapshot(customRoot: String?) -> DirectorySignatureSnapshot {
+        let discovery = OpenCodeSessionDiscovery(customRoot: customRoot)
         return DirectorySignatureSnapshot.from(discovery.discoverSessionFiles().compactMap { url in
             guard let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
             return (url.path, modifiedAt)
@@ -1710,6 +1985,10 @@ final class UnifiedSessionIndexer: ObservableObject {
                                         reason: String,
                                         trigger: IndexRefreshTrigger = .manual) {
         Task.detached(priority: .utility) { [weak self] in
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
             await self?.enqueueProviderRefresh(source: source, reason: reason, trigger: trigger)
         }
     }
@@ -1722,32 +2001,86 @@ final class UnifiedSessionIndexer: ObservableObject {
                 self?.pendingManualFocusedReloadSources.insert(source)
             }
         }
-        let request = await providerRefreshCoordinator.request(source: source)
+        let request = await providerRefreshCoordinator.request(source: source, trigger: trigger)
         switch request {
         case .queued:
             return
-        case .startNow:
-            await runProviderRefreshSequence(source: source, reason: reason, trigger: trigger, delay: nil)
-        case .scheduleAfter(let delay):
-            await runProviderRefreshSequence(source: source, reason: reason, trigger: trigger, delay: delay)
+        case .replaceMonitor(let lease):
+            await handle(source).cancelRefreshAndWait()
+            await runProviderRefreshSequence(source: source,
+                                             reason: "\(reason)-replaces-monitor",
+                                             trigger: trigger,
+                                             lease: lease,
+                                             delay: nil)
+        case .startNow(let lease):
+            await runProviderRefreshSequence(source: source,
+                                             reason: reason,
+                                             trigger: trigger,
+                                             lease: lease,
+                                             delay: nil)
+        case .scheduleAfter(let delay, let lease):
+            await runProviderRefreshSequence(source: source,
+                                             reason: reason,
+                                             trigger: trigger,
+                                             lease: lease,
+                                             delay: delay)
         }
     }
 
     private func runProviderRefreshSequence(source: SessionSource,
                                             reason: String,
                                             trigger: IndexRefreshTrigger,
+                                            lease: UUID,
                                             delay: TimeInterval?) async {
         if let delay, delay > 0 {
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if trigger == .monitor {
+                let clock = ContinuousClock()
+                let deadline = clock.now.advanced(by: .nanoseconds(Int64(delay * 1_000_000_000)))
+                while clock.now < deadline, !Task.isCancelled {
+                    let stillOwns = await MainActor.run {
+                        providerRefreshCoordinator.owns(source: source, lease: lease)
+                    }
+                    guard stillOwns else { return }
+                    if TranscriptScrollSignal.shared.isScrolling {
+                        requestProviderRefresh(source: source,
+                                               reason: "\(reason)-coalesce-scroll-deferred",
+                                               trigger: trigger)
+                        await finishProviderRefreshSequence(source: source, reason: reason, lease: lease)
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+            } else {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
         }
-        await performProviderRefresh(source: source, reason: reason, trigger: trigger)
+        guard !Task.isCancelled else {
+            await finishProviderRefreshSequence(source: source, reason: reason, lease: lease)
+            return
+        }
+        let stillOwns = await MainActor.run {
+            providerRefreshCoordinator.owns(source: source, lease: lease)
+        }
+        guard stillOwns else { return }
+        await performProviderRefresh(source: source, reason: reason, trigger: trigger, lease: lease)
 
-        if let followUpDelay = await providerRefreshCoordinator.finish(source: source) {
+        await finishProviderRefreshSequence(source: source, reason: reason, lease: lease)
+    }
+
+    private func finishProviderRefreshSequence(source: SessionSource,
+                                               reason: String,
+                                               lease: UUID) async {
+        let result = await providerRefreshCoordinator.finish(source: source, lease: lease)
+        switch result {
+        case .stale:
+            return
+        case .followUp(let delay, let trigger, let nextLease):
             await runProviderRefreshSequence(source: source,
-                                             reason: "\(reason)-coalesced",
+                                             reason: "\(reason)-coalesced-\(trigger.rawValue)",
                                              trigger: trigger,
-                                             delay: followUpDelay)
-        } else {
+                                             lease: nextLease,
+                                             delay: delay)
+        case .idle:
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.pendingProviderRefreshSources.remove(source)
@@ -1763,30 +2096,89 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func performProviderRefresh(source: SessionSource,
                                         reason: String,
-                                        trigger: IndexRefreshTrigger) async {
-        await AppReadyGate.waitUntilReady()
-        guard await providerRefreshLimiter.acquire() else {
-            LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: cancelled while waiting for bounded provider slot")
+                                        trigger: IndexRefreshTrigger,
+                                        lease: UUID) async {
+        if trigger == .monitor, TranscriptScrollSignal.shared.isScrolling {
+            requestProviderRefresh(source: source, reason: "\(reason)-pre-ready-scroll-deferred", trigger: trigger)
             return
         }
+        await AppReadyGate.waitUntilReady()
+        guard !Task.isCancelled else { return }
+        let stillOwnsAfterReady = await MainActor.run {
+            providerRefreshCoordinator.owns(source: source, lease: lease)
+        }
+        guard stillOwnsAfterReady else { return }
+        if trigger == .monitor, TranscriptScrollSignal.shared.isScrolling {
+            requestProviderRefresh(source: source, reason: "\(reason)-post-ready-scroll-deferred", trigger: trigger)
+            return
+        }
+        var acquiredProviderPermit = false
+        if trigger != .manual && trigger != .cleanup {
+            if trigger == .monitor {
+                while !Task.isCancelled {
+                    let stillOwns = await MainActor.run {
+                        providerRefreshCoordinator.owns(source: source, lease: lease)
+                    }
+                    guard stillOwns else { return }
+                    if TranscriptScrollSignal.shared.isScrolling {
+                        requestProviderRefresh(source: source,
+                                               reason: "\(reason)-permit-scroll-deferred",
+                                               trigger: trigger)
+                        return
+                    }
+                    if await providerRefreshLimiter.tryAcquire() {
+                        acquiredProviderPermit = true
+                        break
+                    }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+                guard !Task.isCancelled else { return }
+            } else {
+                guard await providerRefreshLimiter.acquire() else {
+                    LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: cancelled while waiting for bounded provider slot")
+                    return
+                }
+                acquiredProviderPermit = true
+            }
+        }
         defer {
-            Task { await providerRefreshLimiter.release() }
+            if acquiredProviderPermit {
+                Task { await providerRefreshLimiter.release() }
+            }
         }
 
-        let didTrigger = await MainActor.run { [weak self] in
-            guard let self else { return false }
-            guard self.shouldRefreshSource(source) else { return false }
+        let launchedTrigger = await MainActor.run { [weak self] () -> IndexRefreshTrigger? in
+            guard let self else { return nil }
+            guard self.providerRefreshCoordinator.owns(source: source, lease: lease) else { return nil }
+            guard self.shouldRefreshSource(source) else { return nil }
+            if trigger == .monitor, TranscriptScrollSignal.shared.isScrolling {
+                // The provider coordinator still owns this source until the
+                // current sequence finishes. Requeueing here coalesces one
+                // follow-up that will retry at the quiet boundary.
+                self.requestProviderRefresh(
+                    source: source,
+                    reason: "\(reason)-scroll-deferred",
+                    trigger: trigger
+                )
+                return nil
+            }
             // Quota Meter remains visible while the terminal is foreground. Its
             // OpenCode titles need the newly discovered sessions in that state too.
             if !self.appIsActive && source != .opencode && trigger != .manual && trigger != .launch {
-                self.pendingRefreshSourcesWhileInactive.insert(source)
+                self.pendingRefreshTriggersWhileInactive[source] = ProviderRefreshCoordinator.higherPriority(
+                    self.pendingRefreshTriggersWhileInactive[source],
+                    trigger
+                )
                 LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: deferred (inactive, trigger=\(trigger.rawValue))")
-                return false
+                return nil
+            }
+            guard let launchedTrigger = self.providerRefreshCoordinator.beginProviderLaunch(source: source, lease: lease) else {
+                return nil
             }
             self.pendingMonitorRefreshSnapshotBySource[source] = nil
-            let mode = self.refreshMode(for: source, trigger: trigger)
-            let executionProfile = self.refreshExecutionProfile(for: source, trigger: trigger)
-            switch trigger {
+            let mode = self.refreshMode(for: source, trigger: launchedTrigger)
+            let executionProfile = self.refreshExecutionProfile(for: source, trigger: launchedTrigger)
+            switch launchedTrigger {
             case .launch, .manual:
                 self.coreIndexingDisplayMode = .indexing
             case .monitor, .providerEnabled, .cleanup:
@@ -1794,26 +2186,26 @@ final class UnifiedSessionIndexer: ObservableObject {
                     self.coreIndexingDisplayMode = .syncing
                 }
             }
-            LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: trigger (\(reason), mode=\(mode), trigger=\(trigger.rawValue))")
-            self.triggerRefresh(for: source, mode: mode, trigger: trigger, executionProfile: executionProfile)
-            return true
+            LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: trigger (\(reason), mode=\(mode), trigger=\(launchedTrigger.rawValue))")
+            self.triggerRefresh(for: source, mode: mode, trigger: launchedTrigger, executionProfile: executionProfile)
+            return launchedTrigger
         }
-        guard didTrigger else { return }
+        guard let launchedTrigger else { return }
 
         let fingerprintBeforeWait: SessionListFingerprint? = await MainActor.run { [weak self] in
             self?.currentSearchIngestFingerprint(for: source)
         }
 
-        var waits = 0
-        while waits < 240 {
-            if Task.isCancelled { break }
-            let indexing = await MainActor.run { [weak self] in
-                self?.isSourceIndexing(source) ?? false
+        while !Task.isCancelled {
+            let state = await MainActor.run { [weak self] in
+                (self?.providerRefreshCoordinator.owns(source: source, lease: lease) ?? false,
+                 self?.isSourceIndexing(source) ?? false)
             }
-            if !indexing { break }
-            waits += 1
+            guard state.0 else { return }
+            if !state.1 { break }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
+        guard !Task.isCancelled else { return }
 
         // Source refresh has completed (core index + session_meta are current for this
         // source). Kick the search-corpus backfill/incremental ingest for it now — strictly
@@ -1826,7 +2218,11 @@ final class UnifiedSessionIndexer: ObservableObject {
         // fingerprint (already published by the refresh, no extra I/O) captured just
         // before vs. just after the wait loop above: identical means this refresh found
         // nothing new/changed for the source, so there is nothing for search-ingest to do.
-        let alwaysKick = trigger == .manual || trigger == .launch || trigger == .cleanup
+        let stillOwnsBeforeIngest = await MainActor.run {
+            providerRefreshCoordinator.owns(source: source, lease: lease)
+        }
+        guard stillOwnsBeforeIngest else { return }
+        let alwaysKick = launchedTrigger == .manual || launchedTrigger == .launch || launchedTrigger == .cleanup
         var shouldKickSearchIngest = true
         if !alwaysKick {
             let fingerprintAfterWait: SessionListFingerprint? = await MainActor.run { [weak self] in
@@ -1972,7 +2368,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                                                     toolIOEnabled: toolIOEnabled,
                                                     identitySnapshot: identitySnapshot,
                                                     livePathAuthority: livePathAuthority)
-            Perf.event("searchIngest", "source=\(source.rawValue) files=\(progress.total) skipped=\(progress.skipped) processed=\(progress.processed) end")
+            Perf.event("searchIngest", "source=\(source.rawValue) files=\(progress.total) skipped=\(progress.skipped) processed=\(progress.processed) unchangedIncomplete=\(progress.unchangedIncomplete) end")
         } catch is CancellationError {
             Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? cancelled")
         } catch {
@@ -2194,7 +2590,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     return SearchIngestService.FileRef(path: revision.selectedURL.path,
                                                        mtime: revision.physicalStat.mtime,
                                                        size: revision.physicalStat.size,
-                                                       manifestRevision: revision.manifestRevision)
+                                                       manifestRevision: revision.manifestRevision, metadata: session)
                 }
                 // A pinned DSH fallback points at the copied primary inside Agent
                 // Sessions' archive, outside the live canonical root. It is a stable
@@ -2205,7 +2601,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                       let stat = SessionFileStat.from(url) else { return nil }
                 return SearchIngestService.FileRef(path: url.path,
                                                    mtime: stat.mtime,
-                                                   size: stat.size)
+                                                   size: stat.size, metadata: session)
             }
             guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
                 return nil
@@ -2218,7 +2614,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                                                sessionID: usesIdentity ? session.id : nil,
                                                contentRevision: usesIdentity
                                                 ? SearchIngestService.contentRevision(for: session)
-                                                : nil)
+                                                : nil, metadata: session)
         }
     }
 
@@ -2270,36 +2666,32 @@ final class UnifiedSessionIndexer: ObservableObject {
         return false
     }
 
-    @MainActor
-    private func scheduleImmediateFocusedSessionCheck(context: FocusedSessionContext,
-                                                      trigger: FocusedReloadTrigger) {
-        Task.detached(priority: .utility) { [weak self] in
-            await self?.performFocusedSessionCheck(context: context, trigger: trigger)
-        }
-    }
-
     private func performFocusedSessionCheck(context: FocusedSessionContext,
                                             trigger: FocusedReloadTrigger) async {
-        let canRunFocusedReload = await MainActor.run { [weak self] in
-            guard let self else { return false }
-            return self.appIsActive || trigger != .monitor
-        }
-        guard canRunFocusedReload else { return }
+        while !Task.isCancelled {
+            if trigger == .monitor {
+                await TranscriptScrollSignal.shared.waitUntilQuiet()
+                guard !Task.isCancelled else { return }
+            }
 
-        let signature = await MainActor.run { [weak self] () -> FileSignature? in
-            guard let self else { return nil }
-            return self.focusedFileSignature(for: context)
-        }
-
-        let shouldReload = await MainActor.run { [weak self] () -> Bool in
-            guard let self else { return false }
-            return self.registerFocusedSignatureObservation(context: context, signature: signature)
-        }
-        guard shouldReload else { return }
-
-        await MainActor.run { [weak self] in
-            guard let self else { return }
-            self.refreshFocusedSession(context: context, trigger: trigger)
+            let completed: Bool? = await MainActor.run { [weak self] in
+                guard let self else { return false }
+                guard self.focusedSessionContext == context else { return false }
+                guard self.appIsActive || trigger != .monitor else { return false }
+                if trigger == .monitor, TranscriptScrollSignal.shared.isScrolling {
+                    return nil
+                }
+                // Wheel/key/scroller delivery is also main-actor work, so this
+                // preflight and the synchronous signature read cannot be split
+                // by a newly delivered user scroll event.
+                let signature = self.focusedFileSignature(for: context)
+                guard self.registerFocusedSignatureObservation(context: context, signature: signature) else {
+                    return false
+                }
+                self.refreshFocusedSession(context: context, trigger: trigger)
+                return true
+            }
+            if completed != nil { return }
         }
     }
 
@@ -2314,9 +2706,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         focusedSessionMonitoringSupported(for: source)
     }
 
-    /// SPEC §8.6 lives in the handles, not here: OpenCode's `refresh` takes no arguments,
-    /// so its adapter's wrapper drops mode/trigger/profile — the same thing this switch's
-    /// `case .opencode: opencode.refresh()` arm used to do.
+    /// Provider-specific refresh signatures live behind the handles. OpenCode
+    /// ignores mode/profile but retains trigger intent so monitor work can honor
+    /// the transcript-scroll execution gate inside its detached worker.
     @MainActor
     private func triggerRefresh(for source: SessionSource,
                                 mode: IndexRefreshMode,
@@ -2654,7 +3046,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                               archivedClaudeDesktopOnly: showArchivedClaudeDesktopOnly,
                               archivedClaudeSessionIDs: archivedClaudeSessionIDs,
                               sideChatsOnly: false,
-                              selectedProjectIdentity: projectSelection?.identity)
+                              selectedProjectIdentity: projectSelection?.identity,
+                              hiddenProjectRoots: hiddenProjectRoots)
         var results = FilterEngine.filterSessions(base, filters: filters)
 
         // Optional quick filter: sessions with commands (tool calls)

@@ -27,7 +27,7 @@ struct TranscriptRenderGenerationGate {
 
 enum TranscriptSessionRenderKey {
     static func build(for session: Session) -> String {
-        "\(session.id)|\(session.eventCount)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(session.endTime?.timeIntervalSince1970 ?? 0)|\(session.isFavorite ? 1 : 0)"
+        "\(session.id)|\(session.contentRevision)|\(session.isPartiallyHydrated)|\(session.eventCount)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(session.endTime?.timeIntervalSince1970 ?? 0)|\(session.isFavorite ? 1 : 0)"
     }
 }
 
@@ -497,6 +497,11 @@ struct TranscriptPlainView: View {
     }
 }
 
+#if DEBUG
+private let transcriptTraceRequested =
+    ProcessInfo.processInfo.environment["AGENTSESSIONS_TRACE_TRANSCRIPT"] == "1"
+#endif
+
 /// Unified transcript view that works with both Codex and Claude session indexers
 struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @ObservedObject var indexer: Indexer
@@ -504,6 +509,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @EnvironmentObject var searchState: UnifiedSearchState
     @EnvironmentObject var archiveManager: SessionArchiveManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.locale) private var presentationLocale
     let sessionID: String?
     let sessionIDExtractor: (Session) -> String?  // Extract ID for clipboard
     let sessionIDLabel: String  // "Codex" or "Claude"
@@ -687,10 +693,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return nil
     }
 
-    private func sessionRepoRootPath(for session: Session) -> String? {
-        Self.repoRootPath(from: session.cwd)
-    }
-
     private var viewMode: SessionViewMode {
         // Resolve through the shared migration function so a persisted "terminal"
         // (old Terminal-backed Session view, removed from the UI in C4a) always
@@ -797,14 +799,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var lastRenderedViewModeRaw: String = SessionViewMode.terminal.rawValue
     @State private var lastRenderedAppendConfigKey: String? = nil
 
-    private var transcriptTraceEnabled: Bool {
-        ProcessInfo.processInfo.environment["AGENTSESSIONS_TRACE_TRANSCRIPT"] == "1"
-            || UserDefaults.standard.bool(forKey: "DebugTraceTranscript")
-    }
-
     private func transcriptTrace(_ message: @autoclosure () -> String) {
         #if DEBUG
-        guard transcriptTraceEnabled else { return }
+        guard transcriptTraceRequested
+            || UserDefaults.standard.bool(forKey: "DebugTraceTranscript") else { return }
         print("🧭[Transcript] \(message())")
         #endif
     }
@@ -817,7 +815,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         guard let id = sessionID else { return "none" }
 
         if let session = resolvedSessionForRender(id: id) {
-            return "\(sessionBuildKey(session))|\(viewModeRaw)|\(session.source)|\(session.parentSessionID ?? "")|\(session.subagentType ?? "")"
+            return "\(sessionBuildKey(session))|\(session.contentRevision)|\(session.isPartiallyHydrated)|\(skipAgentsPreambleEnabled())|\(transcriptReviewCardsEnabled)|\(viewModeRaw)|\(session.source)|\(session.parentSessionID ?? "")|\(session.subagentType ?? "")"
         }
         return "unresolved:\(id)"
     }
@@ -997,9 +995,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         plainTranscriptView(session: session)
                     }
 
-                    if shouldShowFirstPromptJumpButton(session) || shouldShowJumpToLatestButton {
-                        floatingTranscriptControls(session: session)
-                    }
+                    // Keep the overlay subtree mounted while proximity changes.
+                    // The individual buttons below use opacity/hit-testing, so a
+                    // first scroll does not insert a new full-window ZStack child
+                    // during AppKit layout.
+                    floatingTranscriptControls(session: session)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // The one lifted surface in the window. Stated rather than
@@ -1042,7 +1042,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 applyRoleFilterEvent(.sessionChanged)
                 refreshRichInlineImages(session: session)
             }
-            .onChange(of: session.events.count) { _, _ in
+            .onChange(of: session.contentRevision) { _, _ in
                 refreshRichInlineImages(session: session)
             }
             .onChange(of: inlineSessionImageThumbnailsEnabled) { _, _ in
@@ -1056,6 +1056,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     sessionID: session.id,
                     contentVersion: newValue
                 )
+            }
+            .onChange(of: presentationInputs(for: session), initial: true) { _, inputs in
+                derivedState.preparePresentation(inputs)
             }
             .task(id: renderKey) {
                 guard let id = sessionID else { return }
@@ -1184,6 +1187,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func transcriptContentVersion(for session: Session) -> Int {
         var hasher = Hasher()
         hasher.combine(session.id)
+        hasher.combine(session.contentRevision)
+        hasher.combine(session.isPartiallyHydrated)
         hasher.combine(session.eventCount)
         hasher.combine(session.events.count)
         hasher.combine(session.events.last?.id ?? "")
@@ -1204,24 +1209,28 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func floatingTranscriptControls(session: Session) -> some View {
-        VStack {
-            if shouldShowFirstPromptJumpButton(session) {
-                transcriptJumpButton(
-                    systemImage: "arrow.up",
-                    help: "Jump to first user prompt",
-                    action: { jumpToFirstPrompt(session: session) }
-                )
-            }
+        let showFirstPrompt = shouldShowFirstPromptJumpButton(session)
+        let showLatest = shouldShowJumpToLatestButton
+        return VStack {
+            transcriptJumpButton(
+                systemImage: "arrow.up",
+                help: "Jump to first user prompt",
+                action: { jumpToFirstPrompt(session: session) }
+            )
+            .opacity(showFirstPrompt ? 1 : 0)
+            .allowsHitTesting(showFirstPrompt)
+            .accessibilityHidden(!showFirstPrompt)
 
             Spacer(minLength: 0)
 
-            if shouldShowJumpToLatestButton {
-                transcriptJumpButton(
-                    systemImage: "arrow.down",
-                    help: "Jump to latest output",
-                    action: { tailUpdateState.jumpToLatest() }
-                )
-            }
+            transcriptJumpButton(
+                systemImage: "arrow.down",
+                help: "Jump to latest output",
+                action: { tailUpdateState.jumpToLatest() }
+            )
+            .opacity(showLatest ? 1 : 0)
+            .allowsHitTesting(showLatest)
+            .accessibilityHidden(!showLatest)
         }
         .frame(maxWidth: .infinity)
         .frame(maxHeight: .infinity)
@@ -1315,9 +1324,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, let selectedID = sessionID,
+                      let selected = resolvedSessionForRender(id: selectedID),
+                      selected.source == sessionSnapshot.source,
+                      selected.id == sessionSnapshot.id,
+                      selected.contentRevision == sessionSnapshot.contentRevision,
+                      selected.isPartiallyHydrated == sessionSnapshot.isPartiallyHydrated else { return }
                 richHasInlineImages = !out.isEmpty
                 richInlineImagesByBlockIndex = out
+                let metrics = SearchResponsivenessMetrics.shared
+                metrics.record(.imageReady,
+                    operationID: metrics.operation(source: sessionSnapshot.source.rawValue, sessionID: sessionSnapshot.id),
+                    context: .session(sessionSnapshot), status: .published)
             }
         }
     }
@@ -1408,25 +1426,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
     }
 
-    /// Number of ▲▼ stops of the given role in the current snapshot (one per tool invocation for
-    /// Tools and Errors, one per visible agent row for Agent, one per block otherwise) — drives the jump-nav enabled state. Reading `derivedState.snapshot` here tracks the
-    /// dependency so the chevrons enable/disable as the snapshot lands.
-    private func roleOccurrenceCount(_ role: TranscriptRoleFilter) -> Int {
-        let snap = derivedState.snapshot
+    private func presentationInputs(for session: Session) -> TranscriptDerivedState.PresentationInputs {
+        .init(snapshotKey: .init(session: session,
+                                settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(),
+                                                reviewCardsEnabled: transcriptReviewCardsEnabled,
+                                                includeMessageContext: viewMode == .blocks)),
+              showsContext: showsContext,
+              configurationChanges: selectedTelemetry?.configurationChanges ?? [],
+              imageBlocks: Set(richInlineImagesByBlockIndex.filter { !$0.value.isEmpty }.keys),
+              localeIdentifier: presentationLocale.identifier,
+              activeRoles: activeRoleFilters, diagnosticContext: .session(session))
+    }
+
+    private func roleOccurrenceCount(_ role: TranscriptRoleFilter,
+                                     in bundle: TranscriptDerivedState.PresentationBundle?) -> Int {
+        guard let bundle else { return 0 }
         switch role {
-        case .assistant:
-            // Agent rows that show, as the Session table counts them (hidden notes are not stops).
-            guard activeRoleFilters.isEmpty || activeRoleFilters.contains(role) else { return 0 }
-            return richAgentStopCount
-        case .user:
-            guard activeRoleFilters.isEmpty || activeRoleFilters.contains(role) else { return 0 }
-            let markers = TranscriptTelemetryPresentation.markers(changes: selectedTelemetry?.configurationChanges ?? [], blocks: snap.blocks)
-            let groups = derivedState.messageGroups(showsContext: showsContext, markers: markers, imageBlocks: Set(richInlineImagesByBlockIndex.filter { !$0.value.isEmpty }.keys))
-            return groups.groupsByID.values.filter { TranscriptRoleFilter.governing($0.block, source: snap.source) == role }.count
-        case .tools: return snap.toolJumpIDs.count
-        case .errors:
-            return SessionRoleFilters.shownErrorStops(snap.errorJumpIDs, failedInvocationIDs: snap.failedInvocationIDs,
-                                                      activeRoles: activeRoleFilters).count
+        case .assistant: return bundle.agentStopIDs.count
+        case .user: return bundle.userStops
+        case .tools: return bundle.snapshot.toolJumpIDs.count
+        case .errors: return bundle.errorStopIDs.count
         }
     }
 
@@ -1455,24 +1474,27 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private enum RoleChipDensity { case regular, compact, minimal }
 
     /// The role chips, at the widest density that fits the space the toolbar leaves them.
-    private func roleFilterChips(source: SessionSource) -> some View {
-        ViewThatFits(in: .horizontal) {
-            roleFilterChipRow(source: source, density: .regular)
-            roleFilterChipRow(source: source, density: .compact)
-            roleFilterChipRow(source: source, density: .minimal)
+    private func roleFilterChips(session: Session) -> some View {
+        let bundle = derivedState.presentation(matching: presentationInputs(for: session))
+        return ViewThatFits(in: .horizontal) {
+            roleFilterChipRow(source: session.source, density: .regular, bundle: bundle)
+            roleFilterChipRow(source: session.source, density: .compact, bundle: bundle)
+            roleFilterChipRow(source: session.source, density: .minimal, bundle: bundle)
         }
     }
 
-    private func roleFilterChipRow(source: SessionSource, density: RoleChipDensity) -> some View {
+    private func roleFilterChipRow(source: SessionSource, density: RoleChipDensity,
+                                   bundle: TranscriptDerivedState.PresentationBundle?) -> some View {
         HStack(alignment: .center, spacing: density == .regular ? 10 : 4) {
             ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
-                sessionRoleFilterChip(role, source: source, density: density)
+                sessionRoleFilterChip(role, source: source, density: density,
+                                      count: roleOccurrenceCount(role, in: bundle))
             }
         }
     }
 
     private func sessionRoleFilterChip(_ role: TranscriptRoleFilter, source: SessionSource,
-                                       density: RoleChipDensity) -> some View {
+                                       density: RoleChipDensity, count: Int) -> some View {
         // A chip's fill states one thing only: whether this role is currently
         // shown. An earlier version dimmed every chip once all four were active,
         // on the theory that "all on" equals "no filter" — but that made turning
@@ -1483,7 +1505,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // A role's occurrences are reachable when it's shown (explicitly on, or
         // the "no filter" empty-set state) and it actually has ≥1 block.
         let shown = activeRoleFilters.isEmpty || isOn
-        let count = roleOccurrenceCount(role)
         let navEnabled = shown && count > 0
         let label = roleFilterLabel(role)
         // Errors is the only role whose count changes the decision to press it,
@@ -1554,9 +1575,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func blocksTranscriptView(session: Session) -> some View {
-        TranscriptBlockListView(
+        let cwd = session.cwd
+        return TranscriptBlockListView(
             derivedState: derivedState,
             showsContext: showsContext,
+            monochromeSyntax: stripMonochrome,
             session: session,
             fontSize: CGFloat(transcriptFontSize),
             configurationChanges: selectedTelemetry?.configurationChanges ?? [],
@@ -1564,8 +1587,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             inlineImagesEnabled: inlineSessionImageThumbnailsEnabled && richHasInlineImages,
             reviewCardsEnabled: transcriptReviewCardsEnabled,
             linkificationEnabled: transcriptLinkificationEnabled,
-            sessionCwd: session.cwd,
-            repoRootPath: sessionRepoRootPath(for: session),
+            sessionCwd: cwd,
+            repoRootPath: Self.repoRootPath(from: cwd),
             ideTarget: transcriptPreferredIDETarget,
             ideBinaryOverridePath: transcriptIDEBinaryOverridePath,
             scrollToBottomToken: tailUpdateState.scrollToBottomToken,
@@ -1668,7 +1691,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // the overflow menu — a once-a-year choice was holding the primary slot.
             HStack(alignment: .center, spacing: 10) {
                 if viewMode == .blocks {
-                    roleFilterChips(source: session.source)
+                    roleFilterChips(session: session)
                 }
 
                 if isJSONMode && isBuildingJSON {
@@ -4065,6 +4088,13 @@ private struct PlainTextScrollView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class PlainTextView: NSTextView {
+        override func scrollWheel(with event: NSEvent) {
+            if abs(event.scrollingDeltaY) > 0 {
+                TranscriptScrollSignal.shared.noteScroll()
+            }
+            super.scrollWheel(with: event)
+        }
+
         override func keyDown(with event: NSEvent) {
             if event.keyCode == 48, !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control), !event.modifierFlags.contains(.option) {
                 if event.modifierFlags.contains(.shift) {
@@ -4074,7 +4104,13 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 }
                 return
             }
+            let originBefore = enclosingScrollView?.contentView.bounds.origin.y
             super.keyDown(with: event)
+            TranscriptScrollSignal.shared.noteVerticalKeyScrollIfMoved(
+                event: event,
+                originBefore: originBefore,
+                originAfter: enclosingScrollView?.contentView.bounds.origin.y
+            )
         }
     }
 
@@ -4299,6 +4335,10 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 queue: .main
             ) { [weak coordinator, weak scrollView] _ in
                 guard let coordinator, let scrollView else { return }
+                TranscriptScrollSignal.shared.noteScrollIfUserDriven(
+                    event: NSApp.currentEvent,
+                    scrollView: scrollView
+                )
                 emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
             }
         }

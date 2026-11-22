@@ -16,6 +16,11 @@ struct OpenCodeServicePresence {
         let data: [String: State]
     }
 
+    enum RegistrationReadResult {
+        case completed([CodexActivePresence])
+        case deferred
+    }
+
     private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         func urlSession(_ session: URLSession, task: URLSessionTask,
                         willPerformHTTPRedirection response: HTTPURLResponse,
@@ -67,33 +72,71 @@ struct OpenCodeServicePresence {
         }
     }
 
-    static func read(now: Date) async -> [CodexActivePresence] {
-        let roots = await OpenCodePresenceIntegration.shared.stateRoots()
+    static func read(now: Date,
+                     shouldContinue: @escaping @Sendable () -> Bool = { true },
+                     rootsOverride: [URL]? = nil,
+                     registrationReader: (@Sendable (
+                        URL,
+                        Date,
+                        @escaping @Sendable () -> Bool
+                     ) async -> RegistrationReadResult)? = nil) async -> [CodexActivePresence]? {
+        let roots = if let rootsOverride {
+            rootsOverride
+        } else {
+            await OpenCodePresenceIntegration.shared.stateRoots()
+        }
+        guard shouldContinue() else { return nil }
         let paths = roots.flatMap { root in
             (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
         }
+        guard shouldContinue() else { return nil }
         let registrations = paths.filter {
             $0.lastPathComponent == "service.json" || ($0.lastPathComponent.hasPrefix("service-") && $0.pathExtension == "json")
         }.sorted { $0.path < $1.path }.prefix(16)
-        return await withTaskGroup(of: [CodexActivePresence].self) { group in
-            for path in registrations { group.addTask { await readRegistration(path, now: now) } }
+        let result = await withTaskGroup(of: RegistrationReadResult.self) { group -> [CodexActivePresence]? in
+            for path in registrations {
+                group.addTask {
+                    guard shouldContinue(), !Task.isCancelled else { return .deferred }
+                    if let registrationReader {
+                        return await registrationReader(path, now, shouldContinue)
+                    }
+                    return await readRegistration(path, now: now, shouldContinue: shouldContinue)
+                }
+            }
             var result: [CodexActivePresence] = []
-            for await presences in group { result.append(contentsOf: presences) }
+            for await child in group {
+                switch child {
+                case .completed(let presences):
+                    result.append(contentsOf: presences)
+                case .deferred:
+                    group.cancelAll()
+                    return nil
+                }
+            }
             return result
         }
+        guard let result, shouldContinue(), !Task.isCancelled else { return nil }
+        return result
     }
 
-    private static func readRegistration(_ path: URL, now: Date) async -> [CodexActivePresence] {
+    private static func readRegistration(_ path: URL,
+                                         now: Date,
+                                         shouldContinue: @escaping @Sendable () -> Bool) async -> RegistrationReadResult {
+        guard shouldContinue(), !Task.isCancelled else { return .deferred }
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path.path),
               let size = attributes[.size] as? NSNumber, size.intValue <= 16 * 1024,
               let data = try? Data(contentsOf: path),
               let registration = try? JSONDecoder().decode(Registration.self, from: data),
               let request = request(for: registration),
-              kill(Int32(registration.pid), 0) == 0 else { return [] }
+              kill(Int32(registration.pid), 0) == 0 else { return .completed([]) }
+        guard shouldContinue(), !Task.isCancelled else { return .deferred }
         do {
             let (body, response) = try await session.data(for: request)
-            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
-            return decode(body, registration: registration, now: now) ?? []
-        } catch { return [] }
+            guard shouldContinue(), !Task.isCancelled else { return .deferred }
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return .completed([]) }
+            return .completed(decode(body, registration: registration, now: now) ?? [])
+        } catch {
+            return shouldContinue() && !Task.isCancelled ? .completed([]) : .deferred
+        }
     }
 }

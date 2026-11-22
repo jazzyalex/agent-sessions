@@ -30,6 +30,18 @@ final class ClaudeSessionParser {
 
     /// Full parse of Claude Code session file
     static func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
+        let metrics = SearchResponsivenessMetrics.shared
+        let operation = metrics.operation(source: SessionSource.claude.rawValue,
+            sessionID: forcedID ?? SHA256.hash(data: Data(url.path.utf8)).map { String(format: "%02x", $0) }.joined())
+        let span = metrics.beginSpan(.fullReadDecode, operationID: operation)
+        let result = parseFileFullMeasuredBody(at: url, forcedID: forcedID)
+        if let span {
+            if result != nil { metrics.end(span) } else { metrics.fail(span, code: .readError) }
+        }
+        return result
+    }
+
+    private static func parseFileFullMeasuredBody(at url: URL, forcedID: String?) -> Session? {
         SessionInfoMetrics.shared.beginTranscript(path: url.path)
         defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
@@ -52,7 +64,7 @@ final class ClaudeSessionParser {
         var idx = 0
 
         // Detect subagent from file path
-        let (parentSessionID, subagentType) = Self.detectSubagentInfo(from: url)
+        let (parentSessionID, subagentType, subagentTitle) = Self.detectSubagentInfo(from: url)
 
         do {
             try reader.forEachLine { rawLine in
@@ -146,7 +158,8 @@ final class ClaudeSessionParser {
         let fileID = forcedID ?? hash(path: url.path)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let isHousekeeping = Session.computeIsHousekeeping(source: .claude, events: events)
-        let sourceFallbackTitle = hasExplicitCustomTitle ? nil : (aiTitle ?? customTitle)
+        let sourceFallbackTitle = hasExplicitCustomTitle ? nil : (
+            subagentTitle ?? subagentTitleFromParent(for: url) ?? aiTitle ?? customTitle)
         let explicitCustomTitle = hasExplicitCustomTitle ? customTitle : nil
         func makeSession(lightweightTitle: String?) -> Session {
             Session(
@@ -392,7 +405,7 @@ final class ClaudeSessionParser {
     /// Full-fidelity parse for a single JSONL object.
     /// Claude Code can embed `tool_use`, `tool_result`, and `thinking` blocks inside `message.content[]`.
     /// We split these into separate `SessionEvent`s to avoid collapsing tool activity into a single line.
-    private static func parseLineEvents(_ obj: [String: Any], baseEventID: String) -> [SessionEvent] {
+    static func parseLineEvents(_ obj: [String: Any], baseEventID: String, forSearch: Bool = false) -> [SessionEvent] {
         if isRequestLogRecord(obj) { return [] }
         let timestamp = extractTimestamp(from: obj)
         let rawJSON = rawJSONBase64(sanitizeLargeStrings(in: obj))
@@ -430,7 +443,7 @@ final class ClaudeSessionParser {
         if let t = (obj["type"] as? String)?.lowercased() {
             if t == "tool_use" || t == "tool_call" {
                 let toolName = obj["name"] as? String ?? obj["tool"] as? String
-                let toolInput = obj["input"].flatMap(stringifyJSONBounded)
+                let toolInput = obj["input"].flatMap { forSearch ? stringifyJSON($0) : stringifyJSONBounded($0) }
                 return [
                     SessionEvent(
                         id: baseEventID,
@@ -449,7 +462,7 @@ final class ClaudeSessionParser {
                 ]
             }
             if t == "tool_result" {
-                let toolOutput = obj["output"].flatMap(stringifyJSONBounded)
+                let toolOutput = obj["output"].flatMap { forSearch ? stringifyJSON($0) : stringifyJSONBounded($0) }
                 return [
                     SessionEvent(
                         id: baseEventID,
@@ -641,7 +654,7 @@ final class ClaudeSessionParser {
                 case "tool_result", "tool-result":
                     flushTextIfNeeded()
                     seq += 1
-                    let (toolOutput, disposition) = extractToolResultOutput(from: obj, block: block)
+                    let (toolOutput, disposition) = extractToolResultOutput(from: obj, block: block, forSearch: forSearch)
                     let kind: SessionEventKind
                     let role: String?
                     let text: String?
@@ -781,7 +794,7 @@ final class ClaudeSessionParser {
         case otherToolFailure
     }
 
-    private static func extractToolResultOutput(from obj: [String: Any], block: [String: Any]) -> (String?, ToolResultDisposition) {
+    private static func extractToolResultOutput(from obj: [String: Any], block: [String: Any], forSearch: Bool = false) -> (String?, ToolResultDisposition) {
         var output: String? = nil
         let explicitBlockIsError = (block["is_error"] as? Bool) == true
         var toolResultIsError: Bool = false
@@ -817,7 +830,7 @@ final class ClaudeSessionParser {
             } else if let content = block["content"] {
                 // Some Claude tool results embed large base64 blobs (e.g., screenshots).
                 // Always summarize those instead of stringifying megabytes of JSON.
-                output = summarizeToolResultContentIfPossible(content) ?? stringifyJSONBounded(content)
+                output = summarizeToolResultContentIfPossible(content, forSearch: forSearch) ?? (forSearch ? stringifyJSON(content) : stringifyJSONBounded(content))
             }
         }
 
@@ -892,7 +905,7 @@ final class ClaudeSessionParser {
         return (output, .ok)
     }
 
-    private static func summarizeToolResultContentIfPossible(_ content: Any) -> String? {
+    private static func summarizeToolResultContentIfPossible(_ content: Any, forSearch: Bool = false) -> String? {
         guard let parts = content as? [[String: Any]] else { return nil }
 
         var out: [String] = []
@@ -918,7 +931,7 @@ final class ClaudeSessionParser {
                     out.append("[image omitted]")
                 }
             default:
-                if let s = stringifyJSONBounded(part), !s.isEmpty {
+                if let s = forSearch ? stringifyJSON(part) : stringifyJSONBounded(part), !s.isEmpty {
                     out.append(s)
                 }
             }
@@ -975,7 +988,7 @@ final class ClaudeSessionParser {
         }
 
         // Detect subagent from file path
-        let (parentSessionID, subagentType) = detectSubagentInfo(from: url)
+        let (parentSessionID, subagentType, subagentTitle) = detectSubagentInfo(from: url)
 
         func build(headBytes: Int) -> Session? {
             guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
@@ -1173,13 +1186,12 @@ final class ClaudeSessionParser {
             let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))
             let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
-            // Extract title from sample events. Pass customTitle, aiTitle, or agent-name fallback
-            // to the temp session so it influences title computation, then capture the result
-            // as lightweightTitle. Only persist explicit custom-title values on the final session
-            // to prevent generated or agent-name fallbacks from overwriting authoritative titles in the DB.
+            // Only /rename populates customTitle on the final session.
+            // Claude's task label and other fallbacks belong in lightweightTitle.
             let effectiveModel = llmModel ?? model
             let tempIsHousekeeping = Session.computeIsHousekeeping(source: .claude, events: sampleEvents)
-            let titleFallback = hasExplicitCustomTitle ? customTitle : (aiTitle ?? customTitle)
+            let titleFallback = hasExplicitCustomTitle ? customTitle : (
+                subagentTitle ?? subagentTitleFromParent(for: url) ?? aiTitle ?? customTitle)
             let tempSession = Session(id: hash(path: url.path),
                                       source: .claude,
                                       startTime: tmin,
@@ -1384,27 +1396,69 @@ final class ClaudeSessionParser {
     /// This matches ClaudeRunwayRecentSessionScanner's `pathComponents.contains("subagents")`.
     /// The agent-type sidecar (`<basename>.meta.json`) always lives next to the
     /// transcript, so it is read from the transcript's own directory.
-    static func detectSubagentInfo(from url: URL) -> (parentSessionID: String?, subagentType: String?) {
+    static func detectSubagentInfo(from url: URL) -> (
+        parentSessionID: String?, subagentType: String?, title: String?
+    ) {
+        guard let parent = subagentContainer(for: url) else { return (nil, nil, nil) }
+        let sidecar = url.deletingPathExtension().appendingPathExtension("meta.json")
+        let metadata = (try? Data(contentsOf: sidecar)).flatMap {
+            (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+        }
+        return (parent.lastPathComponent,
+                metadata?["agentType"] as? String,
+                SessionInfoMetadataSanitizer.title(metadata?["description"] as? String, source: .claude))
+    }
+
+    static func subagentID(for url: URL) -> String? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard stem.hasPrefix("agent-"), stem.count > "agent-".count,
+              subagentContainer(for: url) != nil else { return nil }
+        return String(stem.dropFirst("agent-".count))
+    }
+
+    private static func subagentContainer(for url: URL) -> URL? {
         let components = url.pathComponents
         guard let subagentsIndex = components.lastIndex(of: "subagents"),
-              subagentsIndex > 0 else {
-            return (nil, nil)
-        }
-        let parentSessionName = components[subagentsIndex - 1]
-        guard ClaudeSessionIDHelper.looksLikeUUID(parentSessionName) else { return (nil, nil) }
+              subagentsIndex > 0,
+              ClaudeSessionIDHelper.looksLikeUUID(components[subagentsIndex - 1]) else { return nil }
+        return URL(fileURLWithPath: NSString.path(withComponents: Array(components[..<subagentsIndex])),
+                   isDirectory: true)
+    }
 
-        // agentType lives in the sidecar adjacent to the transcript, regardless of
-        // flat vs nested layout (e.g. {"agentType":"workflow-subagent","spawnDepth":1}).
-        let agentDir = url.deletingLastPathComponent()
-        let baseName = url.deletingPathExtension().lastPathComponent
-        let metaFile = agentDir.appendingPathComponent("\(baseName).meta.json")
-        var agentType: String?
-        if let metaData = try? Data(contentsOf: metaFile),
-           let metaObj = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
-            agentType = metaObj["agentType"] as? String
+    private static let parentTaskTitles = NSCacheMemo<[String: String]>(countLimit: 32)
+
+    static func subagentTitleFromParent(for url: URL) -> String? {
+        guard url.deletingLastPathComponent().lastPathComponent == "subagents",
+              let agentID = subagentID(for: url),
+              let parent = subagentContainer(for: url) else { return nil }
+        let transcript = parent.deletingLastPathComponent().appendingPathComponent("\(parent.lastPathComponent).jsonl")
+        guard let signature = RunwayFileSignature.read(path: transcript.path) else { return nil }
+        let cacheKey = "\(signature.mtime):\(signature.size):\(transcript.path)" as NSString
+        if let cached = parentTaskTitles.object(forKey: cacheKey) {
+            return cached[agentID]
         }
 
-        return (parentSessionName, agentType)
+        // Copies of a session can lack the sidecar. Look for the parent tool result
+        // that names this exact agent, sharing one bounded scan across siblings.
+        var titles: [String: String] = [:]
+        do {
+            try JSONLReader(url: transcript, maximumBytes: 32 * 1024 * 1024, propagatesReadErrors: true)
+                .forEachLine { line in
+                    guard line.contains("\"toolUseResult\""), line.contains("\"agentId\""),
+                          let object = ClaudeRunwayLog.jsonObject(line),
+                          object["type"] as? String == "user",
+                          let result = object["toolUseResult"] as? [String: Any],
+                          let id = result["agentId"] as? String,
+                          let title = SessionInfoMetadataSanitizer.title(result["description"] as? String, source: .claude)
+                    else { return }
+                    titles[id] = title
+                }
+        } catch {
+            return nil
+        }
+        guard RunwayFileSignature.read(path: transcript.path) == signature else { return nil }
+        parentTaskTitles.setObject(titles, forKey: cacheKey)
+        return titles[agentID]
     }
 
     private static func isValidPath(_ path: String) -> Bool {

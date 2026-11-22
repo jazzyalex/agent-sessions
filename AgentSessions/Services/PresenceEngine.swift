@@ -101,13 +101,54 @@ protocol ProbeRunner: Sendable {
     func run(kind: PresenceEngine.ManagedProbeKind,
              executable: URL,
              arguments: [String],
-             timeout: TimeInterval) async -> Data?
+             timeout: TimeInterval,
+             shouldStart: @escaping @Sendable () -> Bool) async -> Data?
 
     /// Cancel any in-flight command of this kind (best-effort SIGTERM then SIGKILL).
     func cancel(kind: PresenceEngine.ManagedProbeKind) async
 
     /// Cancel every in-flight command, regardless of kind.
     func cancelAll() async
+}
+
+private final class RefreshCycleGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = true
+
+    var isActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return active
+    }
+
+    func cancel() {
+        lock.lock()
+        active = false
+        lock.unlock()
+    }
+}
+
+private final class ProbeStartGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var deferred = false
+
+    func shouldStart(scrollSignal: TranscriptScrollSignal,
+                     cycleGate: RefreshCycleGate) -> Bool {
+        guard cycleGate.isActive else { return false }
+        let allowed = !scrollSignal.isScrolling
+        if !allowed {
+            lock.lock()
+            deferred = true
+            lock.unlock()
+        }
+        return allowed
+    }
+
+    var wasDeferred: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return deferred
+    }
 }
 
 /// Injectable seam over the *filesystem* roots presence discovery reads —
@@ -200,6 +241,7 @@ actor PresenceEngine {
     /// the registry read and the Claude runway scan out of the real home
     /// directory when a test injects its own roots.
     private let rootsResolver: PresenceRootsResolving
+    private let scrollSignal: TranscriptScrollSignal
 
     /// Wall-clock seam used ONLY by the cadence-diet throttle
     /// (`emitFreshnessOnlyIfDue`/`emit`). Everything else in the engine
@@ -225,13 +267,15 @@ actor PresenceEngine {
 
     private var pollTask: Task<Void, Never>? = nil
     private var refreshTask: Task<Void, Never>? = nil
-    private var refreshInFlight: Bool = false
+    private var deferredScrollRefreshTask: Task<Void, Never>? = nil
+    private var refreshCycleOwner: UUID?
     private var refreshQueued: Bool = false
 
     // MARK: - Generation bookkeeping (ported from CodexActiveSessionsModel)
 
     private var refreshGeneration: UInt64 = 0
     private var activeRefreshGeneration: UInt64 = 0
+    private var activeProbeCycle: (generation: UInt64, gate: RefreshCycleGate)?
 
     // MARK: - Latest published snapshot (used for signature diffing + lookups)
 
@@ -250,7 +294,9 @@ actor PresenceEngine {
     private var lastITermProbeAt: Date? = nil
     private var resumeProbeBudgetIndex: Int? = nil
     private var itermProbeRoundRobinCursor: Int = 0
+    private var probeCadenceGeneration: UInt64 = 0
     private var forceFullProbeNextRefresh: Bool = false
+    private var manualRefreshRequestGeneration: UInt64 = 0
     private var consecutiveStableCycles: Int = 0
     private var consecutiveEmptySuppressedCycles: Int = 0
 
@@ -266,9 +312,11 @@ actor PresenceEngine {
 
     init(probeRunner: ProbeRunner = RealProbeRunner(),
          rootsResolver: PresenceRootsResolving = DefaultPresenceRootsResolver(),
+         scrollSignal: TranscriptScrollSignal = .shared,
          now: @escaping () -> Date = Date.init) {
         self.probeRunner = probeRunner
         self.rootsResolver = rootsResolver
+        self.scrollSignal = scrollSignal
         self.now = now
         var continuation: AsyncStream<Emission>.Continuation!
         // Only the latest snapshot matters to a consumer that's behind: each
@@ -284,6 +332,7 @@ actor PresenceEngine {
     deinit {
         pollTask?.cancel()
         refreshTask?.cancel()
+        deferredScrollRefreshTask?.cancel()
         continuation?.finish()
     }
 
@@ -373,9 +422,15 @@ actor PresenceEngine {
         cachedITermTabTitleBySessionGuid = [:]
         environment.deferExpensiveProbesUntil = nil
         forceFullProbeNextRefresh = true
+        manualRefreshRequestGeneration &+= 1
         consecutiveEmptySuppressedCycles = 0
         resetStablePollBackoff()
         armForegroundProbeRamp()
+        // Supersede the active poll before cancellation can resume it with nil
+        // output and let it advance to later probe stages.
+        invalidateRefreshGeneration()
+        refreshCycleOwner = nil
+        refreshQueued = false
         refreshTask?.cancel()
         await probeRunner.cancelAll()
         refreshTask = Task { [weak self] in
@@ -452,6 +507,14 @@ actor PresenceEngine {
         await performRefreshNow()
     }
 
+    func debugSetForceFullProbeNextRefresh(_ value: Bool) {
+        forceFullProbeNextRefresh = value
+    }
+
+    func debugForceFullProbeNextRefresh() -> Bool {
+        forceFullProbeNextRefresh
+    }
+
     /// Test-only: runs the environment scheduling side effects (start/stop,
     /// backoff reset, foreground-probe-ramp arming, refreshSoon) for a
     /// `previous -> next` transition, bypassing the `AppRuntime.isRunningTests`
@@ -516,8 +579,11 @@ actor PresenceEngine {
         pollTask = nil
         refreshTask?.cancel()
         refreshTask = nil
+        deferredScrollRefreshTask?.cancel()
+        deferredScrollRefreshTask = nil
+        invalidateRefreshGeneration()
+        refreshCycleOwner = nil
         Task { await probeRunner.cancelAll() }
-        refreshInFlight = false
         refreshQueued = false
         resetStablePollBackoff()
         if clear {
@@ -532,8 +598,6 @@ actor PresenceEngine {
             resumeProbeBudgetIndex = nil
             itermProbeRoundRobinCursor = 0
             forceFullProbeNextRefresh = false
-            refreshGeneration &+= 1
-            activeRefreshGeneration = refreshGeneration
             let cleared = PresenceSnapshot(
                 presences: [],
                 bySessionID: [:],
@@ -563,6 +627,33 @@ actor PresenceEngine {
         }
     }
 
+    /// Coalesce every activation, poll, and manual refresh rejected during a
+    /// transcript scroll into one retry after the quiet window. Manual refresh
+    /// intent is preserved by `forceFullProbeNextRefresh`, which is cleared only
+    /// after a completed cycle rather than when this retry is scheduled.
+    private func scheduleRefreshAfterScroll() {
+        guard deferredScrollRefreshTask == nil else { return }
+        let scrollSignal = scrollSignal
+        deferredScrollRefreshTask = Task { [weak self] in
+            await scrollSignal.waitUntilQuiet()
+            guard !Task.isCancelled else { return }
+            await self?.runDeferredScrollRefresh()
+        }
+    }
+
+    private func runDeferredScrollRefresh() async {
+        // Clear before entering `refreshOnce`: if scrolling resumed in the
+        // handoff window, that call must be able to schedule the next retry.
+        deferredScrollRefreshTask = nil
+        await refreshOnce()
+    }
+
+    private func pauseRefreshForActiveScroll() -> Bool {
+        guard scrollSignal.isScrolling else { return false }
+        scheduleRefreshAfterScroll()
+        return true
+    }
+
     private func pollIntervalSeconds() -> TimeInterval {
         let baseInterval = CodexActiveSessionsModel.effectivePollIntervalSeconds(
             appIsActive: environment.appIsActive,
@@ -581,6 +672,7 @@ actor PresenceEngine {
 
     private func armForegroundProbeRamp() {
         guard environment.hasVisibleConsumer else { return }
+        probeCadenceGeneration &+= 1
         resumeProbeBudgetIndex = 0
         resetStablePollBackoff()
     }
@@ -589,18 +681,21 @@ actor PresenceEngine {
         consecutiveStableCycles = 0
     }
 
-    private func nextITermProbeBudget() -> Int {
-        let next = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: resumeProbeBudgetIndex)
-        resumeProbeBudgetIndex = next.nextResumeIndex
-        return next.budget
-    }
-
     // MARK: - Generation guard (ported from CodexActiveSessionsModel)
 
     private func beginRefreshGeneration() -> UInt64 {
+        activeProbeCycle?.gate.cancel()
         refreshGeneration &+= 1
         activeRefreshGeneration = refreshGeneration
+        activeProbeCycle = (activeRefreshGeneration, RefreshCycleGate())
         return activeRefreshGeneration
+    }
+
+    private func invalidateRefreshGeneration() {
+        activeProbeCycle?.gate.cancel()
+        activeProbeCycle = nil
+        refreshGeneration &+= 1
+        activeRefreshGeneration = refreshGeneration
     }
 
     private func isCurrentRefreshGeneration(_ generation: UInt64) -> Bool {
@@ -624,7 +719,40 @@ actor PresenceEngine {
             markStaleRefreshDrop()
             return nil
         }
-        let data = await probeRunner.run(kind: kind, executable: executable, arguments: arguments, timeout: timeout)
+        let cycleGate: RefreshCycleGate
+        if let activeProbeCycle, activeProbeCycle.generation == generation {
+            cycleGate = activeProbeCycle.gate
+        } else {
+            cycleGate = RefreshCycleGate()
+            activeProbeCycle = (generation, cycleGate)
+        }
+        guard cycleGate.isActive else {
+            markStaleRefreshDrop()
+            return nil
+        }
+        let scrollSignal = scrollSignal
+        let startGate = ProbeStartGate()
+        let data = await probeRunner.run(
+            kind: kind,
+            executable: executable,
+            arguments: arguments,
+            timeout: timeout,
+            shouldStart: {
+                startGate.shouldStart(scrollSignal: scrollSignal, cycleGate: cycleGate)
+            }
+        )
+        if startGate.wasDeferred {
+            guard isCurrentRefreshGeneration(generation) else {
+                markStaleRefreshDrop()
+                return nil
+            }
+            // The signal may already be quiet by the time this actor resumes.
+            // Invalidate the current cycle explicitly so a refused fork/exec
+            // can never be mistaken for an ordinary command failure.
+            invalidateRefreshGeneration()
+            scheduleRefreshAfterScroll()
+            return nil
+        }
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
             return nil
@@ -690,19 +818,28 @@ actor PresenceEngine {
 
     private func refreshOnce() async {
         guard environment.enabled else { return }
-        if refreshInFlight {
+        guard !pauseRefreshForActiveScroll() else { return }
+        if refreshCycleOwner != nil {
             refreshQueued = true
             return
         }
+        let cycleOwner = UUID()
+        refreshCycleOwner = cycleOwner
         let generation = beginRefreshGeneration()
-        refreshInFlight = true
+        let manualRefreshGenerationAtStart = manualRefreshRequestGeneration
         defer {
-            refreshInFlight = false
-            if refreshQueued {
-                refreshQueued = false
-                refreshTask?.cancel()
-                refreshTask = Task { [weak self] in
-                    await self?.refreshOnce()
+            if refreshCycleOwner == cycleOwner {
+                refreshCycleOwner = nil
+                if activeProbeCycle?.generation == generation {
+                    activeProbeCycle?.gate.cancel()
+                    activeProbeCycle = nil
+                }
+                if refreshQueued {
+                    refreshQueued = false
+                    refreshTask?.cancel()
+                    refreshTask = Task { [weak self] in
+                        await self?.refreshOnce()
+                    }
                 }
             }
         }
@@ -771,6 +908,7 @@ actor PresenceEngine {
             markStaleRefreshDrop()
             return
         }
+        guard !pauseRefreshForActiveScroll() else { return }
 
         let latestProcessProbe = CodexActiveSessionsModel.filterSupportedPresences(
             probeResult.loaded.filter { $0.publisher == "agent-sessions-process" }
@@ -781,6 +919,7 @@ actor PresenceEngine {
         }))
         var completedDesktopKeys: Set<String> = []
         let loaded = CodexActiveSessionsModel.coalescePresencesByTTY(discovered.compactMap { presence in
+            guard !pauseRefreshForActiveScroll() else { return nil }
             guard presence.source == .codex, presence.kind == "desktop" else { return presence }
             guard let path = presence.sessionLogPath, let pid = presence.pid else { return nil }
             let state = codexDesktopTurnStates.state(path: path, pid: pid)
@@ -794,29 +933,37 @@ actor PresenceEngine {
             working.liveStateHint = .activeWorking
             return working
         })
+        guard !pauseRefreshForActiveScroll() else { return }
 
+        var nextCachedITermPresences = cachedITermPresences
+        var nextCachedITermTabTitleByTTY = cachedITermTabTitleByTTY
+        var nextCachedITermTabTitleBySessionGuid = cachedITermTabTitleBySessionGuid
+        var nextLastITermProbeAt = lastITermProbeAt
         if probeResult.didProbeITerm {
-            cachedITermPresences = probeResult.itermPresences
-            lastITermProbeAt = now
+            nextCachedITermPresences = probeResult.itermPresences
+            nextLastITermProbeAt = now
             if !probeResult.itermTabTitleByTTY.isEmpty || !probeResult.itermTabTitleBySessionGuid.isEmpty {
-                cachedITermTabTitleByTTY = probeResult.itermTabTitleByTTY
-                cachedITermTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
+                nextCachedITermTabTitleByTTY = probeResult.itermTabTitleByTTY
+                nextCachedITermTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
             }
         } else if shouldUseITermSnapshot {
-            cachedITermPresences = cachedITermPresences.filter { !$0.isStale(now: now, ttl: ttl) }
+            nextCachedITermPresences = cachedITermPresences.filter { !$0.isStale(now: now, ttl: ttl) }
         }
 
+        var nextCachedProcessPresences = cachedProcessPresences
+        var nextLastProcessProbeAt = lastProcessProbeAt
         if probeResult.didProbeProcesses {
-            cachedProcessPresences = latestProcessProbe
-            lastProcessProbeAt = now
+            nextCachedProcessPresences = latestProcessProbe
+            nextLastProcessProbeAt = now
         } else {
-            cachedProcessPresences = cachedProcessPresences.filter { !$0.isStale(now: now, ttl: ttl) }
+            nextCachedProcessPresences = cachedProcessPresences.filter { !$0.isStale(now: now, ttl: ttl) }
         }
 
         var sessionMap: [String: CodexActivePresence] = [:]
         var logMap: [String: CodexActivePresence] = [:]
         var fallbackMap: [String: CodexActivePresence] = [:]
         for p in loaded {
+            guard !pauseRefreshForActiveScroll() else { return }
             var keyed = false
             if let id = p.sessionId, !id.isEmpty {
                 let key = CodexActiveSessionsModel.sessionLookupKey(source: p.source, sessionId: id)
@@ -839,6 +986,7 @@ actor PresenceEngine {
 
         var ui: [CodexActivePresence] = Array(logMap.values)
         for p in sessionMap.values {
+            guard !pauseRefreshForActiveScroll() else { return }
             if let log = p.sessionLogPath, !log.isEmpty {
                 let key = CodexActiveSessionsModel.logLookupKey(source: p.source, normalizedPath: CodexActiveSessionsModel.normalizePath(log))
                 if logMap[key] != nil { continue }
@@ -853,8 +1001,8 @@ actor PresenceEngine {
             didProbeITerm: probeResult.didProbeITerm,
             probeTitleByTTY: probeResult.itermTabTitleByTTY,
             probeTitleBySessionGuid: probeResult.itermTabTitleBySessionGuid,
-            cachedTitleByTTY: cachedITermTabTitleByTTY,
-            cachedTitleBySessionGuid: cachedITermTabTitleBySessionGuid
+            cachedTitleByTTY: nextCachedITermTabTitleByTTY,
+            cachedTitleBySessionGuid: nextCachedITermTabTitleBySessionGuid
         )
         ui = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
             ui,
@@ -862,7 +1010,8 @@ actor PresenceEngine {
             tabTitleBySessionGuid: effectiveTabTitleBySessionGuid
         )
 
-        let probedITermPresenceKeys = plannedITermProbePresenceKeys(
+        guard !pauseRefreshForActiveScroll() else { return }
+        let itermProbePlan = plannedITermProbe(
             for: ui,
             previousLiveStates: previousLiveStates,
             hasVisibleConsumer: shouldProbeITermSnapshot,
@@ -871,22 +1020,22 @@ actor PresenceEngine {
             isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
         )
 
-        let classification = await classifyLiveStatesAsync(
+        guard let classification = await classifyLiveStatesAsync(
             for: ui,
             generation: generation,
             now: now,
             probeITerm: shouldUseITermSnapshot,
             timeout: Self.processProbeTimeout,
             previousLiveStates: previousLiveStates,
-            probedITermPresenceKeys: probedITermPresenceKeys
-        )
-        let nextLiveStates = classification.liveStates
-        let rawIdleReasons = classification.idleReasons
+            probedITermPresenceKeys: itermProbePlan.presenceKeys
+        ) else { return }
+        let nextLiveStates = classification.value.liveStates
+        let rawIdleReasons = classification.value.idleReasons
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
             return
         }
-
+        guard !pauseRefreshForActiveScroll() else { return }
         let nextLastActivityByPresenceKey = CodexActiveSessionsModel.lastActivityByPresenceKey(for: ui)
 
         let cockpitRecentlyVisible = environment.lastCockpitVisibleAt.map { now.timeIntervalSince($0) < 10 } ?? false
@@ -913,11 +1062,10 @@ actor PresenceEngine {
             }
         let shouldSuppressEmptyPublish = (baseSuppressEmptyPublish || shouldSuppressRecentTransition)
             && !allPreviousPresencesCompleted
-        if shouldSuppressEmptyPublish, ui.isEmpty {
-            consecutiveEmptySuppressedCycles += 1
-        } else {
-            consecutiveEmptySuppressedCycles = 0
-        }
+        guard !pauseRefreshForActiveScroll() else { return }
+        let nextConsecutiveEmptySuppressedCycles = shouldSuppressEmptyPublish && ui.isEmpty
+            ? consecutiveEmptySuppressedCycles + 1
+            : 0
 
         var nextSnapshot = latestSnapshot
         if !shouldSuppressEmptyPublish {
@@ -958,15 +1106,17 @@ actor PresenceEngine {
         // change is "freshness-only" and may be throttled while the app is
         // inactive; a real join/leave (or badge change) never is.
         var didPublishPresences = false
+        var publishedPresenceSignatures: [String: String]?
         if !shouldSuppressEmptyPublish, (membershipChanged || metadataChanged || liveStateChanged) {
             nextSnapshot.presences = ui.sorted(by: { ($0.lastSeenAt ?? .distantPast) > ($1.lastSeenAt ?? .distantPast) })
-            lastPublishedPresenceSignatures = nextSignatures
+            publishedPresenceSignatures = nextSignatures
             nextSnapshot.membershipVersion &+= 1
             didPublishPresences = true
         }
         let isRealMembershipChange = membershipChanged
 
         var didPublishBadge = false
+        var publishedRuntimeSubagentCountsByPresenceKey: [String: Int]?
         let shouldTrackRuntimeSubagentBadges = (isCockpitVisibleSnapshot || isPinnedCockpitVisibleSnapshot)
             && ui.contains(where: { $0.source == .codex })
         if shouldTrackRuntimeSubagentBadges {
@@ -975,13 +1125,43 @@ actor PresenceEngine {
                 stateDBURL: nil
             )
             if nextRuntimeSubagentCountsByPresenceKey != lastPublishedRuntimeSubagentCountsByPresenceKey {
-                lastPublishedRuntimeSubagentCountsByPresenceKey = nextRuntimeSubagentCountsByPresenceKey
+                publishedRuntimeSubagentCountsByPresenceKey = nextRuntimeSubagentCountsByPresenceKey
                 nextSnapshot.runtimeSubagentCountsByPresenceKey = nextRuntimeSubagentCountsByPresenceKey
                 nextSnapshot.badgeVersion &+= 1
                 didPublishBadge = true
             }
         }
 
+        guard !pauseRefreshForActiveScroll() else { return }
+        guard manualRefreshRequestGeneration == manualRefreshGenerationAtStart else {
+            // A newer manual request arrived while this cycle was suspended.
+            // Never let the older result refill the cleared caches or consume
+            // the full-probe request; the defer block schedules the queued run.
+            refreshQueued = true
+            return
+        }
+        cachedITermPresences = nextCachedITermPresences
+        cachedITermTabTitleByTTY = nextCachedITermTabTitleByTTY
+        cachedITermTabTitleBySessionGuid = nextCachedITermTabTitleBySessionGuid
+        lastITermProbeAt = nextLastITermProbeAt
+        cachedProcessPresences = nextCachedProcessPresences
+        lastProcessProbeAt = nextLastProcessProbeAt
+        consecutiveEmptySuppressedCycles = nextConsecutiveEmptySuppressedCycles
+        if probeCadenceGeneration == itermProbePlan.cadenceGeneration {
+            resumeProbeBudgetIndex = itermProbePlan.nextResumeBudgetIndex
+            itermProbeRoundRobinCursor = itermProbePlan.nextRoundRobinCursor
+        }
+        if let publishedPresenceSignatures {
+            lastPublishedPresenceSignatures = publishedPresenceSignatures
+        }
+        if let publishedRuntimeSubagentCountsByPresenceKey {
+            lastPublishedRuntimeSubagentCountsByPresenceKey = publishedRuntimeSubagentCountsByPresenceKey
+        }
+        if forceFullProbeNextRefresh,
+           itermProbePlan.fulfillsFullProbeRequest,
+           classification.didCompleteITermBatch {
+            forceFullProbeNextRefresh = false
+        }
         if stateChanged {
             resetStablePollBackoff()
         } else {
@@ -1057,14 +1237,43 @@ actor PresenceEngine {
             markStaleRefreshDrop()
             return nil
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
 
         // Runtime IDs from the shared service cover TUI clients in any terminal
         // and desktop windows. Offline tests must never touch the user's service.
         var out: [CodexActivePresence] = []
         if !AppRuntime.isRunningTests, AgentEnablement.isEnabled(.opencode) {
-            out = await OpenCodeServicePresence.read(now: now)
+            let scrollSignal = scrollSignal
+            guard let cycle = activeProbeCycle,
+                  cycle.generation == generation,
+                  cycle.gate.isActive else {
+                markStaleRefreshDrop()
+                return nil
+            }
+            let serviceStartGate = ProbeStartGate()
+            guard let servicePresences = await OpenCodeServicePresence.read(
+                now: now,
+                shouldContinue: {
+                    guard !Task.isCancelled else { return false }
+                    return serviceStartGate.shouldStart(
+                        scrollSignal: scrollSignal,
+                        cycleGate: cycle.gate
+                    )
+                }
+            ) else {
+                guard isCurrentRefreshGeneration(generation), cycle.gate.isActive else {
+                    markStaleRefreshDrop()
+                    return nil
+                }
+                if serviceStartGate.wasDeferred {
+                    scheduleRefreshAfterScroll()
+                }
+                return nil
+            }
+            out = servicePresences
         }
         guard isCurrentRefreshGeneration(generation) else { return nil }
+        guard !pauseRefreshForActiveScroll() else { return nil }
         var itermPresences: [CodexActivePresence] = []
         var itermTabTitleByTTY: [String: String] = [:]
         var itermTabTitleBySessionGuid: [String: String] = [:]
@@ -1073,6 +1282,7 @@ actor PresenceEngine {
         let _lpSpan = Perf.begin("loadPresences", thresholdMs: 4, "roots=\(rootPaths.count)")
 #endif
         for path in rootPaths {
+            guard !pauseRefreshForActiveScroll() else { return nil }
             out.append(contentsOf: CodexActiveSessionsModel.filterSupportedPresences(
                 CodexActiveSessionsModel.loadPresences(from: URL(fileURLWithPath: path), decoder: decoder, now: now, ttl: ttl)
             ))
@@ -1107,7 +1317,8 @@ actor PresenceEngine {
         }()
 
         if shouldProbeProcesses {
-            let processPresences = await discoverProcessPresences(
+            guard !pauseRefreshForActiveScroll() else { return nil }
+            guard let processPresences = await discoverProcessPresences(
                 generation: generation,
                 now: now,
                 codexSessionRoots: codexSessionRoots,
@@ -1115,11 +1326,12 @@ actor PresenceEngine {
                 antigravitySessionRoots: antigravitySessionRoots,
                 opencodeSessionRoots: opencodeSessionRoots,
                 timeout: Self.processProbeTimeout
-            )
+            ) else { return nil }
             guard isCurrentRefreshGeneration(generation) else {
                 markStaleRefreshDrop()
                 return nil
             }
+            guard !pauseRefreshForActiveScroll() else { return nil }
             out.append(contentsOf: processPresences)
         } else {
             out.append(contentsOf: CodexActiveSessionsModel.filterSupportedPresences(
@@ -1128,11 +1340,16 @@ actor PresenceEngine {
         }
 
         if shouldProbeITermSnapshot {
-            let sessions = await loadITermSessions(generation: generation, timeout: Self.processProbeTimeout)
+            guard !pauseRefreshForActiveScroll() else { return nil }
+            guard let sessions = await loadITermSessions(
+                generation: generation,
+                timeout: Self.processProbeTimeout
+            ) else { return nil }
             guard isCurrentRefreshGeneration(generation) else {
                 markStaleRefreshDrop()
                 return nil
             }
+            guard !pauseRefreshForActiveScroll() else { return nil }
             if !sessions.isEmpty {
                 itermTabTitleByTTY = CodexActiveSessionsModel.itermTabTitleByTTY(sessions)
                 itermTabTitleBySessionGuid = CodexActiveSessionsModel.itermTabTitleBySessionGuid(sessions)
@@ -1151,6 +1368,10 @@ actor PresenceEngine {
             out.append(contentsOf: itermPresences)
         }
 
+        // A wheel event may arrive after this refresh began. Do not enter the
+        // Claude tree walk or publish a partial snapshot while the transcript
+        // table is competing for CPU and main-thread layout time.
+        guard !pauseRefreshForActiveScroll() else { return nil }
         var claimedClaudeLogPaths = Self.claimedLogPaths(in: out, source: .claude)
         // Passed explicitly rather than left `nil`: `effectiveIdentities` treats
         // `nil` as "fall back to `ClaudeDesktopSessionTitles.defaultRoots()`",
@@ -1160,6 +1381,7 @@ actor PresenceEngine {
         // injected resolver can narrow them.
         let desktopTitlesRoots = claudeDesktopTitlesRoots()
         for root in Self.claudeRunwayRoots(from: claudeRunwayRoots) {
+            guard !pauseRefreshForActiveScroll() else { return nil }
             let synthesized = ClaudeRunwayPresenceSynthesizer.presences(
                 root: root,
                 now: now,
@@ -1229,8 +1451,9 @@ actor PresenceEngine {
                                           claudeSessionRoots: [String],
                                           antigravitySessionRoots: [String],
                                           opencodeSessionRoots: [String],
-                                          timeout: TimeInterval) async -> [CodexActivePresence] {
+                                          timeout: TimeInterval) async -> [CodexActivePresence]? {
         let user = NSUserName()
+        guard !pauseRefreshForActiveScroll() else { return nil }
         let psData = await runManagedCommand(
             kind: .processDiscovery,
             generation: generation,
@@ -1240,53 +1463,21 @@ actor PresenceEngine {
         )
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
-            return []
+            return nil
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
 
         let commandInfos = psData.map { CodexActiveSessionsModel.parsePSCommandListOutput(String(decoding: $0, as: UTF8.self)) } ?? []
         let codexDesktopPIDs = CodexActiveSessionsModel.codexDesktopPIDs(from: commandInfos)
-        let codexHeadlessPIDs = Set(
-            CodexActiveSessionsModel.headlessAgentPIDs(from: commandInfos, needles: ["codex"])
-        )
-        let claudeTTYPIDs = Set(
-            commandInfos
-                .filter { info in
-                    guard info.tty != nil else { return false }
-                    return CodexActiveSessionsModel.commandContainsNeedle(info.command, needles: ["claude", "claude-code"])
-                }
-                .map(\.pid)
-        )
-        // Headless CLI runs from launchd, a script, or another app never carry a tty.
-        // Match them by executable needle and let the shared helper exclude app-bundle
-        // processes so GUI backends stay on their dedicated discovery paths.
-        let claudeHeadlessPIDs = Set(
-            CodexActiveSessionsModel.headlessAgentPIDs(from: commandInfos, needles: ["claude", "claude-code"])
-        )
-        let claudeCommandPIDs = Array(claudeTTYPIDs.union(claudeHeadlessPIDs)).sorted()
-        let opencodeTTYPIDs = Set(
-            commandInfos
-                .filter { info in
-                    guard info.tty != nil else { return false }
-                    return CodexActiveSessionsModel.commandContainsNeedle(info.command, needles: ["opencode"])
-                }
-                .map(\.pid)
-        )
-        let opencodeHeadlessPIDs = Set(
-            CodexActiveSessionsModel.headlessAgentPIDs(from: commandInfos, needles: ["opencode"])
-        )
-        let opencodeCommandPIDs = Array(opencodeTTYPIDs.union(opencodeHeadlessPIDs)).sorted()
-        let antigravityCommandPIDs = Array(
-            Set(
-                commandInfos
-                    .filter { info in
-                        guard info.tty != nil else { return false }
-                        return CodexActiveSessionsModel.commandContainsNeedle(info.command, needles: ["agy", "antigravity"])
-                    }
-                    .map(\.pid)
-            )
-        ).sorted()
+        let agentPIDs = CodexActiveSessionsModel.agentProcessMatches(from: commandInfos)
+        let codexHeadlessPIDs = agentPIDs.headlessCodex
+        let claudeHeadlessPIDs = agentPIDs.headlessClaude
+        let claudeCommandPIDs = agentPIDs.claude.sorted()
+        let opencodeHeadlessPIDs = agentPIDs.headlessOpenCode
+        let opencodeCommandPIDs = agentPIDs.openCode.sorted()
+        let antigravityCommandPIDs = agentPIDs.antigravity.sorted()
 
-        let codexInfos = await discoverLsofPIDInfos(
+        guard let codexInfos = await discoverLsofPIDInfos(
             generation: generation,
             queryArguments: ["-w", "-a", "-c", "codex", "-u", user, "-nP", "-F", "pftna"],
             sessionsRoots: codexSessionRoots,
@@ -1294,57 +1485,61 @@ actor PresenceEngine {
             timeout: timeout,
             headlessEligiblePIDs: codexHeadlessPIDs,
             desktopEligiblePIDs: codexDesktopPIDs
-        )
+        ) else { return nil }
         let claudeInfos: [Int: CodexActiveSessionsModel.LsofPIDInfo]
         if claudeCommandPIDs.isEmpty {
             claudeInfos = [:]
         } else {
-            claudeInfos = await discoverLsofPIDInfos(
+            guard let discovered = await discoverLsofPIDInfos(
                 generation: generation,
                 queryArguments: ["-w", "-a", "-p", claudeCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
                 sessionsRoots: claudeSessionRoots,
                 source: .claude,
                 timeout: timeout,
                 headlessEligiblePIDs: claudeHeadlessPIDs
-            )
+            ) else { return nil }
+            claudeInfos = discovered
         }
-        let opencodeInfos = await discoverLsofPIDInfos(
+        guard let opencodeInfos = await discoverLsofPIDInfos(
             generation: generation,
             queryArguments: ["-w", "-a", "-c", "opencode", "-u", user, "-nP", "-F", "pftn"],
             sessionsRoots: opencodeSessionRoots,
             source: .opencode,
             timeout: timeout,
             headlessEligiblePIDs: opencodeHeadlessPIDs
-        )
+        ) else { return nil }
         let opencodeCommandInfos: [Int: CodexActiveSessionsModel.LsofPIDInfo]
         if opencodeCommandPIDs.isEmpty {
             opencodeCommandInfos = [:]
         } else {
-            opencodeCommandInfos = await discoverLsofPIDInfos(
+            guard let discovered = await discoverLsofPIDInfos(
                 generation: generation,
                 queryArguments: ["-w", "-a", "-p", opencodeCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
                 sessionsRoots: opencodeSessionRoots,
                 source: .opencode,
                 timeout: timeout,
                 headlessEligiblePIDs: opencodeHeadlessPIDs
-            )
+            ) else { return nil }
+            opencodeCommandInfos = discovered
         }
         let antigravityInfos: [Int: CodexActiveSessionsModel.LsofPIDInfo]
         if antigravityCommandPIDs.isEmpty {
             antigravityInfos = [:]
         } else {
-            antigravityInfos = await discoverLsofPIDInfos(
+            guard let discovered = await discoverLsofPIDInfos(
                 generation: generation,
                 queryArguments: ["-w", "-a", "-p", antigravityCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
                 sessionsRoots: antigravitySessionRoots,
                 source: .antigravity,
                 timeout: timeout
-            )
+            ) else { return nil }
+            antigravityInfos = discovered
         }
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
-            return []
+            return nil
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
         let pidInfoBySource: [SessionSource: [Int: CodexActiveSessionsModel.LsofPIDInfo]] = [
             .codex: codexInfos,
             .claude: claudeInfos,
@@ -1353,20 +1548,31 @@ actor PresenceEngine {
         ]
         let allPIDs = Array(pidInfoBySource.values.flatMap(\.keys)).sorted()
         var envByPID: [Int: CodexActiveSessionsModel.PSProcessEnvMeta] = [:]
-        if !allPIDs.isEmpty,
-           let envData = await runManagedCommand(
+        if !allPIDs.isEmpty {
+            guard !pauseRefreshForActiveScroll() else { return nil }
+        }
+        if !allPIDs.isEmpty {
+            let envData = await runManagedCommand(
                 kind: .processDiscovery,
                 generation: generation,
                 executable: URL(fileURLWithPath: "/bin/ps"),
                 arguments: ["eww", "-p", allPIDs.map(String.init).joined(separator: ",")],
                 timeout: timeout
-           ) {
-            envByPID = CodexActiveSessionsModel.parsePSEnvironmentOutput(String(decoding: envData, as: UTF8.self))
+            )
+            guard isCurrentRefreshGeneration(generation) else {
+                markStaleRefreshDrop()
+                return nil
+            }
+            guard !pauseRefreshForActiveScroll() else { return nil }
+            if let envData {
+                envByPID = CodexActiveSessionsModel.parsePSEnvironmentOutput(String(decoding: envData, as: UTF8.self))
+            }
         }
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
-            return []
+            return nil
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
 
         var out = CodexActiveSessionsModel.codexDesktopPresences(
             from: codexInfos, eligiblePIDs: codexDesktopPIDs, now: now
@@ -1374,6 +1580,7 @@ actor PresenceEngine {
         var assignedLogPaths: Set<String> = []
         for (source, infos) in pidInfoBySource {
             for var info in infos.values {
+                guard !pauseRefreshForActiveScroll() else { return nil }
                 if source == .codex, codexDesktopPIDs.contains(info.pid) { continue }
                 if let envMeta = envByPID[info.pid] {
                     info.termProgram = envMeta.termProgram
@@ -1422,7 +1629,8 @@ actor PresenceEngine {
                                       source: SessionSource,
                                       timeout: TimeInterval,
                                       headlessEligiblePIDs: Set<Int> = [],
-                                      desktopEligiblePIDs: Set<Int> = []) async -> [Int: CodexActiveSessionsModel.LsofPIDInfo] {
+                                      desktopEligiblePIDs: Set<Int> = []) async -> [Int: CodexActiveSessionsModel.LsofPIDInfo]? {
+        guard !pauseRefreshForActiveScroll() else { return nil }
         guard let out = await runManagedCommand(
             kind: .processDiscovery,
             generation: generation,
@@ -1432,6 +1640,7 @@ actor PresenceEngine {
         ) else {
             return [:]
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
         let roots = sessionsRoots.map(CodexActiveSessionsModel.normalizePath)
         return CodexActiveSessionsModel.parseLsofMachineOutput(
             String(decoding: out, as: UTF8.self),
@@ -1444,27 +1653,53 @@ actor PresenceEngine {
 
     // MARK: - Classification (ported from classifyLiveStatesAsync)
 
+    private struct LiveStateProbeResult {
+        let value: CodexActiveSessionsModel.LiveStateClassification
+        let didCompleteITermBatch: Bool
+    }
+
+    private enum ITermBatchProbeOutcome {
+        case notRequested
+        case completed([String: CodexActiveSessionsModel.ITermProbeResult])
+        case failed
+    }
+
     private func classifyLiveStatesAsync(for presences: [CodexActivePresence],
                                          generation: UInt64,
                                          now: Date,
                                          probeITerm: Bool,
                                          timeout: TimeInterval,
                                          previousLiveStates: [String: CodexLiveState],
-                                         probedITermPresenceKeys: Set<String>) async -> CodexActiveSessionsModel.LiveStateClassification {
+                                         probedITermPresenceKeys: Set<String>) async -> LiveStateProbeResult? {
+        guard !pauseRefreshForActiveScroll() else { return nil }
         let probeTargets = CodexActiveSessionsModel.itermProbeTargets(
             from: presences,
             selectedPresenceKeys: probedITermPresenceKeys,
             probeITerm: probeITerm
         )
-        let batchProbeResults = await captureBatchedITermProbeResults(
+        guard let batchOutcome = await captureBatchedITermProbeResults(
             generation: generation,
             for: probeTargets,
             timeout: timeout
-        )
+        ) else { return nil }
+        let batchProbeResults: [String: CodexActiveSessionsModel.ITermProbeResult]
+        let didCompleteITermBatch: Bool
+        switch batchOutcome {
+        case .notRequested:
+            batchProbeResults = [:]
+            didCompleteITermBatch = false
+        case .completed(let results):
+            batchProbeResults = results
+            didCompleteITermBatch = true
+        case .failed:
+            batchProbeResults = [:]
+            didCompleteITermBatch = false
+        }
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
-            return CodexActiveSessionsModel.LiveStateClassification(liveStates: previousLiveStates, idleReasons: [:])
+            return nil
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
 #if DEBUG
         let _classifySpan = Perf.begin("refreshClassify", thresholdMs: 4)
 #endif
@@ -1479,24 +1714,53 @@ actor PresenceEngine {
 #if DEBUG
         Perf.end(_classifySpan)
 #endif
-        return result
+        return LiveStateProbeResult(value: result, didCompleteITermBatch: didCompleteITermBatch)
     }
 
-    private func plannedITermProbePresenceKeys(for presences: [CodexActivePresence],
-                                               previousLiveStates: [String: CodexLiveState],
-                                               hasVisibleConsumer: Bool,
-                                               appIsActive: Bool,
-                                               isCockpitVisible: Bool,
-                                               isPinnedCockpitVisible: Bool) -> Set<String> {
-        guard hasVisibleConsumer else { return [] }
+    private struct ITermProbePlan {
+        let presenceKeys: Set<String>
+        let nextResumeBudgetIndex: Int?
+        let nextRoundRobinCursor: Int
+        let cadenceGeneration: UInt64
+        let fulfillsFullProbeRequest: Bool
+    }
+
+    /// Plans the batch without consuming cadence state. The refresh commits
+    /// that state only after its final scroll guard, alongside the snapshot.
+    private func plannedITermProbe(for presences: [CodexActivePresence],
+                                  previousLiveStates: [String: CodexLiveState],
+                                  hasVisibleConsumer: Bool,
+                                  appIsActive: Bool,
+                                  isCockpitVisible: Bool,
+                                  isPinnedCockpitVisible: Bool) -> ITermProbePlan {
+        guard hasVisibleConsumer else {
+            return ITermProbePlan(
+                presenceKeys: [],
+                nextResumeBudgetIndex: resumeProbeBudgetIndex,
+                nextRoundRobinCursor: itermProbeRoundRobinCursor,
+                cadenceGeneration: probeCadenceGeneration,
+                fulfillsFullProbeRequest: false
+            )
+        }
         let candidates = CodexActiveSessionsModel.itermProbeCandidateKeys(for: presences).sorted()
-        guard !candidates.isEmpty else { return [] }
+        guard !candidates.isEmpty else {
+            return ITermProbePlan(
+                presenceKeys: [],
+                nextResumeBudgetIndex: resumeProbeBudgetIndex,
+                nextRoundRobinCursor: itermProbeRoundRobinCursor,
+                cadenceGeneration: probeCadenceGeneration,
+                fulfillsFullProbeRequest: false
+            )
+        }
 
         if forceFullProbeNextRefresh {
-            forceFullProbeNextRefresh = false
-            resumeProbeBudgetIndex = nil
-            itermProbeRoundRobinCursor = candidates.count == 0 ? 0 : (itermProbeRoundRobinCursor % candidates.count)
-            return Set(candidates)
+            return ITermProbePlan(
+                presenceKeys: Set(candidates),
+                nextResumeBudgetIndex: nil,
+                nextRoundRobinCursor: itermProbeRoundRobinCursor % candidates.count,
+                cadenceGeneration: probeCadenceGeneration,
+                fulfillsFullProbeRequest: true
+            )
         }
 
         if !appIsActive, (isPinnedCockpitVisible || isCockpitVisible) {
@@ -1506,26 +1770,37 @@ actor PresenceEngine {
                 waitingBudget: CodexActiveSessionsModel.pinnedBackgroundWaitingITermProbeBudget,
                 start: itermProbeRoundRobinCursor
             )
-            itermProbeRoundRobinCursor = selection.nextCursor
-            return Set(selection.selected)
+            return ITermProbePlan(
+                presenceKeys: Set(selection.selected),
+                nextResumeBudgetIndex: resumeProbeBudgetIndex,
+                nextRoundRobinCursor: selection.nextCursor,
+                cadenceGeneration: probeCadenceGeneration,
+                fulfillsFullProbeRequest: false
+            )
         }
 
-        let budget = nextITermProbeBudget()
+        let budgetStep = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: resumeProbeBudgetIndex)
         let selection = CodexActiveSessionsModel.selectRoundRobinKeys(
             sortedKeys: candidates,
             start: itermProbeRoundRobinCursor,
-            budget: budget
+            budget: budgetStep.budget
         )
-        itermProbeRoundRobinCursor = selection.nextCursor
-        return Set(selection.selected)
+        return ITermProbePlan(
+            presenceKeys: Set(selection.selected),
+            nextResumeBudgetIndex: budgetStep.nextResumeIndex,
+            nextRoundRobinCursor: selection.nextCursor,
+            cadenceGeneration: probeCadenceGeneration,
+            fulfillsFullProbeRequest: false
+        )
     }
 
     // MARK: - iTerm batch probe (ported from captureBatchedITermProbeResults)
 
     private func captureBatchedITermProbeResults(generation: UInt64,
                                                  for targets: [CodexActiveSessionsModel.ITermProbeTarget],
-                                                 timeout: TimeInterval) async -> [String: CodexActiveSessionsModel.ITermProbeResult] {
-        guard !targets.isEmpty else { return [:] }
+                                                 timeout: TimeInterval) async -> ITermBatchProbeOutcome? {
+        guard !pauseRefreshForActiveScroll() else { return nil }
+        guard !targets.isEmpty else { return .notRequested }
 
         let rowSeparator = String(UnicodeScalar(0x1E)!)
         let fieldSeparator = String(UnicodeScalar(0x1F)!)
@@ -1596,16 +1871,28 @@ actor PresenceEngine {
             arguments: arguments,
             timeout: timeout
         ) else {
-            return [:]
+            guard isCurrentRefreshGeneration(generation) else {
+                markStaleRefreshDrop()
+                return nil
+            }
+            guard !pauseRefreshForActiveScroll() else { return nil }
+            return .failed
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
 
         let raw = String(decoding: out, as: UTF8.self)
-        return CodexActiveSessionsModel.parseBatchedITermProbeOutput(raw, rowSeparator: rowSeparator, fieldSeparator: fieldSeparator)
+        return .completed(CodexActiveSessionsModel.parseBatchedITermProbeOutput(
+            raw,
+            rowSeparator: rowSeparator,
+            fieldSeparator: fieldSeparator
+        ))
     }
 
     // MARK: - iTerm inventory (ported from loadITermSessions instance variant)
 
-    private func loadITermSessions(generation: UInt64, timeout: TimeInterval) async -> [CodexActiveSessionsModel.ITermSessionInfo] {
+    private func loadITermSessions(generation: UInt64,
+                                   timeout: TimeInterval) async -> [CodexActiveSessionsModel.ITermSessionInfo]? {
+        guard !pauseRefreshForActiveScroll() else { return nil }
         let scriptLines = [
             "set outRows to {}",
             "set sep to (ASCII character 9)",
@@ -1641,6 +1928,7 @@ actor PresenceEngine {
         ) else {
             return []
         }
+        guard !pauseRefreshForActiveScroll() else { return nil }
         return CodexActiveSessionsModel.parseITermSessionListOutput(String(decoding: out, as: UTF8.self))
     }
 }
@@ -1785,13 +2073,21 @@ actor RealProbeRunner: ProbeRunner {
     func run(kind: PresenceEngine.ManagedProbeKind,
              executable: URL,
              arguments: [String],
-             timeout: TimeInterval) async -> Data? {
+             timeout: TimeInterval,
+             shouldStart: @escaping @Sendable () -> Bool) async -> Data? {
+        guard shouldStart() else { return nil }
         let command = ManagedProbeCommand(executable: executable, arguments: arguments)
         if let existing = inFlightCommands[kind] {
             existing.terminate()
         }
         inFlightCommands[kind] = command
 
+        guard shouldStart() else {
+            if inFlightCommands[kind]?.id == command.id {
+                inFlightCommands.removeValue(forKey: kind)
+            }
+            return nil
+        }
         do {
             try command.start()
         } catch {
@@ -1806,25 +2102,41 @@ actor RealProbeRunner: ProbeRunner {
         let waitResult = await withTaskCancellationHandler {
             await self.waitForExit(command.process, timeout: timeout)
         } onCancel: { [weak self] in
-            Task { await self?.cancel(kind: kind) }
+            Task { await self?.cancel(kind: kind, commandID: command.id) }
         }
         command.process.terminationHandler = nil
         let timedOut = waitResult == .timedOut
         if timedOut {
-            await cancel(kind: kind)
+            cancel(kind: kind, commandID: command.id)
         }
+        let exitedSuccessfully = waitResult == .exited
+            && command.process.terminationReason == .exit
+            && command.process.terminationStatus == 0
         let wasCancelled = Task.isCancelled
         let data = await drainedOutput
         let stillOwned = inFlightCommands[kind]?.id == command.id
         if inFlightCommands[kind]?.id == command.id {
             inFlightCommands.removeValue(forKey: kind)
         }
-        if wasCancelled || timedOut || !stillOwned { return nil }
+        let acceptsPartialLsofOutput = executable.lastPathComponent == "lsof"
+            && waitResult == .exited
+            && command.process.terminationReason == .exit
+            && command.process.terminationStatus == 1
+            && !data.isEmpty
+        if wasCancelled || timedOut || !stillOwned || (!exitedSuccessfully && !acceptsPartialLsofOutput) {
+            return nil
+        }
         return data
     }
 
     func cancel(kind: PresenceEngine.ManagedProbeKind) async {
         guard let command = inFlightCommands.removeValue(forKey: kind) else { return }
+        command.terminate()
+    }
+
+    private func cancel(kind: PresenceEngine.ManagedProbeKind, commandID: UUID) {
+        guard let command = inFlightCommands[kind], command.id == commandID else { return }
+        inFlightCommands.removeValue(forKey: kind)
         command.terminate()
     }
 

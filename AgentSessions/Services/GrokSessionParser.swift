@@ -79,11 +79,11 @@ enum GrokSessionParser {
         build(url: url, lineLimit: previewLineLimit, includeEvents: false, allowLargeFile: true)
     }
 
-    static func parseFileFull(at url: URL, allowLargeFile: Bool = false) -> Session? {
-        build(url: url, lineLimit: nil, includeEvents: true, allowLargeFile: allowLargeFile)
+    static func parseFileFull(at url: URL, allowLargeFile: Bool = false, forSearch: Bool = false) -> Session? {
+        build(url: url, lineLimit: nil, includeEvents: true, allowLargeFile: allowLargeFile, forSearch: forSearch)
     }
 
-    private static func build(url: URL, lineLimit: Int?, includeEvents: Bool, allowLargeFile: Bool) -> Session? {
+    private static func build(url: URL, lineLimit: Int?, includeEvents: Bool, allowLargeFile: Bool, forSearch: Bool = false) -> Session? {
         guard let id = GrokSessionDiscovery.sessionID(forTranscript: url) else { return nil }
 
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -113,7 +113,7 @@ enum GrokSessionParser {
                 firstPromptText = textContent(from: object["content"])
             }
 
-            let built = makeEvents(type: type, object: object, time: startTime, line: line, index: index)
+            let built = makeEvents(type: type, object: object, time: startTime, line: line, index: index, forSearch: forSearch)
             nonMetaCount += built.filter { $0.kind != .meta }.count
             commandCount += built.filter { $0.kind == .tool_call }.count
             if includeEvents { events.append(contentsOf: built) }
@@ -251,7 +251,7 @@ enum GrokSessionParser {
                                    object: [String: Any],
                                    time: Date?,
                                    line: String,
-                                   index: Int) -> [SessionEvent] {
+                                   index: Int, forSearch: Bool) -> [SessionEvent] {
         switch type {
         case "user":
             let text = textContent(from: object["content"])
@@ -302,7 +302,7 @@ enum GrokSessionParser {
             let kind = object["kind"] as? [String: Any]
             return [SessionEvent(id: eventID(lineIndex: index, suffix: "b"), timestamp: time, kind: .tool_call, role: "assistant", text: nil,
                                  toolName: kind?["tool_type"] as? String ?? "backend_tool",
-                                 toolInput: jsonString(kind?["action"]),
+                                 toolInput: jsonString(kind?["action"], forSearch: forSearch),
                                  toolOutput: nil,
                                  messageID: nil, parentID: nil, isDelta: false, rawJSON: line)]
 
@@ -342,12 +342,12 @@ enum GrokSessionParser {
         return joined.isEmpty ? nil : joined
     }
 
-    private static func jsonString(_ value: Any?) -> String? {
+    private static func jsonString(_ value: Any?, forSearch: Bool = false) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
         guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
         let byteCount = text.utf8.count
-        if byteCount > 32_768 {
+        if !forSearch && byteCount > 32_768 {
             return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
         return text

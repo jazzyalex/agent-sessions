@@ -416,16 +416,18 @@ struct FirstRunSetupView: View {
     // MARK: - Visibility filter (mirrors the session list filters)
 
     private func visibleCount(in sessions: [Session]) -> Int {
-        sessions.filter { isVisibleSession($0) }.count
+        let isClaudeProbe = !showSystemProbeSessions && sessions.contains { $0.source == .claude }
+            ? ClaudeProbeConfig.makeSessionClassifier() : nil
+        return sessions.lazy.filter { isVisibleSession($0, isClaudeProbe: isClaudeProbe) }.count
     }
 
-    private func isVisibleSession(_ session: Session) -> Bool {
+    private func isVisibleSession(_ session: Session, isClaudeProbe: ((Session) -> Bool)?) -> Bool {
         if !showSystemProbeSessions {
             switch session.source {
             case .codex:
                 if CodexProbeConfig.isProbeSession(session) { return false }
             case .claude:
-                if ClaudeProbeConfig.isProbeSession(session) { return false }
+                if isClaudeProbe?(session) == true { return false }
             default:
                 break
             }

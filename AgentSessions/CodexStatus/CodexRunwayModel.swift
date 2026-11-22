@@ -45,14 +45,34 @@ struct RunwayFileSignature: Hashable, Sendable {
 /// recomputed by the caller each cycle from the cached artifact, so state still
 /// advances as `now` moves with the disk unchanged.
 final class RunwayFileParseCache<Value>: @unchecked Sendable {
+    private struct FileRevision: Hashable {
+        let path: String
+        let signature: RunwayFileSignature
+    }
+
+    private final class PendingParse {
+        let completion = DispatchGroup()
+        var result: Value?
+
+        init() { completion.enter() }
+    }
+
     private let lock = NSLock()
+    private let coalescesConcurrentParses: Bool
     private var entries: [String: (signature: RunwayFileSignature, value: Value)] = [:]
+    private var pendingParses: [FileRevision: PendingParse] = [:]
+    private var latestParseByPath: [String: PendingParse] = [:]
 
     #if DEBUG
     /// Counts `parse` invocations (cache misses). Tests assert this does not
     /// advance on a second scan of unchanged files.
     private(set) var missCount = 0
     #endif
+
+    /// Enable only when all consumers parse the same byte range for a revision.
+    init(coalescesConcurrentParses: Bool = false) {
+        self.coalescesConcurrentParses = coalescesConcurrentParses
+    }
 
     /// Cached value for `path` when its signature is unchanged; otherwise runs
     /// `parse`, stores, and returns it. `signature` comes from the caller's
@@ -64,17 +84,45 @@ final class RunwayFileParseCache<Value>: @unchecked Sendable {
             lock.unlock()
             return value
         }
+        let revision = FileRevision(path: path, signature: signature)
+        let pending: PendingParse?
+        if coalescesConcurrentParses {
+            if let existing = pendingParses[revision] {
+                lock.unlock()
+                existing.completion.wait()
+                // Completion is signaled only after the result is stored.
+                lock.lock()
+                defer { lock.unlock() }
+                return existing.result!
+            }
+            let reservation = PendingParse()
+            pendingParses[revision] = reservation
+            latestParseByPath[path] = reservation
+            pending = reservation
+        } else {
+            pending = nil
+        }
         lock.unlock()
-        // Parse outside the lock — file IO must not serialize the whole cache.
-        // A concurrent miss on the same path simply parses twice and stores the
-        // same value (last writer wins); the artifact is a pure function of bytes.
+        // Other paths and revisions can parse while the lock is released.
         let value = parse()
         lock.lock()
-        entries[path] = (signature, value)
+        if let pending {
+            // An older read can finish late. Its callers still get their
+            // result, while the cache keeps the newer requested revision.
+            if latestParseByPath[path] === pending {
+                entries[path] = (signature, value)
+                latestParseByPath.removeValue(forKey: path)
+            }
+            pending.result = value
+            pendingParses.removeValue(forKey: revision)
+        } else {
+            entries[path] = (signature, value)
+        }
         #if DEBUG
         missCount += 1
         #endif
         lock.unlock()
+        pending?.completion.leave()
         return value
     }
 
@@ -608,18 +656,21 @@ enum CodexRunwaySnapshotLoader {
             DispatchQueue.global(qos: .utility).async {
                 let needsWeeklyHistory = request.weeklyResetAt != nil
                     || request.baseline.rateUnit == .weeklyPercentPerHour
-                let sessionScan = CodexRunwayRecentSessionScanner.scan(
+                let recentFiles = CodexRunwayRecentSessionScanner.collectRecentFiles(
                     root: request.recentSessionsRoot,
+                    now: request.now
+                )
+                let sessionScan = CodexRunwayRecentSessionScanner.scan(
+                    files: recentFiles,
                     now: request.now,
                     activeSampleAge: CodexRunwayRecentSessionScanner.maximumActiveSampleAge,
-                    completionGrace: CodexRunwayRecentSessionScanner.maximumActiveSampleAge,
-                    pruneCache: !needsWeeklyHistory
+                    completionGrace: CodexRunwayRecentSessionScanner.maximumActiveSampleAge
                 )
                 // Weekly accounting needs old in-window files; the displayed
                 // runway must still contain only currently active sessions.
                 let ledgerSessionScan = !needsWeeklyHistory ? sessionScan
                     : CodexRunwayRecentSessionScanner.scan(
-                        root: request.recentSessionsRoot,
+                        files: recentFiles,
                         now: request.now,
                         activeSampleAge: CodexRunwayTokenActivityParser.weeklyWindow,
                         completionGrace: CodexRunwayTokenActivityParser.weeklyWindow
@@ -1894,14 +1945,27 @@ enum CodexRunwayRecentSessionScanner {
                      now: Date = Date(),
                      activeSampleAge: TimeInterval = maximumActiveSampleAge,
                      completionGrace: TimeInterval = maximumGoalCompletionGrace,
-                     pruneCache: Bool = true,
                      fileManager: FileManager = .default) -> CodexRunwayRecentSessionScan {
+        scan(files: collectRecentFiles(root: root, now: now, fileManager: fileManager),
+             now: now, activeSampleAge: activeSampleAge, completionGrace: completionGrace)
+    }
+
+    fileprivate struct RecentFiles {
+        let entries: [(url: URL, signature: RunwayFileSignature)]
+        let threadNames: [String: String]
+        let coverageComplete: Bool
+    }
+
+    /// Both activity windows in a poll use the same physical file inventory.
+    fileprivate static func collectRecentFiles(root: URL?,
+                                               now: Date,
+                                               fileManager: FileManager = .default) -> RecentFiles {
         let rootURL = root ?? defaultRoot()
         let cutoff = now.addingTimeInterval(-maximumFileAge)
         var candidates: [(url: URL, modifiedAt: Date, signature: RunwayFileSignature)] = []
 
         guard fileManager.fileExists(atPath: rootURL.path) else {
-            return CodexRunwayRecentSessionScan(identities: [], coverageComplete: false)
+            return RecentFiles(entries: [], threadNames: [:], coverageComplete: false)
         }
         let roots = rootURL.lastPathComponent == "sessions"
             ? [rootURL, rootURL.deletingLastPathComponent()
@@ -1937,27 +2001,34 @@ enum CodexRunwayRecentSessionScanner {
         let readEntries = candidates
             .sorted { $0.modifiedAt > $1.modifiedAt }
             .prefix(maximumMetadataFiles)
-        // Unchanged files reuse their head/tail parse; the now-dependent active
-        // window is recomputed below. Prune to the files actually read this cycle.
-        if pruneCache {
-            fileCache.retain(paths: Set(readEntries.map { $0.url.path }))
-        }
-        let recentCandidates = readEntries
+        fileCache.retain(paths: Set(readEntries.map { $0.url.path }))
+        return RecentFiles(
+            entries: readEntries.map { ($0.url, $0.signature) },
+            threadNames: threadNames,
+            coverageComplete: rootsReadComplete && candidates.count <= maximumMetadataFiles
+        )
+    }
+
+    fileprivate static func scan(files: RecentFiles,
+                                 now: Date,
+                                 activeSampleAge: TimeInterval,
+                                 completionGrace: TimeInterval) -> CodexRunwayRecentSessionScan {
+        // Both activity windows reuse the cached, time-independent head/tail parse.
+        let recentCandidates = files.entries
             .compactMap {
                 candidate(
                     for: $0.url,
                     now: now,
                     activeSampleAge: activeSampleAge,
                     completionGrace: completionGrace,
-                    threadNames: threadNames,
+                    threadNames: files.threadNames,
                     signature: $0.signature
                 )
             }
         let merged = mergeParentCandidates(recentCandidates)
         return CodexRunwayRecentSessionScan(
             identities: Array(merged.prefix(maximumFiles)),
-            coverageComplete: rootsReadComplete && candidates.count <= maximumMetadataFiles
-                && merged.count <= maximumFiles
+            coverageComplete: files.coverageComplete && merged.count <= maximumFiles
         )
     }
 
@@ -2409,6 +2480,7 @@ private final class CodexWeeklyHistoryStore: @unchecked Sendable {
 }
 
 enum CodexRunwayTokenActivityParser {
+    private static let durableAccountIDFields = [Data("account_id".utf8), Data("accountId".utf8)]
     /// Upper bound on the backward hunt for a `turn_context`. Past this we give up
     /// and the session goes unpriced (dropped from $, still shown in tk/h) rather
     /// than risk pricing it at a guessed model.
@@ -3309,8 +3381,7 @@ enum CodexRunwayTokenActivityParser {
         var coverageComplete = true
         for path in identities.flatMap(\.logPaths) where !seen.contains(path) {
             seen.insert(path)
-            let actualAccountHash = transcriptAccountHash(fromLogPath: path)
-            if let expectedAccountHash, let actualAccountHash,
+            if let expectedAccountHash, let actualAccountHash = transcriptAccountHash(fromLogPath: path),
                actualAccountHash != expectedAccountHash {
                 continue
             }
@@ -3379,7 +3450,8 @@ enum CodexRunwayTokenActivityParser {
     private static func transcriptAccountHash(fromLogPath path: String) -> String? {
         // Durable session metadata is emitted at the start of a rollout. Keep the
         // hot five-second ledger scan bounded even for 100+ MB transcripts.
-        guard let data = CodexRunwayRateLimitParser.headData(path: path, maxBytes: 256 * 1024) else { return nil }
+        guard let data = CodexRunwayRateLimitParser.headData(path: path, maxBytes: 256 * 1024),
+              durableAccountIDFields.contains(where: { data.range(of: $0) != nil }) else { return nil }
         var identity = CodexTranscriptAccountIdentity()
         for line in String(decoding: data, as: UTF8.self)
             .split(separator: "\n", omittingEmptySubsequences: true) {

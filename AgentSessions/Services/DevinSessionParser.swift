@@ -20,7 +20,8 @@ import Foundation
 enum DevinSessionParser {
     /// Builds the events for one node. A single assistant node can yield an
     /// assistant reply, a thinking block, and several tool calls.
-    static func events(fromChatMessage json: String, nodeID: Int64, time: Date?) -> [SessionEvent] {
+    static func events(fromChatMessage json: String, nodeID: Int64, time: Date?,
+                       forSearch: Bool = false) -> [SessionEvent] {
         guard let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return [meta(nodeID: nodeID, suffix: "raw", role: nil, text: nil, time: time, raw: json)]
@@ -58,7 +59,7 @@ enum DevinSessionParser {
             for (index, call) in (object["tool_calls"] as? [[String: Any]] ?? []).enumerated() {
                 out.append(SessionEvent(id: "\(nodeID)-t\(index)", timestamp: time, kind: .tool_call, role: role, text: nil,
                                         toolName: call["name"] as? String,
-                                        toolInput: jsonString(call["arguments"]),
+                                        toolInput: jsonString(call["arguments"], forSearch: forSearch),
                                         toolOutput: nil,
                                         toolCallID: ToolCallID.from(call["id"]),
                                         messageID: call["id"] as? String,
@@ -120,12 +121,12 @@ enum DevinSessionParser {
 
     /// `tool_calls[].arguments` arrives as a JSON object. Serialised with sorted
     /// keys so the rendered form is stable between runs.
-    private static func jsonString(_ value: Any?) -> String? {
+    private static func jsonString(_ value: Any?, forSearch: Bool = false) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
         guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
         let byteCount = text.utf8.count
-        if byteCount > 32_768 {
+        if !forSearch, byteCount > 32_768 {
             return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
         return text

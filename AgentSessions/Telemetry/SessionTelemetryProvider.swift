@@ -53,8 +53,13 @@ struct SessionTelemetryProviderScan: Sendable {
 /// keeps the engine provider-neutral: adding a parser changes one source descriptor
 /// and one provider, not a second engine switch.
 protocol SessionTelemetryProvider {
+    mutating func prepare(for url: URL)
     mutating func consume(line: String, index: Int)
     func finish() -> SessionTelemetryProviderResult
+}
+
+extension SessionTelemetryProvider {
+    mutating func prepare(for url: URL) {}
 }
 
 struct CodexTelemetryProvider: SessionTelemetryProvider {
@@ -74,6 +79,10 @@ struct CodexTelemetryProvider: SessionTelemetryProvider {
 
 struct ClaudeTelemetryProvider: SessionTelemetryProvider {
     private var accumulator = ClaudeTelemetryAccumulator()
+
+    mutating func prepare(for url: URL) {
+        accumulator = ClaudeTelemetryAccumulator(subagentID: ClaudeSessionParser.subagentID(for: url))
+    }
 
     mutating func consume(line: String, index: Int) {
         accumulator.consume(line: line, index: index)

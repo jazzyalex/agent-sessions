@@ -213,6 +213,29 @@ final class HeadlessAgentPresenceTests: XCTestCase {
 
     // MARK: - Headless PID selection
 
+    func testAgentProcessMatchesPreserveTerminalAndBundleRules() {
+        let rows = [
+            CodexActiveSessionsModel.PSCommandInfo(pid: 101, tty: nil, command: "/opt/bin/codex exec"),
+            .init(pid: 102, tty: "ttys001", command: "/opt/bin/codex"),
+            .init(pid: 103, tty: nil, command: "/Applications/ChatGPT.app/Contents/Resources/codex app-server"),
+            .init(pid: 104, tty: nil, command: #"/bin/zsh -lc "/opt/bin/claude -p""#),
+            .init(pid: 105, tty: "ttys001", command: "/opt/bin/claude-code"),
+            .init(pid: 106, tty: nil, command: "/Applications/Claude.app/Contents/MacOS/Claude"),
+            .init(pid: 107, tty: nil, command: "/usr/bin/env PATH=/opt/bin /opt/bin/opencode run"),
+            .init(pid: 108, tty: "ttys002", command: "/opt/bin/opencode"),
+            .init(pid: 109, tty: nil, command: "/opt/bin/agy"),
+            .init(pid: 110, tty: "ttys002", command: "/opt/bin/antigravity"),
+            .init(pid: 111, tty: "ttys002", command: "/bin/echo codex claude opencode agy"),
+        ]
+        let matches = CodexActiveSessionsModel.agentProcessMatches(from: rows)
+        XCTAssertEqual(matches.headlessCodex, [101])
+        XCTAssertEqual(matches.claude, [104, 105])
+        XCTAssertEqual(matches.headlessClaude, [104])
+        XCTAssertEqual(matches.openCode, [107, 108])
+        XCTAssertEqual(matches.headlessOpenCode, [107])
+        XCTAssertEqual(matches.antigravity, [110])
+    }
+
     func testHeadlessAgentPIDs_selectsNoTTYCLIRunsOnly() {
         let infos = [
             CodexActiveSessionsModel.PSCommandInfo(pid: 7272, tty: nil, command: headlessCommand),

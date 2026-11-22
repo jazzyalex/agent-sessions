@@ -64,22 +64,17 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
         XCTAssertFalse(beforeLivePoll.contains("activeMembership"))
     }
 
-    func testCollapseAllPreservesOffScopeCollapsedParents() {
-        let result = UnifiedHierarchyCommandPolicy.collapsedParentsAfterCollapseAll(
-            existing: ["off-scope-parent"],
-            visibleParentIDs: ["visible-parent"]
-        )
-
-        XCTAssertEqual(result, ["off-scope-parent", "visible-parent"])
+    func testCollapseAllIncludesNewGroupsWithoutReplacingStandardFolds() {
+        let standard: Set<String> = ["manually-collapsed"]
+        XCTAssertTrue(SessionGroupFolding.collapsed.isCollapsed("new-group", standard: standard))
+        XCTAssertFalse(SessionGroupFolding.standard.isCollapsed("new-group", standard: standard))
+        XCTAssertTrue(SessionGroupFolding.standard.isCollapsed("manually-collapsed", standard: standard))
     }
 
-    func testExpandAllOnlyClearsVisibleCollapsedParents() {
-        let result = UnifiedHierarchyCommandPolicy.collapsedParentsAfterExpandAll(
-            existing: ["off-scope-parent", "visible-parent"],
-            visibleParentIDs: ["visible-parent"]
-        )
-
-        XCTAssertEqual(result, ["off-scope-parent"])
+    func testExpandAllLeavesStandardFoldsAvailableForRestoration() {
+        let standard: Set<String> = ["manually-collapsed"]
+        XCTAssertFalse(SessionGroupFolding.expanded.isCollapsed("manually-collapsed", standard: standard))
+        XCTAssertTrue(SessionGroupFolding.standard.isCollapsed("manually-collapsed", standard: standard))
     }
 
     func testCollapseAllPromotesSelectedChildToVisibleParent() {
@@ -464,11 +459,13 @@ final class TranscriptSessionRenderKeyTests: XCTestCase {
 }
 
 final class SessionEquatablePayloadTests: XCTestCase {
-    func testSessionEqualityUsesLightweightEventEdgesNotTranscriptText() {
+    func testSessionEqualityUsesConstantTimeContentRevisionForChangedPayload() {
         let base = makeSession(text: String(repeating: "a", count: 120_000))
         let updatedText = makeSession(text: String(repeating: "b", count: 120_000))
 
-        XCTAssertEqual(base, updatedText)
+        XCTAssertNotEqual(base, updatedText)
+        let samePublication = base
+        XCTAssertEqual(base, samePublication)
     }
 
     func testSessionEqualityChangesWhenEventEdgesChange() {
