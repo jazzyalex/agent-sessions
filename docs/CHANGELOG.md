@@ -4,8 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fast transcript scrolling defers directory and Presence scans until wheel, keyboard, or scrollbar input settles, then coalesces the delayed refresh. Large Codex cold opens reliably replace their provisional tail with the full transcript. Jump controls keep a stable view hierarchy as their visibility changes.
+- Fast transcript scrolling does less work updating the tool row under the pointer. Copy and Raw reappear when scrolling settles.
+- Live session polling matches agent processes in one pass. Claude keeps CLI and Desktop scan caches separate and shares overlapping reads. Codex skips decoding log headers without account metadata.
+- Scrolling reuses cleaned session titles. Live transcript updates do less work on long records and image attachments, and Codex Runway reads its session folders once per refresh.
+- Sessions window menu actions keep a stable focus binding while switching transcripts.
+- Claude session refreshes resolve the usage-probe folder once per batch, reducing disk work while browsing sessions.
+- Background search indexing stops at the first unreadable record in a Codex or Claude transcript and waits for changes before retrying that transcript again in the same app run.
+- Weekly quota estimates and session search indexing do less transcript parsing during startup. A Claude quota history scan stops when its calibration scope changes.
+- Small variations in the reported quota reset time no longer trigger repeat history scans.
+- Search index migrations skip current sessions that share a database with older entries.
+- The Sessions filter summary omits agents disabled in Settings. Transcript filter controls reuse the displayed session to avoid repeated lookups during layout.
+- Session search and filters now stay inside the session-list pane. Search status sits below the controls, and Resume keeps a readable label beside its menu.
+- See which filters are narrowing session search and restore hidden projects from View. Search shows matches so far and puts detailed coverage behind a menu. Resume has one button with its destination choices, and Saved, Archived, and group folding take less toolbar space.
+- The website's mobile header links directly to The Rollout, Guides, Bench, and GitHub. The README summarizes the three latest releases and links to the full notes.
+- The README puts the first search next to installation. The website has a phone-sized app preview, an on-demand notch demo, and a privacy note. Both pages show the same resume support and verification details.
+- Hide a project from the session list and search with **Hide Project** in the session menu. Undo immediately or unhide it from the session list toolbar. Contributed by @buildfolk in #90.
 - Session Info estimates costs for GPT-6.2 Astra and Sol, Claude Fable and Mythos 5.2, MAI Code 2 Flash, and two verified free routes. Antigravity estimates use the model recorded on each response when available.
 - Kimi explains when a session has incomplete cache-read usage instead of describing the record as malformed.
+
+- List search supports complete session IDs and consistent terms, phrases, prefixes and Boolean queries. Return verifies eligible source sessions with explicit complete, incomplete and unresolved counts; Escape cancels without discarding results.
+- Search indexing and verification use bounded source readers, preserve structured tool fields, and rebuild older ordinary and Tool I/O indexes without waiting for content cooldowns.
+- Claude web credentials load asynchronously; changing or removing a credential invalidates older requests, cached responses and usage publications.
+- Session presentation shares markers, message groups, timing and navigation counts off the main thread, with revision checks for same-size edits and provisional-to-full refreshes. Large-session timing still awaits profiling.
+
+- The Session transcript colors supported fenced code, interpreter heredocs, and verified source text in expanded tool results, including source lines in git blame output.
+- Blame highlighting stays plain for unproven multiline commands or reads of different files, preventing wrong-language colors and comment state leaking across files.
+- Claude sub-sessions show their task name and recorded thinking effort. Session info counts the sub-session's own usage separately from work it delegates.
 
 ## [6.5] - 2026-11-09
 

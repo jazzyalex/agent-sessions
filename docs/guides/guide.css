@@ -105,6 +105,20 @@ a:hover { text-decoration: underline; }
 .nav-star { font-variant-numeric: tabular-nums; }
 .gh-star-icon { color: #f5b301; }
 
+@media (max-width: 560px) {
+  .nav-inner {
+    height: auto;
+    padding: 0 16px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .nav-brand { align-self: flex-start; min-height: 44px; }
+  .nav-links { justify-content: space-between; gap: 0; }
+  .nav-links a { display: flex; align-items: center; min-height: 44px; }
+  .nav-star { display: none !important; }
+}
+
 /* ---------- Buttons ---------- */
 .button-row {
   display: flex;

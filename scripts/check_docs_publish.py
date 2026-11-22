@@ -155,12 +155,18 @@ def check_marketing_contract():
     if not meta_match or released_meta_phrase not in meta_match.group(1):
         problems.append("docs/index.html primary meta description must use the released source count.")
 
-    if "Cline CLI and Cline Desktop support" not in readme:
-        problems.append("README.md must present Cline CLI and Desktop as released in 5.4.")
-    if "Cline<em>new in 5.4</em>" not in homepage or "Desktop &middot; CLI" not in homepage:
+    if "| Cline | Desktop, CLI |" not in readme:
+        problems.append("README.md must list released Cline Desktop and CLI support.")
+    if '<td class="name">Cline</td><td class="surf">Desktop &middot; CLI</td>' not in homepage:
         problems.append("docs/index.html must list released Cline Desktop and CLI support.")
-    if "DeepSeek Harness<em>new in 5.5</em>" not in homepage:
-        problems.append("docs/index.html must list DeepSeek Harness as new in 5.5.")
+    if '<td class="name">DeepSeek Harness</td><td class="surf">CLI</td>' not in homepage:
+        problems.append("docs/index.html must list released DeepSeek Harness support.")
+
+    qwen_resume = "Active sessions (end-to-end unverified)"
+    if f"| Qwen Code | CLI | {qwen_resume} |" not in readme:
+        problems.append("README.md must describe the scope and verification of Qwen resume.")
+    if f'<td class="name">Qwen Code</td><td class="surf">CLI</td><td class="cap">{qwen_resume}</td>' not in homepage:
+        problems.append("docs/index.html must describe the scope and verification of Qwen resume.")
 
     source_rows = re.findall(
         r'<tr(?! class="addrow")[^>]*><td class="name">', homepage

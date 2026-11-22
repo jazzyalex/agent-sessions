@@ -29,6 +29,11 @@ the repository or a real session as the preflight input.
 Every source is merged as ordinary reviewed code. Agent Sessions does not download source
 plugins, execute contributed agent code, or infer support from an installed binary.
 
+DeepSeek Harness is an independent integration. Its decoder uses selected upstream
+Zstandard 1.5.7 sources under the BSD license. The
+[vendored decoder README](../ThirdParty/DSHZstd/README.md) records the source archive,
+checksum, license, and offline verification command.
+
 ### Recently added evidence: Cline
 
 Among the two locally reviewed new candidates on 2026-08-17, [Cline](https://github.com/cline/cline)

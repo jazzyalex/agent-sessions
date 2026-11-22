@@ -57,7 +57,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 
 ## Public Copy Update (Required for Releases)
 
-- Update `README.md` with a short **TL;DR** and major highlights under “What’s New in X.Y”.
+- Add one linked highlight for the new version under “What's new” in `README.md`. Keep the three most recent releases.
 - Ensure README feature copy matches current naming (for example, **Session view** instead of Color view) and agent list.
 - Update `docs/index.html` feature/hero copy to reflect major changes and avoid outdated references.
 - Do not add a versioned `What's New in X.Y` section to `docs/index.html` (GitHub Pages main page).

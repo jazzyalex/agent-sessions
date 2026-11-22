@@ -68,3 +68,50 @@ article.post img {
   margin-top: 10px;
   max-width: 720px;
 }
+
+.post-export-story {
+  font-size: 18px;
+  max-width: 760px;
+}
+
+.post-export-story .post-export-intro {
+  font-size: clamp(20px, 3vw, 23px);
+  line-height: 1.5;
+  margin: 26px 0;
+}
+
+.post-export-story .post-export-sample {
+  margin: 24px 0 30px;
+}
+
+.post-export-story pre {
+  margin: 0;
+  padding: clamp(12px, 3vw, 20px);
+  font-size: 15px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.post-export-story mark {
+  background: color-mix(in srgb, #bf8700 20%, var(--bg-elev));
+  color: var(--ink);
+}
+
+.post-report-template {
+  margin: 20px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--hair-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+.post-report-template summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.post-export-story .post-report-template pre {
+  margin-top: 12px;
+  background: var(--bg-sunken);
+}

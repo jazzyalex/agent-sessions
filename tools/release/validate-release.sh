@@ -110,6 +110,11 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
   error "Version '$VERSION' does not match expected format (X.Y or X.Y.Z)"
 fi
 
+MAJOR_MINOR="$VERSION"
+if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\.[0-9]+$ ]]; then
+  MAJOR_MINOR="${BASH_REMATCH[1]}"
+fi
+
 echo ""
 
 # =============================================================================
@@ -135,42 +140,20 @@ else
     error "README download button text missing or wrong version"
   fi
 
-  # Check "What's New" section
-  # Extract major.minor for section check (2.9.1 -> 2.9, 2.9 -> 2.9)
-  if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\.[0-9]+$ ]]; then
-    # Three-part version: extract first two parts
-    MAJOR_MINOR="${BASH_REMATCH[1]}"
+  # Read the highlights from the single "What's new" section.
+  RELEASE_HIGHLIGHTS=$(awk -v heading="## What's new" '
+    $0 == heading { in_section = 1; next }
+    in_section && /^## / { exit }
+    in_section && /^- / { print }
+  ' "$README")
+  LATEST_RELEASE_LINK="- [${VERSION}](https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}) "
+  if [[ "${RELEASE_HIGHLIGHTS%%$'\n'*}" == "$LATEST_RELEASE_LINK"* ]]; then
+    pass "README 'What's new' leads with the v${VERSION} release"
   else
-    # Two-part version: use as-is
-    MAJOR_MINOR="$VERSION"
+    error "README 'What's new' must lead with a highlight linked to v${VERSION}"
   fi
-  if grep -q "## What's New in ${MAJOR_MINOR}" "$README"; then
-    pass "README has 'What's New in ${MAJOR_MINOR}' section"
-  else
-    error "README missing 'What's New in ${MAJOR_MINOR}' section"
-  fi
-
-  # Check for version gaps in "What's New" sections
-  # Extract all "What's New in X.Y" versions
-  WHATS_NEW_VERSIONS=$(grep -oE "## What's New in [0-9]+\.[0-9]+" "$README" | grep -oE "[0-9]+\.[0-9]+" | sort -V)
-  if [[ -n "$WHATS_NEW_VERSIONS" ]]; then
-    PREV_MINOR=""
-    for v in $WHATS_NEW_VERSIONS; do
-      if [[ -n "$PREV_MINOR" ]]; then
-        PREV_MAJOR=$(echo "$PREV_MINOR" | cut -d. -f1)
-        PREV_MIN=$(echo "$PREV_MINOR" | cut -d. -f2)
-        CURR_MAJOR=$(echo "$v" | cut -d. -f1)
-        CURR_MIN=$(echo "$v" | cut -d. -f2)
-
-        if [[ "$PREV_MAJOR" == "$CURR_MAJOR" ]]; then
-          EXPECTED_MIN=$((PREV_MIN + 1))
-          if [[ "$CURR_MIN" -gt "$EXPECTED_MIN" ]]; then
-            warn "README may be missing 'What's New' sections between ${PREV_MINOR} and ${v}"
-          fi
-        fi
-      fi
-      PREV_MINOR="$v"
-    done
+  if [[ $(printf '%s\n' "$RELEASE_HIGHLIGHTS" | awk 'NF { count++ } END { print count + 0 }') -gt 3 ]]; then
+    error "README 'What's new' exceeds three release highlights"
   fi
 
   # Check agent mentions in overview

@@ -345,7 +345,8 @@ Complete this checklist **before** running the deployment script. Answer all que
 - [ ] README.md and docs/index.html reviewed and updated:
   - Download button/link points to `{VERSION}` and visible label reads `Download Agent Sessions {VERSION}`
   - File name references use `AgentSessions-{VERSION}.dmg`
-  - No release notes added to README or website (keep feature overview current; detailed notes live in `docs/CHANGELOG.md`)
+  - README “What's new” lists the three most recent releases with one linked highlight per version
+  - Detailed notes come from `docs/CHANGELOG.md` and are published to GitHub Releases
   - Gemini remains noted as read-only; Favorites listed if present
   - Product Hunt badge aligns with the social buttons row and matches button height
 - [ ] All code changes committed and pushed to main
@@ -530,8 +531,8 @@ git status --porcelain
 - Uncommitted documentation changes → Commit and push
 
 ## Website/README Content Guidelines (Mandatory)
-- Do not add release notes to README or the website. Keep detailed changes in `docs/CHANGELOG.md`.
-- Keep features current. `README.md` may include a versioned "What's New" summary, but `docs/index.html` should not include a versioned "What's New" section.
+- Keep one “What's new” section in `README.md`. Add a one-line highlight linked to the new GitHub release and drop the oldest entry after three.
+- Keep the website focused on current features and link to GitHub Releases for release history. Write detailed changes in `docs/CHANGELOG.md`.
 - Always update:
   - The download URL to `v{VERSION}/AgentSessions-{VERSION}.dmg`
   - The visible label to `Download Agent Sessions {VERSION}`

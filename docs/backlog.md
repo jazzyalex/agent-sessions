@@ -1337,6 +1337,59 @@ time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`
 
 ## Transcript UI
 
+### Release scroll-performance preflight follow-ups
+> **partial** · sev: med · urg: high · verified 2026-11-20
+
+- **What:** the final Sol 6.2 High review found no remaining P0/P1 after the Codex tail-first ownership fix, but four lower-priority concurrency/performance gaps remain. A superseded provider worker can pass its lease check and later kick search or consume focused-reload intent after an `await`; focused monitoring records a file signature before hydration is accepted; search FileRefs resolve artifacts and stat every row on the main actor; and OpenCode SQLite can begin full hydration when scrolling resumes after its cheap revision probe.
+- **Where:** provider completion and idle cleanup are in `AgentSessions/Services/UnifiedSessionIndexer.swift:2070-2093` and `:2221-2279`; focused signature acknowledgement is at `:2644-2692`; main-actor FileRef construction and filesystem reads are at `:2336-2352` and `:2577-2618`; the missing second OpenCode scroll checkpoint is at `AgentSessions/Services/OpenCodeSessionIndexer.swift:362-411`. The Codex publication path also emits Swift 6 async-lock warnings at `AgentSessions/Services/SessionIndexer.swift:751-787`.
+- **Fix shape:** make lease validation and its side effects one main-actor transaction; retain a revision-specific focused reload until accepted or superseded; snapshot sessions/authority on main and construct FileRefs off-main; add a second quiet check before OpenCode SQLite hydration; replace async-context `NSCondition` calls with a scoped lock helper.
+- **Why deferred:** the owner set P0/P1 as the closure threshold for this pass. These P2/P3 items need their own race fixtures and a Release replay rather than another unbounded review/fix cycle.
+- **Risk if wrong:** a rare refresh interleaving can start redundant search work, consume a newer manual intent, or leave a focused transcript stale until another change. Main-thread stats and OpenCode hydration can still add CPU during a gesture.
+- **To close:** implement the four fixes, run the focused concurrency suite and full preflight suite, then repeat the 100-gesture Release Time Profiler replay. Recheck the previously measured 338.57 ms SwiftUI/AppKit layout stall with Hangs and record peak/p95 CPU, total/main-thread CPU, samples at or above 160%, and stalls over 250 ms before merging.
+
+### Session window becomes unresponsive during live syntax review
+> **open** · sev: high · urg: low · verified 2026-11-11
+
+- **Implementation (2026-11-11):** Shared off-main presentation bundles now own groups, filtered counts and timing; content revisions invalidate same-size changes and image mapping. Code and synthetic validation are recorded in [the implementation ledger](reviews/2026-11-10-search-responsiveness-implementation.md). The owner explicitly deferred live profiling; the 8,000-message cause and production improvement remain unproven.
+- **What:** the owner observed beachballs and inability to scroll the November 7 Session transcript in the fresh Debug build. PID 47916 reached 186.6% CPU, a 1.4 GB physical footprint, and a 2.2 GB peak while system CPU idle exceeded 50%.
+- **Owner follow-up:** the deployed release scrolls normally on the November 7 session, but opens the approximately 8,000-message session `01a0e10e-4ff2-7f80-9a41-65eb91364db4` slowly. The owner explicitly deferred this work to another session on November 10.
+- **Where:** [live review and profile evidence](reviews/2026-11-10-syntax-highlighting-live-review.md). The sampled main thread includes SwiftUI toolbar/layout and `UnifiedTranscriptView.roleOccurrenceCount` at `TranscriptPlainView.swift:1423`. Background discovery and search ingestion were active. The cause is unresolved.
+- **Why deferred:** owner request. Profiles and a standalone Release build are saved; the slow large-session opening interval still needs to be captured.
+- **Risk if wrong:** attributing the lag to one sampled stack could leave the actual trigger active.
+- **To close:** reproduce the same session and scroll/Find/fold interactions, identify the dominant work with repeated samples, fix the cause, and complete the live review in both appearances.
+
+### Claude cloud Keychain read can block the main thread
+> **open** · sev: high · urg: low · verified 2026-11-11
+
+- **Implementation (2026-11-11):** The credential service now owns physical Security work on a serial background queue; epoch/lease checks cover clients, usage persistence and UI delivery. Deterministic delayed-read and stale-owner tests are recorded in [the implementation ledger](reviews/2026-11-10-search-responsiveness-implementation.md). Real delayed-Keychain launch acceptance remains deferred.
+- **What:** the new standalone Release app stalled before window inspection. All 525 main-thread samples were blocked inside `SecItemCopyMatching` through the synchronous session-key provider. The wait later cleared. A concurrent usage refresh was also reading the Keychain.
+- **Where:** `AgentSessions/ClaudeCloud/ClaudeCloudSessionCatalog.swift:122` invokes the provider on the main actor. `AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeManualWebCookie.swift:114` calls the synchronous Security API. Profile is `/private/tmp/as-live-current-release-launch.sample.txt`.
+- **Fix shape:** move credential retrieval off the main actor, then apply catalog state on its actor. Recheck the enabled state after the asynchronous read.
+- **Why deferred:** the owner requested that responsiveness fixes move to another session.
+- **Risk if wrong:** moving catalog mutation across actors could introduce races or publish cloud rows after the feature is disabled.
+- **To close:** a delayed credential read permits main-thread UI work, disabling during that wait prevents a fetch, and the real app opens while the credential provider is delayed.
+
+### Known session ID cannot locate its session in list search
+> **open** · sev: med · urg: low · verified 2026-11-11
+
+- **Implementation (2026-11-11):** The normal search entry point now matches source-qualified own IDs and known provider ID hints before content-query parsing. Synthetic collision/identity coverage is recorded in [the implementation ledger](reviews/2026-11-10-search-responsiveness-implementation.md); the owner-visible live query remains deferred.
+- **What:** list search for `01a1b92f-e29b-7b82-964d-86140e9652fa` returned zero matches. Prompt-text search located the same session as “Review transcript readability plan”.
+- **Where:** `AgentSessions/Services/FilterEngine.swift:663` searches title and repository metadata without an explicit session-ID match. [Live evidence](reviews/2026-11-10-syntax-highlighting-live-review.md).
+- **Fix shape:** add an explicit session-ID lookup through the normal list-search entry point.
+- **Why deferred:** recorded during syntax review; the current focus is the unresponsive Session window.
+- **Risk if wrong:** adding identity matching only in the metadata fallback could leave an earlier indexed-candidate filter excluding the session.
+- **To close:** paste a complete known ID into list search and open the correct session.
+
+### Tool-output list search loses content and overstates deep-scan coverage
+> **open** · sev: med · urg: low · verified 2026-11-11
+
+- **Implementation (2026-11-11):** Return now verifies all eligible rows through bounded semantic scanners, including sampled hits; UI reports incomplete and unresolved coverage. Ordinary/Tool I/O formats are 6/2 and migration obligations bypass cooldowns. Provider and large-field fixtures are recorded in [the implementation ledger](reviews/2026-11-10-search-responsiveness-implementation.md); private-corpus profiling remains deferred.
+- **What:** the [tool-output search diagnosis](reviews/2026-11-10-tool-output-search.md) reproduces Claude output placeholders replacing source text in the index, sampled output recall gaps, and Return skipping indexed sessions under the default deep-scan setting. In-session Find can locate text that list search misses.
+- **Where:** `ToolTextBlockNormalizer.swift:212`, `SessionSearchTextBuilder.swift:273`, `SearchCoordinator.swift:947`, and the linked report's concrete database probes.
+- **Why deferred:** diagnosis is saved; a search-specific implementation and index migration need their own scoped change.
+- **Risk if wrong:** widening indexing or deep scanning without bounds could add large storage and CPU costs.
+- **To close:** correct the omitted-output fallback, align Return behavior and help with actual coverage, and verify exact output-only queries across the recorded source and size cases.
+
 ### Switching to Text or JSON view beachballs
 > **open** · sev: low · urg: low · verified 2026-11-09
 
