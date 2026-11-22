@@ -33,6 +33,22 @@ final class MessageOriginParserTests: XCTestCase {
         let event = try codex([text("hi")], kinds: ["user.text | x"])
         XCTAssertEqual(event.kind, .user); XCTAssertEqual(event.messageOrigin, .typed); XCTAssertEqual(event.text, "hi")
     }
+    // Codex Desktop 0.131 to 0.146 tagged user messages with only a turn id. With no item kinds
+    // to align, such a message reads like an untagged one instead of hidden context.
+    func testCodexTurnIDOnlyMetadataReadsLikeUntagged() throws {
+        func turnOnly(_ value: String) throws -> SessionEvent {
+            let payload: [String: Any] = ["type": "message", "role": "user", "content": [text(value)],
+                                          "internal_chat_message_metadata_passthrough": ["turn_id": "t1"]]
+            let data = try JSONSerialization.data(withJSONObject: ["type": "response_item", "payload": payload])
+            return SessionIndexer.parseLine(String(decoding: data, as: UTF8.self), eventID: UUID().uuidString).0
+        }
+        let prompt = try turnOnly("process the latest resumes")
+        XCTAssertEqual(prompt.kind, .user)
+        XCTAssertNil(prompt.messageOrigin)
+        let context = try turnOnly("<environment_context>workspace</environment_context>")
+        XCTAssertEqual(context.kind, .meta)
+        XCTAssertEqual(context.messageOrigin, .context(kinds: ["environment_context"]))
+    }
     func testCodexOpenPageIsContext() throws {
         XCTAssertEqual(try codex([text("page")], kinds: ["additional_content.codex_apps_open_page | x"]).messageOrigin, .context(kinds: ["additional_content.codex_apps_open_page"]))
     }

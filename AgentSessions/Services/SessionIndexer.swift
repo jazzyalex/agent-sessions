@@ -3164,7 +3164,9 @@ final class SessionIndexer: ObservableObject {
                 if type == "message", role == "user" {
                     let metadata = workingObj["internal_chat_message_metadata_passthrough"]
                         ?? obj["internal_chat_message_metadata_passthrough"]
-                    if let metadata {
+                    // Some Codex builds tag every message with only a turn id. Without item kinds
+                    // there is nothing to align, so such a message reads like an untagged one.
+                    if let metadata, (metadata as? [String: Any])?["content_item_kinds"] != nil {
                         let rawKinds = (metadata as? [String: Any])?["content_item_kinds"] as? [String]
                         let kinds = rawKinds?.map { $0.components(separatedBy: " | ")[0] }
                         if let kinds, !kinds.isEmpty, kinds.allSatisfy({ !$0.isEmpty }) {

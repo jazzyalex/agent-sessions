@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Codex prompts tagged with only a turn id show again.** Codex Desktop 0.131 to 0.146 tagged user messages with a turn id and no item kinds. Agent Sessions read such a message as unresolved context, so the prompt was hidden in the Session view and left out of the session's typed text. It now reads like an untagged message: plain text is the prompt, an environment block is context.
+
 ## [6.6] - 2026-11-18
 
 ### Highlights
