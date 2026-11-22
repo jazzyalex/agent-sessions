@@ -27558,18 +27558,18 @@
         }
       }
     },
-    "Configuration economics": {
+    "Model Economics": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Configuration economics"
+            "value": "Model Economics"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "配置经济性"
+            "value": "模型经济性"
           }
         }
       }
@@ -27911,23 +27911,6 @@
         }
       }
     },
-    "%@ local estimate, observed window only": {
-      "comment": "Quota summary detail. The placeholder is the provider display name.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ local estimate, observed window only"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 本地估算，仅限已观测窗口"
-          }
-        }
-      }
-    },
     "%lld sessions · %@ timed": {
       "comment": "Configuration row detail. The first placeholder is the session count and the second is the formatted timed duration.",
       "localizations": {
@@ -27977,18 +27960,18 @@
         }
       }
     },
-    "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Estimated quota uses Quota Meter's provider-wide local calibration, not a direct per-model quota measurement. Provider allowances are never added together, and work on other devices may affect the estimate.": {
+    "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Attributed quota converts local model usage with Quota Meter's provider-wide calibration; it is not the provider-reported account total. Work on other devices may affect the estimate.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Estimated quota uses Quota Meter's provider-wide local calibration, not a direct per-model quota measurement. Provider allowances are never added together, and work on other devices may affect the estimate."
+            "value": "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Attributed quota converts local model usage with Quota Meter's provider-wide calibration; it is not the provider-reported account total. Work on other devices may affect the estimate."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "API 等值使用已发布的模型价格。小时费率会优先汇总精确的请求时段；若无精确时段，则只采用所选筛选范围内、不超过 30 分钟且配置相同的相邻用量间隔。每项指标都需要至少 15 分钟的独立覆盖时间；未计时的费用仍计入总价值，但不计入费率。估算配额使用配额仪表的提供商级本地校准，并非直接测量每个模型的配额。不同提供商的配额绝不相加，其他设备上的工作也可能影响估算。"
+            "value": "API 等值使用已发布的模型价格。小时费率会优先汇总精确的请求时段；若无精确时段，则只采用所选筛选范围内、不超过 30 分钟且配置相同的相邻用量间隔。每项指标都需要至少 15 分钟的独立覆盖时间；未计时的费用仍计入总价值，但不计入费率。归因配额使用配额仪表的提供商级校准来换算本地模型用量；它不是提供商报告的账户总量。其他设备上的工作也可能影响估算。"
           }
         }
       }
@@ -28009,50 +27992,34 @@
         }
       }
     },
-    "Est. quota / timed hour": {
+    "Attributed quota / timed hour": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Est. quota / timed hour"
+            "value": "Attributed quota / timed hour"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "估算配额 / 计时小时"
+            "value": "归因配额 / 计时小时"
           }
         }
       }
     },
-    "Estimated weekly quota": {
+    "Attributed quota spent": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estimated weekly quota"
+            "value": "Attributed quota spent"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "估算每周配额"
-          }
-        }
-      }
-    },
-    "No calibrated provider window": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No calibrated provider window"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有已校准的提供商窗口"
+            "value": "归因配额消耗"
           }
         }
       }
@@ -28073,18 +28040,18 @@
         }
       }
     },
-    "Separate provider allowances; no combined percentage": {
+    "Selected filter · observed windows": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Separate provider allowances; no combined percentage"
+            "value": "Selected filter · observed windows"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "各提供商配额独立；不合并百分比"
+            "value": "所选筛选 · 已观测窗口"
           }
         }
       }
@@ -28137,19 +28104,19 @@
         }
       }
     },
-    "est. % / timed hour": {
-      "comment": "Chart unit label. The percent sign denotes estimated percentage points of a weekly quota used per timed hour.",
+    "attributed % / timed hour": {
+      "comment": "Chart unit label. The percent sign denotes attributed percentage points of a weekly quota used per timed hour.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "est. % / timed hour"
+            "value": "attributed % / timed hour"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "估算 % / 计时小时"
+            "value": "归因 % / 计时小时"
           }
         }
       }

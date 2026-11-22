@@ -84,11 +84,7 @@ struct EconomicsAnalyticsView: View {
                 value: Self.currency(snapshot.totalAPIEquivalentUSD),
                 detail: "Published API rates"
             )
-            summaryCard(
-                title: "Estimated weekly quota",
-                value: quotaSummaryValue,
-                detail: quotaSummaryDetail
-            )
+            quotaSummaryCard
             summaryCard(
                 title: "Timed activity",
                 value: AnalyticsSummary.formatDuration(snapshot.totalTimedSeconds),
@@ -125,24 +121,54 @@ struct EconomicsAnalyticsView: View {
         .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
     }
 
-    private var configurationCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Configuration economics")
-                        .font(.headline)
-                    Text("Only the selected date range is analyzed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Picker("Metric", selection: $metric) {
-                    ForEach(EconomicsMetric.allCases) { metric in
-                        Text(metric.displayName).tag(metric)
+    private var quotaSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Attributed quota spent")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if quotaSummarySources.isEmpty {
+                Text("—")
+                    .font(.system(size: 25, weight: .semibold, design: .rounded))
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(quotaSummarySources, id: \.self) { source in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(Self.quotaProviderName(source))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 6)
+                            Text(Self.percentPoints(snapshot.quotaPercentPointsBySource[source] ?? 0))
+                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 300)
+            }
+
+            Text("Selected filter · observed windows")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
+        .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
+    }
+
+    private var configurationCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 20) {
+                    configurationHeading
+                    Spacer(minLength: 20)
+                    metricPicker
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    configurationHeading
+                    metricPicker
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
 
             VStack(spacing: 6) {
@@ -152,6 +178,34 @@ struct EconomicsAnalyticsView: View {
             }
         }
         .analyticsCard(colorScheme: colorScheme)
+    }
+
+    private var configurationHeading: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Model Economics")
+                .font(.headline)
+            Text("Only the selected date range is analyzed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var metricPicker: some View {
+        HStack(spacing: 10) {
+            Text("Metric")
+                .lineLimit(1)
+                .fixedSize()
+            Picker("Metric", selection: $metric) {
+                ForEach(EconomicsMetric.allCases) { metric in
+                    Text(metric.displayName).tag(metric)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 300)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func configurationRow(_ row: EconomicsConfigurationRow) -> some View {
@@ -250,7 +304,7 @@ struct EconomicsAnalyticsView: View {
 
                 HStack(spacing: 12) {
                     detailMetric(
-                        "Est. quota / timed hour",
+                        "Attributed quota / timed hour",
                         value: row.weeklyQuotaPercentPointsPerHour.map(Self.percentPoints) ?? "—"
                     )
                     detailMetric(
@@ -315,7 +369,7 @@ struct EconomicsAnalyticsView: View {
                 Text("Selected-period trend")
                     .font(.caption.weight(.semibold))
                 Spacer()
-                Text(metric == .quotaPerHour ? "est. % / timed hour" : "$ / timed hour")
+                Text(metric == .quotaPerHour ? "attributed % / timed hour" : "$ / timed hour")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -380,7 +434,7 @@ struct EconomicsAnalyticsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("How to read these numbers")
                     .font(.caption.weight(.semibold))
-                Text("API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Estimated quota uses Quota Meter's provider-wide local calibration, not a direct per-model quota measurement. Provider allowances are never added together, and work on other devices may affect the estimate.")
+                Text("API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Attributed quota converts local model usage with Quota Meter's provider-wide calibration; it is not the provider-reported account total. Work on other devices may affect the estimate.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -493,20 +547,18 @@ struct EconomicsAnalyticsView: View {
         (value * 100).formatted(.number.precision(.fractionLength(0))) + "%"
     }
 
-    private var quotaSummaryValue: String {
-        guard snapshot.quotaPercentPointsBySource.count == 1,
-              let value = snapshot.quotaPercentPointsBySource.values.first else { return "—" }
-        return Self.percentPoints(value)
+    private var quotaSummarySources: [SessionSource] {
+        snapshot.quotaPercentPointsBySource.keys.sorted {
+            $0.displayName < $1.displayName
+        }
     }
 
-    private var quotaSummaryDetail: LocalizedStringKey {
-        if let source = snapshot.quotaPercentPointsBySource.keys.first,
-           snapshot.quotaPercentPointsBySource.count == 1 {
-            return "\(source.displayName) local estimate, observed window only"
+    private static func quotaProviderName(_ source: SessionSource) -> String {
+        switch source {
+        case .codex: return "Codex"
+        case .claude: return "Claude"
+        default: return source.displayName
         }
-        if snapshot.quotaPercentPointsBySource.count > 1 {
-            return "Separate provider allowances; no combined percentage"
-        }
-        return "No calibrated provider window"
     }
+
 }

@@ -22,7 +22,7 @@ enum EconomicsMetric: String, CaseIterable, Identifiable {
 
     var displayName: LocalizedStringResource {
         switch self {
-        case .quotaPerHour: return "Est. quota / timed hour"
+        case .quotaPerHour: return "Attributed quota / timed hour"
         case .apiCostPerHour: return "API $ / timed hour"
         }
     }
