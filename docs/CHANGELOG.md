@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Opening a search result lands on the match.** When the match was in tool output, or in a long session that first shows its last part while the rest loads, the transcript counted the match (1/1) but stopped short of it, or was pulled back to the end of the session, until you pressed the next-match arrow. The jump now waits for the whole session and for the tool output to be decoded, then stays on the word after Tools turns on.
+
 ## [6.6] - 2026-11-18
 
 ### Highlights

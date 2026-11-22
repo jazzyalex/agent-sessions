@@ -1024,6 +1024,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 loadRoleFilters()
                 refreshRichInlineImages(session: session)
                 syncToolTextDecoding()
+                // A jump requested in the update that first shows this session never reaches
+                // onChange (a chat found only by reading its file appears in an empty list).
+                if searchState.autoJumpToken > lastHandledAutoJumpToken,
+                   TranscriptAutoJumpPolicy.shouldLatch(requestedSessionID: searchState.autoJumpSessionID,
+                                                        isSearchActive: isUnifiedSearchActive,
+                                                        displayedSessionID: session.id) {
+                    pendingAutoJumpToken = searchState.autoJumpToken
+                    pendingAutoJumpSessionID = session.id
+                    applyAutoJumpIfReady(session: session)
+                }
             }
             .onDisappear {
                 richInlineImagesTask?.cancel()
@@ -3005,12 +3015,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func isTranscriptReady(for session: Session) -> Bool {
+        // A large chat paints its tail first; jumping then misses a match earlier in the chat
+        // and spends the jump. Wait for the full parse, which always follows.
+        guard !session.isPartiallyHydrated else { return false }
         // Rich (.blocks) mode never runs `rebuild` (no `lastBuildKey`); its
         // readiness is the derived-state snapshot landing for this session. When
         // ready, the block controller can resolve a unified match to a block and
         // auto-jump, mirroring Terminal's post-9456faa3 auto-jump-on-open.
         if viewMode == .blocks {
-            return derivedState.snapshot.key == TranscriptDerivedState.Key(session: session, settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(), reviewCardsEnabled: transcriptReviewCardsEnabled, includeMessageContext: true)) && !derivedState.isComputing
+            // Blocks come from events: before they load there is nothing to land on.
+            return !session.events.isEmpty
+                && derivedState.snapshot.key == TranscriptDerivedState.Key(session: session, settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(), reviewCardsEnabled: transcriptReviewCardsEnabled, includeMessageContext: true)) && !derivedState.isComputing
         }
         guard let key = lastBuildKey else { return false }
         return key.hasPrefix("\(session.id)|")

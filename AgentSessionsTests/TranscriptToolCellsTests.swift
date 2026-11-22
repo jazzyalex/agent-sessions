@@ -1879,6 +1879,18 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertTrue(h.controller.isFlashing(rowID: 1))
     }
 
+    func testUnifiedRawOnlyHitLandsOnTheWordOnceDecoded() {
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 answer: only the second call's raw text holds the word.
+        let h = Harness([user(), bash("t1", "ls"), output("t1", "clean"), bash("t2", "cat"), output("t2", "needle"), assistant()])
+        let opened = h.controller.applyFind(source: .unified, query: "needle", matches: [], token: 1, direction: 1,
+                                            reset: true, shouldJump: true, revealsHidden: true)
+        XCTAssertEqual(opened.total, 0, "nothing decoded yet: the jump opens the call whose raw text matched")
+        // Decoding then finds the word in both calls. The jump lands in the call it opened, unasked.
+        let decoded = h.controller.refreshFindAfterRowsChanged(matches: [needleMatch(block: 2), needleMatch(block: 4)])
+        XCTAssertEqual(decoded.current, 2)
+        XCTAssertEqual(decoded.total, 2)
+    }
+
     func testTypingLandsOnFirstVisibleMatchAndLeavesToolsOff() {
         // 0 user · 1 call · 2 output · 3 answer; the first match is in the hidden output.
         let h = Harness([user(), bash("t1", "ls"), output("t1", "needle"), assistant("needle done")])
@@ -1946,5 +1958,51 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(entered.current, 1, "the first Enter lands on the match typing could not show")
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(requests, 1)
+    }
+
+    func testToolsOnJumpIsNotUndoneByTheFollowTailScroll() {
+        // 0 user · 1 call · 2 output · 3 answer, then enough turns to scroll; the reader is at the end.
+        let filler = (0..<30).flatMap { i in [user("question \(i)"), assistant("answer \(i)")] }
+        let h = Harness([user(), bash("t1", "ls"), output("t1", "needle"), assistant()] + filler)
+        h.controller.onRequestToolsShown = {}
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertTrue(h.isAtBottom)
+
+        h.controller.applyFind(source: .local, query: "needle", matches: [needleMatch(block: 2)], token: 1,
+                               direction: 1, reset: false, shouldJump: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        // Tools on: the new rows queue a follow-tail scroll, then the waiting jump lands.
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        h.layout()
+        guard let row = h.rowIndex(id: 1) else { return XCTFail("the invocation row shows") }
+        XCTAssertTrue(h.scroll.contentView.bounds.intersects(h.table.rect(ofRow: row)), "the jump stays on the match")
+        XCTAssertFalse(h.isAtBottom)
+    }
+
+    func testListJumpWaitsForMatchesTheTranscriptHasNotLoadedYet() {
+        // The search read a word the open transcript does not hold yet (a chat still being written).
+        let start = [user(), assistant()]
+        let h = Harness(start)
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        let opened = h.controller.applyFind(source: .unified, query: "needle", matches: [], token: 1, direction: 1,
+                                            reset: true, shouldJump: true, revealsHidden: true)
+        XCTAssertEqual(opened.total, 0)
+
+        // 0 user · 1 answer · 2 call · 3 output: the append brings the word, in output Tools hides.
+        h.replace(start + [bash("t1", "ls"), output("t1", "needle")])
+        let arrived = h.controller.refreshFindAfterRowsChanged(matches: [needleMatch(block: 3)])
+        XCTAssertEqual(arrived.current, 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1, "the waiting jump lands on the first match that arrives")
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertTrue(h.controller.isFlashing(rowID: 2))
     }
 }
