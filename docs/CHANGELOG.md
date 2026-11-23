@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [7.0] - 2026-11-23
+
 ### Highlights
 
 - **Search every local session with explicit coverage.** Search supports terms, phrases, prefixes, Boolean queries, and complete session IDs across enabled agents. Results appear as they are found; Return verifies eligible source sessions and reports complete, incomplete, and unresolved coverage without discarding partial results.
