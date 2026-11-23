@@ -1,3 +1,16 @@
+## 2026-11-23 11:56 · Agent Sessions 7.0 · deployed and verified
+status: done
+
+**Release:** Agent Sessions 7.0 (build 92) is public. The release tag `v7.0` names `fe7037969fe23d7978f64b75bab1916726a9d9b1`; the canonical pipeline then committed and pushed the signed Sparkle feed as `e7072c5b` on `main`. GitHub release: `https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0`. DMG: `AgentSessions-7.0.dmg`, 35,013,910 bytes, SHA-256 `00828a858d59a6a161e4c276d4ef440b2e9278b6a01c9956f12a7fe915ffcb85`.
+
+**Verification:** Final exact-commit release QA ran on `fe703796`: `.deriveddata-tests/Logs/Test/Run-AgentSessions-2026.11.23_11-38-10--0800.xcresult` reports 4,780 passed, 10 skipped, zero failed; all 646 Python release/script tests passed. Localization extraction and catalogs passed with 1,761 app keys, six Info.plist keys, and 492 stringsdata files. The standalone pre-bump candidate survived 12 foreground/background switches; it had no open window at screenshot time, so the black screenshot is not visual UI evidence. Existing compiler warnings remain.
+
+**Signing and publication:** Apple accepted and stapled both app and DMG notarizations. Developer ID signature, DMG integrity, stapled-ticket smoke, app version, Sparkle EdDSA signature, appcast enclosure, GitHub assets, README/site links, remote/local tag, and Homebrew cask 7.0 all passed. `tools/release/deploy verify 7.0` completed with zero errors and zero warnings. `spctl` reported `Insufficient Context` for the DMG container after successful notarization/stapling; the mounted app passed signature/ticket smoke and the independent deployment verifier passed.
+
+**Price checkpoint:** The released build bundles sequence `2026111702` and canonical fingerprint `2f6ab7c7c5f6f681f6521943a2c58a569552ef4b752461451bde340ea759d9ba`. `docs/prices-v2.released.json` already contains those exact values, so no post-release price commit is required.
+
+**Recovery and follow-up:** The pre-release tracked-change patch remains `/private/tmp/Codex-History-v7-prep-20261122-2220.patch` with SHA-256 `01f7d6298577734f8cd4ec45dd1c4c186ddc4800aa86afdbb17ffb9bb598e367`; committed history and the public tag provide the release recovery point. Remaining work is operational only: test an upgrade from 6.6 through Sparkle or Homebrew on a clean user installation and monitor release issues/downloads. Performance P2/P3 items remain in `docs/backlog.md`; the accepted Release evidence is materially improved but not stall-free, including the previously measured 338.57 ms SwiftUI/AppKit layout stall.
+
 ## 2026-11-22 21:41 · v7-release-preparation · reviewed, tested, and backed up locally
 status: in-progress
 
