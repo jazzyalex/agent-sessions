@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.6/AgentSessions-6.6.dmg"><b>Download Agent Sessions 6.6</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v7.0/AgentSessions-7.0.dmg"><b>Download Agent Sessions 7.0</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -26,7 +26,7 @@ Requires macOS 14 or later.
 
 ## Install
 
-Open [AgentSessions-6.6.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.6/AgentSessions-6.6.dmg) and drag **Agent Sessions.app** into Applications, or install with Homebrew.
+Open [AgentSessions-7.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v7.0/AgentSessions-7.0.dmg) and drag **Agent Sessions.app** into Applications, or install with Homebrew.
 
 ```bash
 brew install --cask jazzyalex/agent-sessions/agent-sessions
