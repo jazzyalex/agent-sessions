@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.6</title>
-            <pubDate>Wed, 18 Nov 2026 13:01:23 -0800</pubDate>
+            <title>7.0</title>
+            <pubDate>Mon, 23 Nov 2026 11:53:55 -0800</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,23 +27,20 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.6</h2>
+<h2>What&#x27;s New in 7.0</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Open Claude Code sessions in VS Code.</strong> Right-click a Claude Code session to open its local folder and resume in the verified VS Code or Insiders window. Install the Claude Code extension and trust the project folder. Resuming a removed worktree from its repository root requires Claude Code extension 2.1.300 or later. Contributed by @dobernhardt in #91.</li>
-<li><strong>Resume supported CLI sessions in Macterm.</strong> Select Macterm under Settings → General → Terminal App. Resume reuses the nearest local project and opens a new tab in the session folder. Contributed by @kian1991 in #94.</li>
+<li><strong>Search every local session with explicit coverage.</strong> Search supports terms, phrases, prefixes, Boolean queries, and complete session IDs across enabled agents. Results appear as they are found; Return verifies eligible source sessions and reports complete, incomplete, and unresolved coverage without discarding partial results.</li>
+<li><strong>Compare agent economics.</strong> Analytics adds API-equivalent value and attributed quota by agent, model, and thinking effort. It states timing and coverage limits, excludes untimed spend from hourly rates, and keeps provider-wide quota left separate from quota attributable to the selected sessions.</li>
+<li><strong>Smoother large transcripts.</strong> Transcript presentation shares message grouping, timing, navigation, and syntax work off the main thread. Fast scrolling defers directory and Presence scans until input settles, reduces repeated row layout, and reliably replaces a large Codex session&#x27;s provisional tail with the full transcript.</li>
 </ul>
-<h3>Improvements</h3>
-<ul>
-<li><strong>Updated model pricing.</strong> Session cost estimates and Quota Meter now use GPT-6.2 pricing and refreshed rates for other models.</li>
-</ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.6</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0</a></p>
 </div>
             ]]></description>
-            <sparkle:version>91</sparkle:version>
-            <sparkle:shortVersionString>6.6</sparkle:shortVersionString>
+            <sparkle:version>92</sparkle:version>
+            <sparkle:shortVersionString>7.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.6/AgentSessions-6.6.dmg" length="31935166" type="application/octet-stream" sparkle:edSignature="1YyrR1pEvkzXJTMypER7/lzQYlkOU9IHuZ3ot2gdf1ai2gjCD06brTJrSj6tWco8p2WtVRVW+yYF+NogRFPlAw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v7.0/AgentSessions-7.0.dmg" length="35013910" type="application/octet-stream" sparkle:edSignature="SiLcU0QEhF2NkmK7PokbSby2/TnW6EKTdRZ6eY+ReaMPTl35p/T3lkVQY9aMXTlIdyo6KrZLZ44Ufd5kt2euAw=="/>
         </item>
     </channel>
 </rss>
