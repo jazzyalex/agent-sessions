@@ -2250,7 +2250,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                 self?.currentSearchIngestFingerprint(for: source)
             }
             if let before = fingerprintBeforeWait, let after = fingerprintAfterWait, before == after {
-                shouldKickSearchIngest = false
+                let retryIsDue = await searchIngestService?.retryIsDue(for: source) ?? false
+                shouldKickSearchIngest = retryIsDue
             }
         }
         if !shouldKickSearchIngest {

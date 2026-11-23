@@ -170,6 +170,20 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         XCTAssertNil(ClaudeUsageSource.unavailable.weeklyCalibrationFamily)
     }
 
+    func testPriceRefreshDropsRevokedWebCalibrationInput() {
+        let model = ClaudeUsageModel()
+        var revoked = Self.sampleSnapshot(source: .webEndpoint)
+        revoked.ownership = "web:revoked-owner"
+        revoked.requestLease = nil
+        model.setWeeklyCalibrationInputForTesting(revoked)
+        XCTAssertTrue(model.hasWeeklyCalibrationInputForTesting)
+
+        model.refreshWeeklyCalibrationForNewPrices(now: Date())
+
+        XCTAssertFalse(model.hasWeeklyCalibrationInputForTesting,
+                       "price refresh must not replay quota from a revoked Web credential")
+    }
+
     private static func sampleSnapshot(source: ClaudeUsageSource) -> ClaudeLimitSnapshot {
         ClaudeLimitSnapshot(fetchedAt: Date(), source: source, health: .live,
             fiveHourUsedRatio: 0.3, fiveHourResetText: "", weeklyUsedRatio: 0.1, weeklyResetText: "",

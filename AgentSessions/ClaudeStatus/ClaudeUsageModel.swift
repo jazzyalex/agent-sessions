@@ -416,6 +416,7 @@ final class ClaudeUsageModel: ObservableObject {
         guard let owner = currentSnapshotOwnership,
               owner.hasPrefix("web:") || owner.hasPrefix("legacy:"),
               !ClaudeCredentialService.shared.isCurrentWebOwner(owner) else { return }
+        invalidateWeeklyCalibrationOwner()
         currentSnapshotOwnership = nil
         sessionRemainingPercent = 0
         weekAllModelsRemainingPercent = 0
@@ -692,9 +693,18 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func refreshWeeklyCalibrationForNewPrices(now: Date) {
-        guard let input = weeklyCalibrationInput,
-              RunwayPriceTable.shared.rateRevision(forProvider: "claude") != input.priceRevision else { return }
+        guard let input = weeklyCalibrationInput else { return }
+        guard !input.snapshot.hasWebOwnership || input.snapshot.webOwnershipIsCurrent else {
+            invalidateWeeklyCalibrationOwner()
+            return
+        }
+        guard RunwayPriceTable.shared.rateRevision(forProvider: "claude") != input.priceRevision else { return }
         updateWeeklyCalibration(from: input.snapshot, now: now)
+    }
+
+    private func invalidateWeeklyCalibrationOwner() {
+        weeklyCalibrationInput = nil
+        WeeklyQuotaCalibrationStore.shared.invalidateInMemoryScope(provider: "claude")
     }
 
     private func updateWeeklyCalibration(from s: ClaudeLimitSnapshot, now: Date) {
@@ -789,6 +799,15 @@ final class ClaudeUsageModel: ObservableObject {
 
     func applyLimitSnapshotForTesting(_ snapshot: ClaudeLimitSnapshot) {
         applyLimitSnapshot(snapshot)
+    }
+
+    func setWeeklyCalibrationInputForTesting(_ snapshot: ClaudeLimitSnapshot,
+                                              priceRevision: Int? = nil) {
+        weeklyCalibrationInput = (snapshot, priceRevision)
+    }
+
+    var hasWeeklyCalibrationInputForTesting: Bool {
+        weeklyCalibrationInput != nil
     }
 #endif
 

@@ -59,6 +59,119 @@ final class SearchIngestTests: XCTestCase {
         )
     }
 
+    private func makeAtomicWrite(index: Int) -> SearchIngestDBWrite {
+        let id = "atomic-\(index)"
+        let path = "/tmp/\(id).jsonl"
+        return SearchIngestDBWrite(
+            path: path,
+            fileMtime: Int64(index + 1),
+            fileSize: 10,
+            source: "codex",
+            meta: makeMetaRow(
+                sessionID: id,
+                source: "codex",
+                path: path,
+                mtime: Int64(index + 1)
+            ),
+            searchMtime: Int64(index + 1),
+            searchSize: 10,
+            searchText: "atomicneedle\(index)",
+            toolIO: index.isMultiple(of: 2)
+                ? .init(referenceTimestamp: Int64(index + 1), text: "toolneedle\(index)")
+                : nil
+        )
+    }
+
+    func testConcurrentSearchTransactionsCommitAsOwnedActorOperations() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<24 {
+                let write = makeAtomicWrite(index: index)
+                group.addTask {
+                    try await db.commitSearchIngest(write)
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        let ids = try await db.indexedSessionIDs(sources: ["codex"])
+        XCTAssertEqual(Set(ids), Set((0..<24).map { "atomic-\($0)" }))
+        for index in 0..<24 {
+            let matches = try await db.searchSessionIDsFTS(
+                sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+                dateFrom: nil, dateTo: nil, query: "atomicneedle\(index)",
+                includeSystemProbes: true, limit: 2
+            )
+            XCTAssertEqual(matches, ["atomic-\(index)"])
+        }
+    }
+
+    func testFailedAtomicSearchWriteRollsBackOnlyItsOwnRows() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        try await db.exec(
+            """
+            CREATE TRIGGER fail_injected_search
+            BEFORE INSERT ON session_search
+            WHEN NEW.session_id = 'atomic-fail'
+            BEGIN
+              SELECT RAISE(ABORT, 'injected search failure');
+            END;
+            """
+        )
+
+        let successWrite = makeAtomicWrite(index: 100)
+        let failedPath = "/tmp/atomic-fail.jsonl"
+        let failedWrite = SearchIngestDBWrite(
+            path: failedPath,
+            fileMtime: 1,
+            fileSize: 10,
+            source: "codex",
+            meta: makeMetaRow(
+                sessionID: "atomic-fail",
+                source: "codex",
+                path: failedPath,
+                mtime: 1
+            ),
+            searchMtime: 1,
+            searchSize: 10,
+            searchText: "must rollback",
+            toolIO: nil
+        )
+        let results = await withTaskGroup(of: Bool.self, returning: [Bool].self) { group in
+            group.addTask {
+                do {
+                    try await db.commitSearchIngest(successWrite)
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            group.addTask {
+                do {
+                    try await db.commitSearchIngest(failedWrite)
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            var values: [Bool] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+        XCTAssertEqual(results.filter { $0 }.count, 1)
+
+        let ids = Set(try await db.indexedSessionIDs(sources: ["codex"]))
+        XCTAssertTrue(ids.contains("atomic-100"))
+        XCTAssertFalse(ids.contains("atomic-fail"))
+        let files = Set(try await db.fetchIndexedFiles(for: "codex").map(\.path))
+        XCTAssertTrue(files.contains("/tmp/atomic-100.jsonl"))
+        XCTAssertFalse(files.contains("/tmp/atomic-fail.jsonl"),
+                       "the failed transaction must not leave its file row behind")
+    }
+
     // MARK: - deleteSessionsForPaths
 
     func testDeleteSessionsForPathsAlsoRemovesSearchRows() async throws {
@@ -838,12 +951,34 @@ final class SearchIngestTests: XCTestCase {
         let second = try await service.ingest(source: .codex, files: [hotRef], toolIOEnabled: false, quietSeconds: 3600)
         XCTAssertEqual(second.skipped, 1, "hot file within the quiet period must be skipped")
         XCTAssertEqual(second.processed, 0)
+        let retryRequired = await service.requiresRetry(for: .codex)
+        XCTAssertTrue(retryRequired,
+                      "a time-gated file must keep a monitor retry obligation even when its fingerprint stays unchanged")
+        let retryDueNow = await service.retryIsDue(for: .codex)
+        XCTAssertFalse(retryDueNow, "the monitor must not spin while the quiet gate is still active")
+        let retryDueAfterQuiet = await service.retryIsDue(
+            for: .codex,
+            now: Date().addingTimeInterval(3601)
+        )
+        XCTAssertTrue(retryDueAfterQuiet)
 
         let staleStillThere = try await db.searchSessionIDsFTS(
             sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
             dateFrom: nil, dateTo: nil, query: "lemursaffron", includeSystemProbes: true, limit: 10
         )
         XCTAssertEqual(staleStillThere.count, 1, "stale row must be retained (not blown away) while the file is hot")
+
+        let settled = try await service.ingest(
+            source: .codex,
+            files: [hotRef],
+            toolIOEnabled: false,
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(settled.processed, 1)
+        let retryCleared = await service.requiresRetry(for: .codex)
+        XCTAssertFalse(retryCleared,
+                       "a successful retry must clear the monitor obligation")
     }
 
     func testIngestReindexesQuietFileAfterQuietPeriodElapses() async throws {

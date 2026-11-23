@@ -1512,6 +1512,46 @@ final class SessionTelemetryEngineTests: XCTestCase {
                        "repricing persistent evidence must read zero transcript bytes")
     }
 
+    func testEconomicsWarmEvidenceAndQuotaUseOneCapturedPriceSnapshot() async throws {
+        let url = try write(codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let initial = Data(#"{"version":2,"sequence":9999999998,"updated":"2098-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: initial))
+        let captured = prices.snapshot()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = configuredCodexQuota(prices: prices, now: now, reset: reset)
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let selected = session(url, source: .codex)
+        let evidenceValue = await engine.economicsIndexEvidence(
+            for: selected,
+            priceSnapshot: captured
+        )
+        let evidence = try XCTUnwrap(evidenceValue)
+        let capturedCost = try XCTUnwrap(evidence.telemetry.costEstimate?.apiEquivalentUSD)
+
+        let replacement = Data(#"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"gpt-5.5":{"inputPerMTok":50,"cachedInputPerMTok":5,"outputPerMTok":300,"cacheWritePerMTok":null}}}"#.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: replacement))
+
+        let warm = try XCTUnwrap(engine.telemetry(
+            fromIndexed: evidence,
+            for: selected,
+            verifiedRevisionKey: evidence.revisionKey,
+            priceSnapshot: captured
+        ))
+        XCTAssertEqual(warm.costEstimate?.apiEquivalentUSD, capturedCost)
+        XCTAssertEqual(warm.costEstimate?.priceTableUpdated, "2098-01-01")
+        XCTAssertNotNil(engine.economicsQuotaContext(
+            for: .codex,
+            now: now,
+            priceSnapshot: captured
+        ))
+        XCTAssertNil(engine.economicsQuotaContext(for: .codex, now: now),
+                     "a live revision must not validate quota learned from the captured revision")
+    }
+
     func testPriceMetadataChangeInvalidatesCachedProvenance() async throws {
         let url = try write(codexLines().map {
             $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")

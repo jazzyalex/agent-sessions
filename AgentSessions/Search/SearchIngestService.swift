@@ -230,6 +230,14 @@ actor SearchIngestService {
         let revisionsByPath: [String: SearchSourceRevision.File]
     }
     private var incompleteJSONLBySource: [SessionSource: IncompleteJSONLState] = [:]
+    /// Sources whose last pass was cancelled or hit a time-dependent/transient
+    /// failure. The provider fingerprint can remain unchanged while a quiet or
+    /// cooldown gate expires, so the monitor must not suppress the next pass.
+    private struct RetryObligation {
+        /// nil means retry on the next monitor pass.
+        let notBefore: Date?
+    }
+    private var retryObligationBySource: [SessionSource: RetryObligation] = [:]
 
     /// Test-only observability: incremented each time the aggregate early-out fires
     /// (i.e. `ingest` returned after the cheap generation check but before touching
@@ -245,6 +253,15 @@ actor SearchIngestService {
         self.db = db
         self.claudeImageIndexCache = claudeImageIndexCache
         self.economicsIndexer = economicsIndexer
+    }
+
+    func requiresRetry(for source: SessionSource) -> Bool {
+        retryObligationBySource[source] != nil
+    }
+
+    func retryIsDue(for source: SessionSource, now: Date = Date()) -> Bool {
+        guard let obligation = retryObligationBySource[source] else { return false }
+        return obligation.notBefore.map { now >= $0 } ?? true
     }
 
     /// Re-ingest cooldown tiers: a changed-but-quiet file is re-ingested at most
@@ -288,6 +305,10 @@ actor SearchIngestService {
                 livePathAuthority: LivePathAuthority = .notApplicable) async throws -> Progress {
         let sourceRaw = source.rawValue
         let descriptor = source.descriptor
+        // A thrown or cancelled pass leaves this obligation in place. Only the
+        // completed paths below may clear it.
+        retryObligationBySource[source] = RetryObligation(notBefore: nil)
+        var preflightRetryRequired = false
 
         // The scan marker and external image-cache invalidations have separate
         // lifetimes. Retry pending removals before the aggregate early-out even
@@ -302,7 +323,11 @@ actor SearchIngestService {
                 claudeRequestLogPendingInvalidations = !pending.isEmpty
             } catch {
                 // Non-fatal: the next Claude pass retries the failed cleanup.
+                preflightRetryRequired = true
             }
+            preflightRetryRequired = preflightRetryRequired
+                || !claudeRequestLogReindexDone
+                || claudeRequestLogPendingInvalidations
         }
 
         // Directory-artifact early-out guard: the remembered aggregate is keyed by the
@@ -355,13 +380,15 @@ actor SearchIngestService {
         let requiredMigration = try await db.requiredSearchMigrations(
             source: sourceRaw, includeToolIO: toolIOEnabled, toolIOCutoff: toolIOCutoffTS)
         SearchResponsivenessMetrics.shared.record(.migrationCounts, counters: [.pendingMigrations: Int64(requiredMigration.sessionIDs.count)])
-        if requiredMigration.sessionIDs.isEmpty, noFileInDangerZone,
+        if !preflightRetryRequired,
+           requiredMigration.sessionIDs.isEmpty, noFileInDangerZone,
            artifactAnchorsCurrent,
            let lastClean = lastCleanAggregateBySource[sourceRaw],
            let dbGenerationAtStart,
            lastClean.dbGeneration == dbGenerationAtStart,
            lastClean.aggregate == incomingAggregate {
             earlyOutHitCountForTesting += 1
+            retryObligationBySource[source] = nil
             return Progress(processed: 0, total: files.count, skipped: files.count)
         }
 
@@ -415,6 +442,18 @@ actor SearchIngestService {
         var skipped = 0
         var unchangedIncomplete = 0
         var hadIngestFailure = false
+        var hadRetryableFailure = preflightRetryRequired
+        var retryImmediately = preflightRetryRequired
+        var earliestRetryDate: Date?
+        func markRetryRequired(notBefore: Date? = nil) {
+            hadRetryableFailure = true
+            guard let notBefore, !retryImmediately else {
+                retryImmediately = true
+                earliestRetryDate = nil
+                return
+            }
+            earliestRetryDate = min(earliestRetryDate ?? notBefore, notBefore)
+        }
         let rememberedIncomplete = incompleteJSONLBySource[source]
         var incompleteRevisions: [String: SearchSourceRevision.File] = [:]
         /// Deterministic (input-order) stale directory-artifact anchors seen this pass.
@@ -439,6 +478,7 @@ actor SearchIngestService {
                     staleAnchorPaths.append(file.path)
                     skipped += 1
                     hadIngestFailure = true
+                    markRetryRequired()
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
                     }
@@ -520,6 +560,9 @@ actor SearchIngestService {
                 let age = max(0, nowTS - file.activityTimestamp)
                 if age < quietSeconds {
                     hadIngestFailure = true
+                    markRetryRequired(notBefore: Date(
+                        timeIntervalSince1970: file.activityTimestamp + quietSeconds
+                    ))
                     skipped += 1
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
@@ -541,6 +584,9 @@ actor SearchIngestService {
                     ?? updatedAtByPath[file.path]
                 if cooldown > 0, let lastTS, nowTS - Double(lastTS) < cooldown {
                     hadIngestFailure = true
+                    markRetryRequired(notBefore: Date(
+                        timeIntervalSince1970: Double(lastTS) + cooldown
+                    ))
                     skipped += 1
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
@@ -577,6 +623,7 @@ actor SearchIngestService {
             case .parseFailed:
                 skipped += 1
                 hadIngestFailure = true
+                markRetryRequired()
             case .incompleteJSONL(let revision):
                 incompleteRevisions[file.path] = revision
                 skipped += 1
@@ -585,6 +632,7 @@ actor SearchIngestService {
                 staleAnchorPaths.append(file.path)
                 skipped += 1
                 hadIngestFailure = true
+                markRetryRequired()
             }
 
             if idx < files.count - 1 {
@@ -618,6 +666,7 @@ actor SearchIngestService {
                 }
             } catch {
                 hadIngestFailure = true
+                markRetryRequired()
             }
         }
 
@@ -658,6 +707,7 @@ actor SearchIngestService {
                     )
                 } catch {
                     hadIngestFailure = true
+                    markRetryRequired()
                 }
             } else {
                 // A failed provider-live read cannot authorize deletion or retirement.
@@ -673,10 +723,12 @@ actor SearchIngestService {
                     )
                 } catch {
                     hadIngestFailure = true
+                    markRetryRequired()
                 }
                 // Keep retrying after a provider read failure. Remembering this aggregate
                 // as clean would strand the persisted corpus indefinitely.
                 hadIngestFailure = true
+                markRetryRequired()
             }
         }
 
@@ -701,6 +753,7 @@ actor SearchIngestService {
             // Keep retrying: remembering this aggregate as clean would strand the
             // persisted corpus indefinitely.
             hadIngestFailure = true
+            markRetryRequired()
         case .authoritative(let livePaths):
             if hadIngestFailure {
                 break
@@ -712,6 +765,7 @@ actor SearchIngestService {
                 )
             } catch {
                 hadIngestFailure = true
+                markRetryRequired()
             }
         }
 
@@ -733,6 +787,13 @@ actor SearchIngestService {
             )
         } else {
             lastCleanAggregateBySource[sourceRaw] = nil
+        }
+        if hadRetryableFailure {
+            retryObligationBySource[source] = RetryObligation(
+                notBefore: retryImmediately ? nil : earliestRetryDate
+            )
+        } else {
+            retryObligationBySource[source] = nil
         }
 
         return Progress(processed: processed, total: total, skipped: skipped,
@@ -888,23 +949,19 @@ actor SearchIngestService {
         }()
 
         do {
-            try await db.begin()
-            try await db.upsertFile(path: session.filePath, mtime: file.mtime, size: file.size, source: sourceRaw)
-            try await db.upsertSessionMeta(meta)
-            try await db.upsertSessionSearch(sessionID: session.id,
-                                             source: sourceRaw,
-                                             mtime: file.searchMtime,
-                                             size: file.searchSize,
-                                             text: searchText)
-            if let toolIOText {
-                try await db.upsertSessionToolIO(sessionID: session.id,
-                                                 source: sourceRaw,
-                                                 mtime: file.searchMtime,
-                                                 size: file.searchSize,
-                                                 refTS: refTS,
-                                                 text: toolIOText)
-            }
-            try await db.commit()
+            try await db.commitSearchIngest(SearchIngestDBWrite(
+                path: session.filePath,
+                fileMtime: file.mtime,
+                fileSize: file.size,
+                source: sourceRaw,
+                meta: meta,
+                searchMtime: file.searchMtime,
+                searchSize: file.searchSize,
+                searchText: searchText,
+                toolIO: toolIOText.map {
+                    SearchIngestDBWrite.ToolIO(referenceTimestamp: refTS, text: $0)
+                }
+            ))
             // Search ingest already established the authoritative session revision.
             // Populate compact Economics evidence now so opening Analytics does not
             // have to discover and reread every historical transcript. This is
@@ -915,7 +972,6 @@ actor SearchIngestService {
             }
             return .ingested(selectedPath: session.filePath)
         } catch {
-            await db.rollbackSilently()
             return .parseFailed
         }
     }

@@ -298,14 +298,26 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     }
 
     func telemetryReadResult(for session: Session) async -> ReadResult {
-        await telemetry(for: session, revisionRetryCount: 0)
+        await telemetry(for: session, revisionRetryCount: 0, fixedPriceSnapshot: nil)
     }
 
     /// Transcript-derived evidence suitable for durable indexing. The returned
     /// telemetry has current event pricing but no live weekly-quota attribution;
     /// callers persist the token evidence and re-apply price/quota on warm reads.
-    func economicsIndexEvidence(for session: Session) async -> SessionTelemetryIndexEvidence? {
-        (await telemetryReadResult(for: session)).indexEvidence
+    func economicsIndexEvidence(
+        for session: Session,
+        priceSnapshot: RunwayPriceSnapshot? = nil
+    ) async -> SessionTelemetryIndexEvidence? {
+        let snapshot = priceSnapshot ?? priceTable.snapshot()
+        return (await telemetry(
+            for: session,
+            revisionRetryCount: 0,
+            fixedPriceSnapshot: snapshot
+        )).indexEvidence
+    }
+
+    func economicsPriceSnapshot() -> RunwayPriceSnapshot {
+        priceTable.snapshot()
     }
 
     /// Cheap revision proof used before accepting a persistent Economics row.
@@ -323,12 +335,14 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     /// Per-session telemetry intentionally remains stricter: without a durable
     /// transcript account id it still refuses to claim an account-scoped share.
     func economicsQuotaContext(for source: SessionSource,
-                               now: Date) -> WeeklyQuotaEconomicsContext? {
+                               now: Date,
+                               priceSnapshot: RunwayPriceSnapshot? = nil) -> WeeklyQuotaEconomicsContext? {
+        let snapshot = priceSnapshot ?? priceTable.snapshot()
         let descriptor = SessionSourceRegistry.descriptor(for: source)
         guard descriptor.telemetry.weeklyQuota.isAvailable,
               let context = quotaStore.economicsContext(provider: source.rawValue, now: now),
               context.calibrationProvenance.priceRevision
-                == priceTable.snapshot().rateRevision(forProvider: source.rawValue) else {
+                == snapshot.rateRevision(forProvider: source.rawValue) else {
             return nil
         }
         return context
@@ -337,12 +351,14 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     /// Reprices persisted token evidence and refreshes quota attribution without
     /// reopening the transcript. A revision or parser mismatch fails closed.
     func telemetry(fromIndexed evidence: SessionTelemetryIndexEvidence,
-                   for session: Session) -> SessionTelemetry? {
+                   for session: Session,
+                   verifiedRevisionKey: String? = nil,
+                   priceSnapshot: RunwayPriceSnapshot? = nil) -> SessionTelemetry? {
         guard evidence.telemetry.source == session.source,
               evidence.telemetry.parserVersion == SessionTelemetry.parserVersion,
-              economicsRevisionKey(for: session) == evidence.revisionKey else { return nil }
+              (verifiedRevisionKey ?? economicsRevisionKey(for: session)) == evidence.revisionKey else { return nil }
         let descriptor = SessionSourceRegistry.descriptor(for: session.source)
-        let snapshot = priceTable.snapshot()
+        let snapshot = priceSnapshot ?? priceTable.snapshot()
         let pricing = TelemetryPricingIdentity(snapshot: snapshot)
         let repriced = repricedTelemetry(
             evidence.telemetry,
@@ -360,7 +376,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         )
     }
 
-    private func telemetry(for session: Session, revisionRetryCount: Int) async -> ReadResult {
+    private func telemetry(
+        for session: Session,
+        revisionRetryCount: Int,
+        fixedPriceSnapshot: RunwayPriceSnapshot?
+    ) async -> ReadResult {
         guard !Task.isCancelled else { return .unavailable(.cancelled) }
         let descriptor = SessionSourceRegistry.descriptor(for: session.source)
         let capabilities = descriptor.telemetry
@@ -379,7 +399,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             for: session,
             telemetryRevision: descriptor.telemetryRevision) else { return .unavailable(.missingRevision) }
 
-        let pricingSnapshot = priceTable.snapshot()
+        let pricingSnapshot = fixedPriceSnapshot ?? priceTable.snapshot()
         let pricing = TelemetryPricingIdentity(snapshot: pricingSnapshot)
         let key = TelemetryRequestKey(
             source: session.source,
@@ -406,7 +426,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 expectedRevision: expectedRevision,
                 telemetryRevision: descriptor.telemetryRevision) else {
                 guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
-                return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
+                return await telemetry(
+                    for: session,
+                    revisionRetryCount: revisionRetryCount + 1,
+                    fixedPriceSnapshot: fixedPriceSnapshot
+                )
             }
             let result = applyingWeeklyQuota(to: cached.telemetry,
                                              source: session.source,
@@ -420,7 +444,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 expectedRevision: expectedRevision,
                 telemetryRevision: descriptor.telemetryRevision) else {
                 guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
-                return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
+                return await telemetry(
+                    for: session,
+                    revisionRetryCount: revisionRetryCount + 1,
+                    fixedPriceSnapshot: fixedPriceSnapshot
+                )
             }
             guard !Task.isCancelled else { return .unavailable(.cancelled) }
             metrics.recordCacheHit()
@@ -449,14 +477,22 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         guard let computed = scan.computed else {
             guard scan.revisionChanged else { return .unavailable(.scanFailed) }
             guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
-            return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
+            return await telemetry(
+                for: session,
+                revisionRetryCount: revisionRetryCount + 1,
+                fixedPriceSnapshot: fixedPriceSnapshot
+            )
         }
         guard isCurrentTelemetryRevision(
             for: session,
             expectedRevision: expectedRevision,
             telemetryRevision: descriptor.telemetryRevision) else {
             guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
-            return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
+            return await telemetry(
+                for: session,
+                revisionRetryCount: revisionRetryCount + 1,
+                fixedPriceSnapshot: fixedPriceSnapshot
+            )
         }
         guard !Task.isCancelled else { return .unavailable(.cancelled) }
         let result = applyingWeeklyQuota(to: computed.telemetry,
@@ -471,7 +507,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             expectedRevision: expectedRevision,
             telemetryRevision: descriptor.telemetryRevision) else {
             guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
-            return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
+            return await telemetry(
+                for: session,
+                revisionRetryCount: revisionRetryCount + 1,
+                fixedPriceSnapshot: fixedPriceSnapshot
+            )
         }
         guard !Task.isCancelled else { return .unavailable(.cancelled) }
         return .available(

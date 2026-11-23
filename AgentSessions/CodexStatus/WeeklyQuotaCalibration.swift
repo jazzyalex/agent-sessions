@@ -1964,6 +1964,39 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         return true
     }
 
+    /// Drops process-local evidence for one provider and invalidates any scan
+    /// still running under the previous credential/scope. Persisted evidence is
+    /// left untouched; normal scope checks decide whether it can be restored.
+    func invalidateInMemoryScope(provider: String) {
+        lock.lock(); defer { lock.unlock() }
+        ledgers[provider] = nil
+        trackers[provider] = nil
+        bootstraps[provider] = nil
+        bestBootstraps[provider] = nil
+        latestUsedPercentPoints[provider] = nil
+        latestQuotaObservedAt[provider] = nil
+        latestResetsAt[provider] = nil
+        activeScopeKeys[provider] = nil
+        snapshots[provider] = nil
+        migratedProviders.remove(provider)
+        scanCooldownUntil[provider] = nil
+        dispatchedScans[provider] = nil
+        scannedAnchors[provider] = nil
+        // Keep an old scan registered until its defer runs. The generation bump
+        // below makes its result ineligible; retaining the slot prevents a second
+        // scan from overlapping it and the old defer from clearing the new lease.
+        scopeGenerations[provider] = (scopeGenerations[provider] ?? 0) + 1
+        restored = restored.filter {
+            !$0.hasPrefix("quotaMeter.weeklyCalibration.\(provider).")
+        }
+        restoredSnapshotKeys = restoredSnapshotKeys.filter {
+            !$0.hasPrefix("quotaMeter.weeklyQuotaSnapshots.\(provider).")
+        }
+        lastSnapshotPersistedAt = lastSnapshotPersistedAt.filter {
+            !$0.key.hasPrefix("quotaMeter.weeklyQuotaSnapshots.\(provider).")
+        }
+    }
+
     func resetForTesting() {
         lock.lock(); defer { lock.unlock() }
         ledgers.removeAll()

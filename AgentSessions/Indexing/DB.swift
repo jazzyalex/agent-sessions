@@ -816,6 +816,43 @@ actor IndexDB {
 
     func rollbackSilently() { try? exec("ROLLBACK;") }
 
+    /// Owns the complete search write transaction in one actor turn. Callers must
+    /// not assemble a transaction from separate awaited actor calls: another DB
+    /// operation could otherwise begin or roll back work on the same connection.
+    func commitSearchIngest(_ write: SearchIngestDBWrite) throws {
+        try begin()
+        do {
+            try upsertFile(
+                path: write.path,
+                mtime: write.fileMtime,
+                size: write.fileSize,
+                source: write.source
+            )
+            try upsertSessionMeta(write.meta)
+            try upsertSessionSearch(
+                sessionID: write.meta.sessionID,
+                source: write.source,
+                mtime: write.searchMtime,
+                size: write.searchSize,
+                text: write.searchText
+            )
+            if let toolIO = write.toolIO {
+                try upsertSessionToolIO(
+                    sessionID: write.meta.sessionID,
+                    source: write.source,
+                    mtime: write.searchMtime,
+                    size: write.searchSize,
+                    refTS: toolIO.referenceTimestamp,
+                    text: toolIO.text
+                )
+            }
+            try commit()
+        } catch {
+            rollbackSilently()
+            throw error
+        }
+    }
+
     // MARK: - Economics telemetry index
 
     /// Atomically replaces one session's repricable telemetry payload and its
@@ -3771,7 +3808,7 @@ actor IndexDB {
 }
 
 // MARK: - DTOs
-struct SessionMetaRow {
+struct SessionMetaRow: Sendable {
     let sessionID: String
     let source: String
     let path: String
@@ -3852,6 +3889,23 @@ struct SessionMetaRow {
         self.surface = surface ?? codexSurface
         self.openClawPreviewDigest = openClawPreviewDigest
     }
+}
+
+struct SearchIngestDBWrite: Sendable {
+    struct ToolIO: Sendable {
+        let referenceTimestamp: Int64
+        let text: String
+    }
+
+    let path: String
+    let fileMtime: Int64
+    let fileSize: Int64
+    let source: String
+    let meta: SessionMetaRow
+    let searchMtime: Int64
+    let searchSize: Int64
+    let searchText: String
+    let toolIO: ToolIO?
 }
 
 struct SessionDayRow {

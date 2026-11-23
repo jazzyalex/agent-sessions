@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Search refreshes commit each session atomically across concurrent providers and remember quiet, cooled-down, cancelled, or failed work until it is eligible to retry.
+- Economics calculations use one captured price revision from quota attribution through stored-session repricing. Claude drops weekly calibration when its Web credential owner changes.
 - Fast transcript scrolling defers directory and Presence scans until wheel, keyboard, or scrollbar input settles, then coalesces the delayed refresh. Large Codex cold opens reliably replace their provisional tail with the full transcript. Jump controls keep a stable view hierarchy as their visibility changes.
 - Fast transcript scrolling does less work updating the tool row under the pointer. Copy and Raw reappear when scrolling settles.
 - Live session polling matches agent processes in one pass. Claude keeps CLI and Desktop scan caches separate and shares overlapping reads. Codex skips decoding log headers without account metadata.

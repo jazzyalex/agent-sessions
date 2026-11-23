@@ -117,6 +117,20 @@ final class AnalyticsService: ObservableObject {
         agentFilter: AnalyticsAgentFilter,
         projectFilter: AnalyticsProjectFilter
     ) async {
+        await calculateEconomics(
+            dateRange: dateRange,
+            agentFilter: agentFilter,
+            projectFilter: projectFilter,
+            priceRetryCount: 0
+        )
+    }
+
+    private func calculateEconomics(
+        dateRange: AnalyticsDateRange,
+        agentFilter: AnalyticsAgentFilter,
+        projectFilter: AnalyticsProjectFilter,
+        priceRetryCount: Int
+    ) async {
         let generation = UUID()
         economicsGeneration = generation
         economicsPhase = .analyzing
@@ -146,9 +160,14 @@ final class AnalyticsService: ObservableObject {
         }
 
         let engine = SessionTelemetryEngine.shared
+        let priceSnapshot = engine.economicsPriceSnapshot()
         let quotaContextBySource = Dictionary(uniqueKeysWithValues:
             Set(candidates.map(\.source)).compactMap { source in
-                engine.economicsQuotaContext(for: source, now: now).map { (source, $0) }
+                engine.economicsQuotaContext(
+                    for: source,
+                    now: now,
+                    priceSnapshot: priceSnapshot
+                ).map { (source, $0) }
             }
         )
         let keys = candidates.map {
@@ -173,8 +192,8 @@ final class AnalyticsService: ObservableObject {
                 source: session.source,
                 sessionID: session.id
             )
-            guard let expectedRevision = engine.economicsRevisionKey(for: session),
-                  let lookup = lookupByKey[storageKey],
+            guard let lookup = lookupByKey[storageKey],
+                  let expectedRevision = engine.economicsRevisionKey(for: session),
                   lookup.parserVersion == SessionTelemetry.parserVersion,
                   lookup.revisionKey == expectedRevision else {
                 missing.append(session)
@@ -191,7 +210,12 @@ final class AnalyticsService: ObservableObject {
                 durableAccountHash: lookup.durableAccountHash,
                 revisionKey: lookup.revisionKey
             )
-            if let telemetry = engine.telemetry(fromIndexed: evidence, for: session) {
+            if let telemetry = engine.telemetry(
+                fromIndexed: evidence,
+                for: session,
+                verifiedRevisionKey: expectedRevision,
+                priceSnapshot: priceSnapshot
+            ) {
                 observations.append(contentsOf: economicsObservations(
                     for: session,
                     telemetry: telemetry,
@@ -224,7 +248,10 @@ final class AnalyticsService: ObservableObject {
                     group.addTask {
                         EconomicsBackfillResult(
                             session: session,
-                            evidence: await engine.economicsIndexEvidence(for: session)
+                            evidence: await engine.economicsIndexEvidence(
+                                for: session,
+                                priceSnapshot: priceSnapshot
+                            )
                         )
                     }
                 }
@@ -246,14 +273,26 @@ final class AnalyticsService: ObservableObject {
                             telemetry: evidence.telemetry
                         )
                         _ = await repository.storeEconomicsTelemetry(entry)
-                        if let telemetry = engine.telemetry(fromIndexed: evidence, for: result.session) {
-                            observations.append(contentsOf: economicsObservations(
+                        guard !Task.isCancelled, economicsGeneration == generation else {
+                            group.cancelAll()
+                            return
+                        }
+                        if let verifiedRevision = engine.economicsRevisionKey(for: result.session),
+                           verifiedRevision == evidence.revisionKey {
+                            if let telemetry = engine.telemetry(
+                                fromIndexed: evidence,
                                 for: result.session,
-                                telemetry: telemetry,
-                                quotaContext: quotaContextBySource[result.session.source],
-                                period: current
-                            ))
-                            analyzedSessions += 1
+                                verifiedRevisionKey: verifiedRevision,
+                                priceSnapshot: priceSnapshot
+                            ) {
+                                observations.append(contentsOf: economicsObservations(
+                                    for: result.session,
+                                    telemetry: telemetry,
+                                    quotaContext: quotaContextBySource[result.session.source],
+                                    period: current
+                                ))
+                                analyzedSessions += 1
+                            }
                         }
                     }
                     economicsProgress = EconomicsAnalysisProgress(
@@ -276,7 +315,10 @@ final class AnalyticsService: ObservableObject {
                         group.addTask {
                             EconomicsBackfillResult(
                                 session: session,
-                                evidence: await engine.economicsIndexEvidence(for: session)
+                                evidence: await engine.economicsIndexEvidence(
+                                    for: session,
+                                    priceSnapshot: priceSnapshot
+                                )
                             )
                         }
                     }
@@ -285,6 +327,21 @@ final class AnalyticsService: ObservableObject {
         }
 
         guard !Task.isCancelled, economicsGeneration == generation else { return }
+        let latestPrices = engine.economicsPriceSnapshot()
+        let usedSources = Set(candidates.map(\.source))
+        let priceRevisionChanged = usedSources.contains { source in
+            latestPrices.rateRevision(forProvider: source.rawValue)
+                != priceSnapshot.rateRevision(forProvider: source.rawValue)
+        }
+        if priceRevisionChanged, priceRetryCount == 0 {
+            await calculateEconomics(
+                dateRange: dateRange,
+                agentFilter: agentFilter,
+                projectFilter: projectFilter,
+                priceRetryCount: 1
+            )
+            return
+        }
         publishEconomicsSnapshot(
             observations: observations,
             current: current,

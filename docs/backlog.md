@@ -45,6 +45,40 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ---
 
+## Search and Transcript Integrity
+
+### Qualify search rows by source as well as raw session ID
+> **open** · sev: high · urg: low · verified 2026-11-22
+
+- **What:** `session_meta`, `session_search`, and `session_tool_io` still key durable rows by raw `session_id` alone. Two providers that emit the same ID can replace each other's metadata and searchable text.
+- **Where:** `AgentSessions/Indexing/DB.swift` table creation and the search upsert, lookup, and delete paths that join by `session_id`.
+- **Fix shape:** migrate all three tables to source-qualified identity, rebuild their FTS rows, and add a fixture in which two sources share one raw ID but remain independently searchable.
+- **Why deferred:** this needs a schema migration and full search-index compatibility review; it is not part of the narrow post-merge P1 correction.
+- **Risk if wrong:** search can show the wrong provider's metadata or silently lose one of the colliding sessions.
+- **To close:** prove migration from the current schema and pass search, deletion, rebuild, and same-ID cross-source tests.
+
+### Validate transcript append-only reuse against earlier edits
+> **open** · sev: med · urg: low · verified 2026-11-22
+
+- **What:** the transcript append fast path proves that the event count grew, but it does not prove that already-rendered earlier events are unchanged. A provider rewrite plus append in one refresh can retain stale rendered content.
+- **Where:** `AgentSessions/Views/TranscriptPlainView.swift`, `tryAppendPlainTranscript` and its append-state guards.
+- **Fix shape:** retain an inexpensive prefix revision or another provider-backed append-only proof and fall back to the full render whenever the earlier prefix changes.
+- **Why deferred:** the current release work targeted scrolling and cold-open responsiveness; changing the append contract needs provider fixtures and performance qualification.
+- **Risk if wrong:** a live transcript can temporarily display an older version of an edited event until a later full reload.
+- **To close:** add rewrite-plus-append tests for supported appendable providers and repeat the large-session scroll/open profile.
+
+## Analytics Performance
+
+### Move warm OpenCode Economics revision validation off the main actor
+> **open** · sev: med · urg: low · verified 2026-11-22
+
+- **What:** a warm Economics calculation validates each OpenCode session by synchronously reading and hashing SQLite payloads while `AnalyticsService` is isolated to the main actor.
+- **Where:** `AgentSessions/Analytics/Services/AnalyticsService.swift` warm lookup loop and `AgentSessions/Telemetry/SessionTelemetryEngine.swift` OpenCode revision generation.
+- **Fix shape:** compute the revision checks in a bounded background task, then publish only results that still match the calculation generation.
+- **Why deferred:** the merged P1 fix makes one calculation internally consistent; moving validation changes scheduling and needs a representative large OpenCode database profile.
+- **Risk if wrong:** opening or filtering Economics can cause a visible main-thread pause on large OpenCode histories.
+- **To close:** add cancellation/revision tests and profile a warm Economics refresh with a large current-schema database.
+
 ## Cross-Surface Session Storage
 
 ### OpenCode Desktop selected-but-idle presence
