@@ -315,7 +315,11 @@ final class ClaudeUsageModel: ObservableObject {
         }
         sourceManager = nil
         service = nil
-        weeklyCalibrationInput = nil
+        // Stop is also an ownership boundary. Credential observers are removed
+        // below, so leaving the process-local calibration alive would let a new
+        // Economics run reuse Web quota after the cookie changes while tracking
+        // is disabled.
+        invalidateWeeklyCalibrationOwner()
         fiveHourProjectionTracker.reset()
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
@@ -738,6 +742,11 @@ final class ClaudeUsageModel: ObservableObject {
                                                             raw: weeklyResetAnchorText,
                                                             now: s.fetchedAt),
            weekResetAt > max(now, s.fetchedAt) {
+            WeeklyQuotaCalibrationStore.shared.bindInMemoryScopeOwner(
+                provider: "claude",
+                owner: s.ownership,
+                requestLease: s.requestLease
+            )
             // Historical bootstrap, same as Codex: without this the Claude rows
             // wait out the 60s budget and fall to "n/a" permanently, because a
             // weekly tick is far too rare to be a first reading.
@@ -810,6 +819,11 @@ final class ClaudeUsageModel: ObservableObject {
     func setWeeklyCalibrationInputForTesting(_ snapshot: ClaudeLimitSnapshot,
                                               priceRevision: Int? = nil) {
         weeklyCalibrationInput = (snapshot, priceRevision)
+        WeeklyQuotaCalibrationStore.shared.bindInMemoryScopeOwner(
+            provider: "claude",
+            owner: snapshot.ownership,
+            requestLease: snapshot.requestLease
+        )
     }
 
     var hasWeeklyCalibrationInputForTesting: Bool {

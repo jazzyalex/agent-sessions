@@ -185,6 +185,11 @@ struct WeeklyQuotaEconomicsContext: Sendable {
     /// this generation so a suspended Economics calculation cannot publish a
     /// context captured for the previous owner.
     let ownerGeneration: Int
+    /// Process-local producer identity. Claude Web contexts also retain the
+    /// request lease so a credential epoch change invalidates them immediately,
+    /// before NotificationCenter can deliver its deferred cleanup callback.
+    let processOwner: String?
+    let processOwnerLease: ClaudeCredentialRequestLease?
 }
 
 /// One accepted observation of the conversion.
@@ -926,6 +931,15 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// dispatch and its completion is discarded if it no longer matches, so an old
     /// account's in-flight walk cannot land in the new account's state.
     private var scopeGenerations: [String: Int] = [:]
+    private struct ProcessOwnerBinding {
+        let owner: String?
+        let lease: ClaudeCredentialRequestLease?
+    }
+    /// The provider's process-local producer identity is intentionally separate
+    /// from durable calibration scope. Claude exposes no durable account id, so
+    /// this is the only proof that a Web-derived conversion still belongs to the
+    /// credential that produced it.
+    private var processOwnerBindings: [String: ProcessOwnerBinding] = [:]
     /// Backoff after a scan that returned nothing usable. Long enough that a
     /// permanently unscannable root costs one walk per interval, short enough that
     /// a transient read failure self-heals well inside a weekly window.
@@ -1397,14 +1411,40 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             resetAt: resetAt,
             isLocalEstimate: calibration.state == .localEstimate,
             calibrationProvenance: provenance,
-            ownerGeneration: scopeGenerations[provider] ?? 0
+            ownerGeneration: scopeGenerations[provider] ?? 0,
+            processOwner: processOwnerBindings[provider]?.owner,
+            processOwnerLease: processOwnerBindings[provider]?.lease
         )
     }
 
     func economicsContextIsCurrent(provider: String,
                                    context: WeeklyQuotaEconomicsContext) -> Bool {
+        lock.lock()
+        let generationIsCurrent = (scopeGenerations[provider] ?? 0) == context.ownerGeneration
+        let currentBinding = processOwnerBindings[provider]
+        let ownerIsCurrent = currentBinding?.owner == context.processOwner
+        lock.unlock()
+
+        guard generationIsCurrent, ownerIsCurrent else { return false }
+        guard context.processOwner?.hasPrefix("web:") == true
+                || context.processOwner?.hasPrefix("legacy:") == true else {
+            return true
+        }
+        guard let lease = context.processOwnerLease,
+              lease.owner == context.processOwner else { return false }
+        return lease.isValid
+    }
+
+    /// Binds otherwise-unscoped process-local evidence to the producer that
+    /// supplied it. Callers invalidate the whole scope before changing owners.
+    func bindInMemoryScopeOwner(provider: String,
+                                owner: String?,
+                                requestLease: ClaudeCredentialRequestLease?) {
         lock.lock(); defer { lock.unlock() }
-        return (scopeGenerations[provider] ?? 0) == context.ownerGeneration
+        processOwnerBindings[provider] = ProcessOwnerBinding(
+            owner: owner,
+            lease: requestLease
+        )
     }
 
     /// Ledger activity since a bootstrap was measured, or nil when the ledger
@@ -1988,6 +2028,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         latestQuotaObservedAt[provider] = nil
         latestResetsAt[provider] = nil
         activeScopeKeys[provider] = nil
+        processOwnerBindings[provider] = nil
         snapshots[provider] = nil
         migratedProviders.remove(provider)
         scanCooldownUntil[provider] = nil
@@ -2026,6 +2067,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         scanCooldownUntil.removeAll()
         dispatchedScans.removeAll()
         scopeGenerations.removeAll()
+        processOwnerBindings.removeAll()
         scannedAnchors.removeAll()
         scansInFlight.removeAll()
         scanStartedAt.removeAll()

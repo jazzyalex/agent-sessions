@@ -342,7 +342,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         guard descriptor.telemetry.weeklyQuota.isAvailable,
               let context = quotaStore.economicsContext(provider: source.rawValue, now: now),
               context.calibrationProvenance.priceRevision
-                == snapshot.rateRevision(forProvider: source.rawValue) else {
+                == snapshot.rateRevision(forProvider: source.rawValue),
+              quotaStore.economicsContextIsCurrent(
+                provider: source.rawValue,
+                context: context
+              ) else {
             return nil
         }
         return context

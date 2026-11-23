@@ -47,6 +47,16 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Search and Transcript Integrity
 
+### Back off stable unsupported search-ingest revisions
+> **open** · sev: low · urg: low · verified 2026-11-22
+
+- **What:** the recurring retry dispatcher now wakes every due provider, but an unchanged source whose scanner returns `unsupported` can remain immediately retryable and be revisited on every monitor interval.
+- **Where:** `AgentSessions/Search/SearchDatabaseAdapters.swift` scanner outcomes and `AgentSessions/Search/SearchIngestService.swift` retry-obligation handling for unsupported files.
+- **Fix shape:** remember the stable unsupported artifact revision, or assign bounded backoff, and clear it only when that revision or provider capability changes.
+- **Why deferred:** the behavior is bounded by the monitor interval and does not strand supported indexing; changing retry classification needs provider fixtures for cold archives and newly supported revisions.
+- **Risk if wrong:** permanently unsupported artifacts consume avoidable background CPU during otherwise idle monitoring.
+- **To close:** prove an unchanged unsupported artifact is not retried every tick and that a changed revision or newly supported format becomes eligible immediately.
+
 ### Qualify search rows by source as well as raw session ID
 > **open** · sev: high · urg: low · verified 2026-11-22
 

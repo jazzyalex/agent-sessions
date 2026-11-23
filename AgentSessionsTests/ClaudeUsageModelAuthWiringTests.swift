@@ -199,6 +199,18 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
                              "replacement publication must invalidate A synchronously before an observer can inspect B")
     }
 
+    func testStoppingUsageTrackingInvalidatesCalibrationBeforeRemovingCredentialObservers() {
+        let model = ClaudeUsageModel()
+        let generation = model.weeklyCalibrationGenerationForTesting
+        model.setWeeklyCalibrationInputForTesting(Self.sampleSnapshot(source: .oauthEndpoint))
+
+        model.setEnabled(false)
+
+        XCTAssertFalse(model.hasWeeklyCalibrationInputForTesting)
+        XCTAssertGreaterThan(model.weeklyCalibrationGenerationForTesting, generation,
+                             "tracking stop must close the quota scope before its credential observers are removed")
+    }
+
     private static func sampleSnapshot(source: ClaudeUsageSource) -> ClaudeLimitSnapshot {
         ClaudeLimitSnapshot(fetchedAt: Date(), source: source, health: .live,
             fiveHourUsedRatio: 0.3, fiveHourResetText: "", weeklyUsedRatio: 0.1, weeklyResetText: "",

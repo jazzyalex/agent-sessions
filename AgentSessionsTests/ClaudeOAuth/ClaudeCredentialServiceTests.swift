@@ -299,6 +299,44 @@ final class ClaudeCredentialServiceTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testEconomicsContextRejectsCredentialMutationBeforeObserverDelivery() async throws {
+        let service = ClaudeCredentialService(store: FakeClaudeSecretStore(value: "credential-A"))
+        let lease = ClaudeCredentialRequestLease(owner: service.currentOwner, credentials: service)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting()
+        store.bindInMemoryScopeOwner(
+            provider: "claude",
+            owner: lease.owner,
+            requestLease: lease
+        )
+        let now = Date()
+        let context = WeeklyQuotaEconomicsContext(
+            percentPointsPerDollar: 1,
+            windowStart: now.addingTimeInterval(-3600),
+            resetAt: now.addingTimeInterval(3600),
+            isLocalEstimate: true,
+            calibrationProvenance: WeeklyQuotaCalibrationProvenance(
+                origin: .live,
+                acquiredAt: now,
+                scannedAt: nil,
+                sourceFamily: "web",
+                accountHash: nil,
+                priceRevision: 1,
+                originResetAt: now.addingTimeInterval(3600),
+                originWindowStart: now.addingTimeInterval(-3600)
+            ),
+            ownerGeneration: 0,
+            processOwner: lease.owner,
+            processOwnerLease: lease
+        )
+        XCTAssertTrue(store.economicsContextIsCurrent(provider: "claude", context: context))
+
+        try await service.remove()
+
+        XCTAssertFalse(store.economicsContextIsCurrent(provider: "claude", context: context),
+                       "accepted credential mutation must revoke quota before a deferred observer runs")
+    }
+
     private func waitForSignal(_ semaphore: DispatchSemaphore,
                                timeoutMilliseconds: Int) async -> Bool {
         await Task.detached(priority: .userInitiated) {
