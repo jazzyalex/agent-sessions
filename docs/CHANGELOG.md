@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixes
+
+- **Sessions with screenshots open and index faster.** A Codex line over 5 MB that holds an image was searched for its call id with a generic collection search, twice. On one 232 MB session of 48,073 events that took 46 of the 56 seconds of the full parse; the parse now takes 12 seconds. The parsed session is unchanged.
+
 ## [6.6] - 2026-11-18
 
 ### Highlights

@@ -3502,11 +3502,12 @@ final class SessionIndexer: ObservableObject {
             let megabytes = utf8Count / 1_000_000
             // A tool output keeps its type, `call_id` and time, so the call still shows a result
             // (spec §9: "Large event (N MB) not loaded").
-            if let callID = rawCallID(in: line), let outputType = rawOutputType(in: line) {
+            let callID = rawCallID(in: line)
+            if let callID, let outputType = rawOutputType(in: line) {
                 let time = rawTopLevelTimestamp(in: line).map { #","timestamp":"\#($0)""# } ?? ""
                 return #"{"type":"\#(outputType)","call_id":"\#(callID)"\#(time),"output":"Large event (\#(megabytes) MB) not loaded"}"#
             }
-            if let callID = rawCallID(in: line) {
+            if let callID {
                 return #"{"type":"omitted","call_id":"\#(callID)","text":"[Large event omitted - \#(megabytes)MB]"}"#
             }
             return #"{"type":"omitted","text":"[Large event omitted - \#(megabytes)MB]"}"#
@@ -3555,14 +3556,20 @@ final class SessionIndexer: ObservableObject {
     /// Returns nil when the key is missing or the value is empty, longer than 256 bytes,
     /// or holds an escape or control byte (the value is embedded in a stub unescaped).
     static func rawCallID(in line: String) -> String? {
-        let utf8 = line.utf8
-        guard let key = utf8.firstRange(of: rawCallIDKey) else { return nil }
-        let tail = utf8[key.upperBound...].prefix(257)
-        guard let end = tail.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
-        let value = utf8[key.upperBound..<end]
-        guard !value.isEmpty,
-              !value.contains(where: { $0 == UInt8(ascii: "\\") || $0 < 0x20 }) else { return nil }
-        return String(decoding: value, as: UTF8.self)
+        // A byte search over the line's storage. The generic collection search took seconds on a
+        // line of several megabytes, and this runs only on such lines.
+        var line = line
+        return line.withUTF8 { bytes -> String? in
+            guard let base = bytes.baseAddress,
+                  let hit = memmem(base, bytes.count, rawCallIDKey, rawCallIDKey.count) else { return nil }
+            let start = base.distance(to: hit.assumingMemoryBound(to: UInt8.self)) + rawCallIDKey.count
+            let tail = bytes[start..<min(start + 257, bytes.count)]
+            guard let end = tail.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
+            let value = bytes[start..<end]
+            guard !value.isEmpty,
+                  !value.contains(where: { $0 == UInt8(ascii: "\\") || $0 < 0x20 }) else { return nil }
+            return String(decoding: value, as: UTF8.self)
+        }
     }
 
     private static let rawOutputTypes = ["function_call_output", "custom_tool_call_output"]

@@ -127,6 +127,18 @@ final class ToolEventFieldsParserTests: XCTestCase {
         XCTAssertTrue(output.text.contains("Large event (5 MB) not loaded"), output.text)
     }
 
+    func testRawCallIDFindsTheFirstIDAnywhereInALargeLine() {
+        let filler = String(repeating: "A", count: 6_000_000)
+        XCTAssertEqual(SessionIndexer.rawCallID(in: #"{"call_id":"call_first","output":"\#(filler)","call_id":"call_second"}"#), "call_first")
+        XCTAssertEqual(SessionIndexer.rawCallID(in: #"{"arguments":"\#(filler)","call_id":"call_end"}"#), "call_end")
+        XCTAssertEqual(SessionIndexer.rawCallID(in: #"{"note":"café 😀","call_id":"call_after_unicode"}"#), "call_after_unicode")
+        XCTAssertNil(SessionIndexer.rawCallID(in: #"{"output":"\#(filler)"}"#))
+        XCTAssertNil(SessionIndexer.rawCallID(in: #"{"call_id":""}"#))
+        XCTAssertNil(SessionIndexer.rawCallID(in: #"{"call_id":"a\"b"}"#))
+        XCTAssertNil(SessionIndexer.rawCallID(in: #"{"call_id":"\#(String(repeating: "x", count: 300))"}"#))
+        XCTAssertNil(SessionIndexer.rawCallID(in: #"{"call_id":"unterminated"#))
+    }
+
     func testCodexLargeLineOfAnotherPayloadTypeStaysMetaEvenWithAnOutputTypeInside() throws {
         // The payload is not an output; an output type appears only nested inside it.
         let dir = try makeTempDir("codex-stub-nested")
