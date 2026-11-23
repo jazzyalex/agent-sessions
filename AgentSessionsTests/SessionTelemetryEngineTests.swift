@@ -1744,6 +1744,13 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(economics.windowStart, now.addingTimeInterval(-3600))
         XCTAssertEqual(economics.resetAt, reset)
         XCTAssertTrue(economics.isLocalEstimate)
+        XCTAssertTrue(engine.economicsQuotaContextIsCurrent(economics, for: .codex))
+
+        quota.invalidateInMemoryScope(provider: "codex")
+
+        XCTAssertFalse(engine.economicsQuotaContextIsCurrent(economics, for: .codex),
+                       "a suspended Economics run must reject quota captured for an invalidated owner")
+        XCTAssertNil(engine.economicsQuotaContext(for: .codex, now: now))
     }
 
     func testCodexWeeklyQuotaFailsClosedForMismatchedDurableTranscriptAccount() async throws {

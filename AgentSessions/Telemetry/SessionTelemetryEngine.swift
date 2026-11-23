@@ -348,6 +348,14 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         return context
     }
 
+    func economicsQuotaContextIsCurrent(_ context: WeeklyQuotaEconomicsContext,
+                                        for source: SessionSource) -> Bool {
+        quotaStore.economicsContextIsCurrent(
+            provider: source.rawValue,
+            context: context
+        )
+    }
+
     /// Reprices persisted token evidence and refreshes quota attribution without
     /// reopening the transcript. A revision or parser mismatch fails closed.
     func telemetry(fromIndexed evidence: SessionTelemetryIndexEvidence,

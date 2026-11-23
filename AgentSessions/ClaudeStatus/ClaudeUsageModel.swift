@@ -631,6 +631,12 @@ final class ClaudeUsageModel: ObservableObject {
     /// Apply a normalized ClaudeLimitSnapshot from the source manager.
     private func applyLimitSnapshot(_ s: ClaudeLimitSnapshot) {
         guard !s.hasWebOwnership || s.webOwnershipIsCurrent else { return }
+        if currentSnapshotOwnership != s.ownership {
+            // Invalidate before publishing the replacement owner. A queued
+            // credential-change observer may run after B has replaced A and can
+            // no longer infer that A's unscoped calibration is obsolete.
+            invalidateWeeklyCalibrationOwner()
+        }
         currentSnapshotOwnership = s.ownership
         let now = Date()
         let freshness = Self.alertFreshness(for: s, now: now)
@@ -808,6 +814,10 @@ final class ClaudeUsageModel: ObservableObject {
 
     var hasWeeklyCalibrationInputForTesting: Bool {
         weeklyCalibrationInput != nil
+    }
+
+    var weeklyCalibrationGenerationForTesting: Int {
+        WeeklyQuotaCalibrationStore.shared.scopeGenerationForTesting(provider: "claude")
     }
 #endif
 

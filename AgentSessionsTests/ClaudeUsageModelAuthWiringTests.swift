@@ -184,6 +184,21 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
                        "price refresh must not replay quota from a revoked Web credential")
     }
 
+    func testReplacementOwnerInvalidatesCalibrationBeforeDeferredCredentialObserver() {
+        let model = ClaudeUsageModel()
+        var accountA = Self.sampleSnapshot(source: .oauthEndpoint)
+        accountA.ownership = "oauth:account-a"
+        model.applyLimitSnapshotForTesting(accountA)
+        let generationA = model.weeklyCalibrationGenerationForTesting
+
+        var accountB = Self.sampleSnapshot(source: .oauthEndpoint)
+        accountB.ownership = "oauth:account-b"
+        model.applyLimitSnapshotForTesting(accountB)
+
+        XCTAssertGreaterThan(model.weeklyCalibrationGenerationForTesting, generationA,
+                             "replacement publication must invalidate A synchronously before an observer can inspect B")
+    }
+
     private static func sampleSnapshot(source: ClaudeUsageSource) -> ClaudeLimitSnapshot {
         ClaudeLimitSnapshot(fetchedAt: Date(), source: source, health: .live,
             fiveHourUsedRatio: 0.3, fiveHourResetText: "", weeklyUsedRatio: 0.1, weeklyResetText: "",

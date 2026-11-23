@@ -264,6 +264,12 @@ actor SearchIngestService {
         return obligation.notBefore.map { now >= $0 } ?? true
     }
 
+#if DEBUG
+    func setRetryObligationForTesting(for source: SessionSource, notBefore: Date?) {
+        retryObligationBySource[source] = RetryObligation(notBefore: notBefore)
+    }
+#endif
+
     /// Re-ingest cooldown tiers: a changed-but-quiet file is re-ingested at most
     /// this often. Big files cost a full parse to refresh a 48k-char sampled
     /// text — throttle hard; the deep-scan tier covers staleness in between.

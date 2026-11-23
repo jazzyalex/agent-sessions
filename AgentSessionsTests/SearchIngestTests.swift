@@ -172,6 +172,36 @@ final class SearchIngestTests: XCTestCase {
                        "the failed transaction must not leave its file row behind")
     }
 
+    func testRecurringMonitorSelectsDueRetriesWithoutProviderSnapshotChange() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let service = SearchIngestService(db: db)
+        let now = Date(timeIntervalSince1970: 4_000_000)
+        await service.setRetryObligationForTesting(
+            for: .codex,
+            notBefore: now.addingTimeInterval(-1)
+        )
+        await service.setRetryObligationForTesting(
+            for: .claude,
+            notBefore: now.addingTimeInterval(60)
+        )
+
+        let recorder = await MainActor.run { SearchRetryRecorder() }
+        let due = await UnifiedSessionIndexer.dispatchDueSearchIngestRetries(
+            service: service,
+            sources: [.claude, .codex, .opencode],
+            now: now
+        ) { source in
+            recorder.record(source)
+        }
+
+        XCTAssertEqual(due, [.codex],
+                       "the recurring monitor must wake due work even when no provider fingerprint changes")
+        let dispatched = await MainActor.run { recorder.sources }
+        XCTAssertEqual(dispatched, [.codex],
+                       "the recurring monitor must dispatch every due retry selected by its production scheduler")
+    }
+
     // MARK: - deleteSessionsForPaths
 
     func testDeleteSessionsForPathsAlsoRemovesSearchRows() async throws {
@@ -2047,4 +2077,13 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertEqual(stored?.originSource, "cli")
     }
 
+}
+
+@MainActor
+private final class SearchRetryRecorder {
+    private(set) var sources: [SessionSource] = []
+
+    func record(_ source: SessionSource) {
+        sources.append(source)
+    }
 }

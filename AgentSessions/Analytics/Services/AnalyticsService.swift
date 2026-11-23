@@ -121,7 +121,8 @@ final class AnalyticsService: ObservableObject {
             dateRange: dateRange,
             agentFilter: agentFilter,
             projectFilter: projectFilter,
-            priceRetryCount: 0
+            priceRetryCount: 0,
+            quotaRetryCount: 0
         )
     }
 
@@ -129,7 +130,8 @@ final class AnalyticsService: ObservableObject {
         dateRange: AnalyticsDateRange,
         agentFilter: AnalyticsAgentFilter,
         projectFilter: AnalyticsProjectFilter,
-        priceRetryCount: Int
+        priceRetryCount: Int,
+        quotaRetryCount: Int
     ) async {
         let generation = UUID()
         economicsGeneration = generation
@@ -230,6 +232,16 @@ final class AnalyticsService: ObservableObject {
 
         var completed = candidates.count - missing.count
         economicsProgress = EconomicsAnalysisProgress(completed: completed, total: candidates.count)
+        guard economicsQuotaContextsAreCurrent(quotaContextBySource, engine: engine) else {
+            await retryEconomicsAfterQuotaOwnershipChange(
+                dateRange: dateRange,
+                agentFilter: agentFilter,
+                projectFilter: projectFilter,
+                priceRetryCount: priceRetryCount,
+                quotaRetryCount: quotaRetryCount
+            )
+            return
+        }
         publishEconomicsSnapshot(
             observations: observations,
             current: current,
@@ -299,7 +311,8 @@ final class AnalyticsService: ObservableObject {
                         completed: completed,
                         total: candidates.count
                     )
-                    if completed % 4 == 0 || completed == candidates.count {
+                    if (completed % 4 == 0 || completed == candidates.count),
+                       economicsQuotaContextsAreCurrent(quotaContextBySource, engine: engine) {
                         publishEconomicsSnapshot(
                             observations: observations,
                             current: current,
@@ -327,19 +340,33 @@ final class AnalyticsService: ObservableObject {
         }
 
         guard !Task.isCancelled, economicsGeneration == generation else { return }
-        let latestPrices = engine.economicsPriceSnapshot()
-        let usedSources = Set(candidates.map(\.source))
-        let priceRevisionChanged = usedSources.contains { source in
-            latestPrices.rateRevision(forProvider: source.rawValue)
-                != priceSnapshot.rateRevision(forProvider: source.rawValue)
-        }
-        if priceRevisionChanged, priceRetryCount == 0 {
-            await calculateEconomics(
+        guard economicsQuotaContextsAreCurrent(quotaContextBySource, engine: engine) else {
+            await retryEconomicsAfterQuotaOwnershipChange(
                 dateRange: dateRange,
                 agentFilter: agentFilter,
                 projectFilter: projectFilter,
-                priceRetryCount: 1
+                priceRetryCount: priceRetryCount,
+                quotaRetryCount: quotaRetryCount
             )
+            return
+        }
+        let latestPrices = engine.economicsPriceSnapshot()
+        if latestPrices.semanticRevision != priceSnapshot.semanticRevision {
+            if priceRetryCount == 0 {
+                await calculateEconomics(
+                    dateRange: dateRange,
+                    agentFilter: agentFilter,
+                    projectFilter: projectFilter,
+                    priceRetryCount: 1,
+                    quotaRetryCount: quotaRetryCount
+                )
+            } else {
+                // A second manifest change during the one retry is rare, but a
+                // known-old partial snapshot must not become the final live total.
+                economicsSnapshot = .empty
+                economicsProgress = .empty
+                economicsPhase = .ready
+            }
             return
         }
         publishEconomicsSnapshot(
@@ -350,6 +377,39 @@ final class AnalyticsService: ObservableObject {
             analyzedSessions: analyzedSessions
         )
         economicsPhase = .ready
+    }
+
+    private func economicsQuotaContextsAreCurrent(
+        _ contexts: [SessionSource: WeeklyQuotaEconomicsContext],
+        engine: SessionTelemetryEngine
+    ) -> Bool {
+        contexts.allSatisfy { source, context in
+            engine.economicsQuotaContextIsCurrent(context, for: source)
+        }
+    }
+
+    private func retryEconomicsAfterQuotaOwnershipChange(
+        dateRange: AnalyticsDateRange,
+        agentFilter: AnalyticsAgentFilter,
+        projectFilter: AnalyticsProjectFilter,
+        priceRetryCount: Int,
+        quotaRetryCount: Int
+    ) async {
+        if quotaRetryCount == 0 {
+            await calculateEconomics(
+                dateRange: dateRange,
+                agentFilter: agentFilter,
+                projectFilter: projectFilter,
+                priceRetryCount: priceRetryCount,
+                quotaRetryCount: 1
+            )
+        } else {
+            // Repeated owner churn cannot be made attributable. Fail closed while
+            // retaining a responsive, retryable Economics surface.
+            economicsSnapshot = .empty
+            economicsProgress = .empty
+            economicsPhase = .ready
+        }
     }
 
     private func publishEconomicsSnapshot(

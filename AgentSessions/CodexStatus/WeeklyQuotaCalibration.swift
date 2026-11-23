@@ -181,6 +181,10 @@ struct WeeklyQuotaEconomicsContext: Sendable {
     let resetAt: Date
     let isLocalEstimate: Bool
     let calibrationProvenance: WeeklyQuotaCalibrationProvenance
+    /// Process-local ownership token. Credential/account invalidation advances
+    /// this generation so a suspended Economics calculation cannot publish a
+    /// context captured for the previous owner.
+    let ownerGeneration: Int
 }
 
 /// One accepted observation of the conversion.
@@ -1392,8 +1396,15 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             windowStart: resetAt.addingTimeInterval(-windowSeconds),
             resetAt: resetAt,
             isLocalEstimate: calibration.state == .localEstimate,
-            calibrationProvenance: provenance
+            calibrationProvenance: provenance,
+            ownerGeneration: scopeGenerations[provider] ?? 0
         )
+    }
+
+    func economicsContextIsCurrent(provider: String,
+                                   context: WeeklyQuotaEconomicsContext) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return (scopeGenerations[provider] ?? 0) == context.ownerGeneration
     }
 
     /// Ledger activity since a bootstrap was measured, or nil when the ledger
@@ -2024,6 +2035,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     }
 
     #if DEBUG
+    func scopeGenerationForTesting(provider: String) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return scopeGenerations[provider] ?? 0
+    }
+
     func setBootstrapForTesting(provider: String, result: WeeklyQuotaBootstrapResult?) {
         lock.lock(); defer { lock.unlock() }
         bootstraps[provider] = result

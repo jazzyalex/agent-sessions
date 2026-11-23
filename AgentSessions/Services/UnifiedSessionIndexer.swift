@@ -1534,6 +1534,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             while !Task.isCancelled {
                 await TranscriptScrollSignal.shared.waitUntilQuiet()
                 guard !Task.isCancelled else { break }
+                await kickDueSearchIngestRetries()
+                guard !Task.isCancelled else { break }
                 if await checkForNewOpenCodeSessions() { break }
             }
             let intervalSeconds = await MainActor.run { [weak self] () -> UInt64 in
@@ -1679,6 +1681,65 @@ final class UnifiedSessionIndexer: ObservableObject {
                 self.requestProviderRefresh(source: source, reason: "directory-snapshot-delta", trigger: .monitor)
             }
         }
+    }
+
+    /// Time-gated and transient ingest failures can become retryable without a
+    /// provider directory/WAL fingerprint changing. Check the service's durable
+    /// in-process obligation from the recurring monitor tick itself, not only
+    /// after a provider refresh that may never be requested again.
+    private func kickDueSearchIngestRetries(now: Date = Date()) async {
+        guard let service = searchIngestService,
+              !Task.isCancelled,
+              !TranscriptScrollSignal.shared.isScrolling else { return }
+        let enabledSources = await MainActor.run {
+            SessionSource.allCases.filter { AgentEnablement.isEnabled($0) }
+        }
+        await Self.dispatchDueSearchIngestRetries(
+            service: service,
+            sources: enabledSources,
+            now: now
+        ) { [weak self] source in
+            guard let self,
+                  !TranscriptScrollSignal.shared.isScrolling,
+                  AgentEnablement.isEnabled(source) else { return }
+            self.kickSearchIngest(source: source)
+        }
+    }
+
+    @discardableResult
+    static func dispatchDueSearchIngestRetries(
+        service: SearchIngestService,
+        sources: [SessionSource],
+        now: Date,
+        kick: @escaping @MainActor @Sendable (SessionSource) -> Void
+    ) async -> [SessionSource] {
+        let dueSources = await dueSearchIngestRetrySources(
+            service: service,
+            sources: sources,
+            now: now
+        )
+        guard !Task.isCancelled, !dueSources.isEmpty else { return dueSources }
+        await MainActor.run {
+            for source in dueSources {
+                kick(source)
+            }
+        }
+        return dueSources
+    }
+
+    static func dueSearchIngestRetrySources(
+        service: SearchIngestService,
+        sources: [SessionSource],
+        now: Date
+    ) async -> [SessionSource] {
+        var due: [SessionSource] = []
+        due.reserveCapacity(sources.count)
+        for source in sources {
+            if await service.retryIsDue(for: source, now: now) {
+                due.append(source)
+            }
+        }
+        return due
     }
 
     @MainActor
