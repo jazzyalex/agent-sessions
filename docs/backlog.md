@@ -79,6 +79,16 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Analytics Performance
 
+### Clear already-displayed Economics quota on owner revocation
+> **open** · sev: med · urg: low · verified 2026-11-22
+
+- **What:** new and suspended Economics calculations reject a revoked quota owner, but a quota estimate already assigned to the current view can remain visible until another calculation completes or the user refreshes.
+- **Where:** `AgentSessions/Analytics/Services/AnalyticsService.swift` snapshot publication and `AgentSessions/Analytics/Views/AnalyticsView.swift` Economics presentation lifetime.
+- **Fix shape:** invalidate the displayed quota component when the owner changes, and perform one final context-validity check after constructing a snapshot immediately before assigning it.
+- **Why deferred:** the release blocker was stale data entering a new publication; clearing an existing rendered value is a separate UI-state contract that needs an end-to-end suspended-calculation test.
+- **Risk if wrong:** after credential removal or account replacement, an already-open Economics view can temporarily show the previous owner's estimated quota rate.
+- **To close:** drive an owner change while Economics is open and while a calculation is suspended, then prove the rendered quota clears immediately and cannot be reassigned by the old calculation.
+
 ### Move warm OpenCode Economics revision validation off the main actor
 > **open** · sev: med · urg: low · verified 2026-11-22
 
