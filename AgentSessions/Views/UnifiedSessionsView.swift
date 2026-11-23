@@ -534,8 +534,10 @@ struct UnifiedSessionsView: View {
         let baseRows: [Session]
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty || searchCoordinator.isRunning {
-            // Apply current UI filters and sort to search results
-            baseRows = unified.applyFiltersAndSort(to: searchCoordinator.results)
+            // SearchCoordinator already applied filters to authoritative sessions.
+            // Its display rows omit events, so filtering them again can hide valid
+            // command and operator-scoped matches. Only preserve display ordering.
+            baseRows = unified.sortSearchResultsForDisplay(searchCoordinator.results)
         } else {
             baseRows = unified.sessions
         }
@@ -1098,13 +1100,12 @@ struct UnifiedSessionsView: View {
                     sideChatParentContext: sideChatParentContextByID[s.id],
                     isExpanded: !groupFolding.isCollapsed(s.id, standard: collapsedParents),
                     onToggleExpand: { id in
-                        let wasCollapsed = groupFolding.isCollapsed(id, standard: collapsedParents)
+                        collapsedParents = groupFolding.standardCollapsedParents(
+                            afterToggling: id,
+                            expandableParentIDs: currentExpandableParentIDs,
+                            standard: collapsedParents
+                        )
                         groupFolding = .standard
-                        if wasCollapsed {
-                            collapsedParents.remove(id)
-                        } else {
-                            collapsedParents.insert(id)
-                        }
                     }
                     )
                     .equatable()

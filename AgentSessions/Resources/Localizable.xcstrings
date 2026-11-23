@@ -1,6 +1,125 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Search every local session with verified coverage, keep large transcripts smoother, and compare agent economics.": {
+      "comment": "One-line teaser for the Agent Sessions 7.0 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search every local session with verified coverage, keep large transcripts smoother, and compare agent economics."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通过已验证的覆盖范围搜索每个本地会话，让大型对话记录更流畅，并比较代理经济性。"
+          }
+        }
+      }
+    },
+    "Search with verified coverage": {
+      "comment": "Title for the Agent Sessions 7.0 What's New highlight about complete local-history search verification.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search with verified coverage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索结果有明确覆盖范围"
+          }
+        }
+      }
+    },
+    "Search terms, phrases, prefixes, Boolean queries, and complete session IDs across every enabled agent. Press Return to verify the eligible local history and see what was complete, incomplete, or unresolved.": {
+      "comment": "Body for the Agent Sessions 7.0 What's New search highlight. Return is the keyboard key used to start full verification.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search terms, phrases, prefixes, Boolean queries, and complete session IDs across every enabled agent. Press Return to verify the eligible local history and see what was complete, incomplete, or unresolved."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可在所有已启用的代理中搜索关键词、短语、前缀、布尔查询和完整会话 ID。按下 Return 可验证符合条件的本地历史记录，并查看哪些结果完整、不完整或尚未解析。"
+          }
+        }
+      }
+    },
+    "Smoother large transcripts": {
+      "comment": "Title for the Agent Sessions 7.0 What's New highlight about reduced work while opening and scrolling large transcripts.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Smoother large transcripts"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大型对话记录更流畅"
+          }
+        }
+      }
+    },
+    "Fast scrolling defers directory and Presence scans until input settles, while large sessions reuse transcript work and reliably replace provisional content with the full conversation.": {
+      "comment": "Body for the Agent Sessions 7.0 What's New performance highlight. Presence is the app's local live-session process discovery.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast scrolling defers directory and Presence scans until input settles, while large sessions reuse transcript work and reliably replace provisional content with the full conversation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速滚动时，目录和 Presence 扫描会延后到输入停止；大型会话会复用对话记录处理结果，并可靠地用完整对话替换临时内容。"
+          }
+        }
+      }
+    },
+    "Economics in Analytics": {
+      "comment": "Title for the Agent Sessions 7.0 What's New highlight about the Economics view in Analytics.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Economics in Analytics"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics 中的经济性"
+          }
+        }
+      }
+    },
+    "Compare API-equivalent value and attributed quota by agent, model, and thinking effort. Coverage limits and unavailable evidence stay explicit.": {
+      "comment": "Body for the Agent Sessions 7.0 What's New Economics highlight. API-equivalent value is an estimate, not a bill.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compare API-equivalent value and attributed quota by agent, model, and thinking effort. Coverage limits and unavailable evidence stay explicit."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按代理、模型和思考强度比较 API 等值和归因配额。覆盖范围限制和不可用的证据都会明确显示。"
+          }
+        }
+      }
+    },
     "Resume options": {
       "localizations": {
         "en": {

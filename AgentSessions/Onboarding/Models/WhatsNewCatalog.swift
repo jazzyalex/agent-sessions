@@ -106,6 +106,7 @@ enum WhatsNewCatalog {
     private static let githubSponsorsURL = URL(string: "https://github.com/sponsors/jazzyalex")
 
     private static let teasers: [String: LocalizedStringResource] = [
+        "7.0": "Search every local session with verified coverage, keep large transcripts smoother, and compare agent economics.",
         "4.3": "A calmer first run, and a What's New you open on your own terms.",
         "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
         "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",
@@ -126,6 +127,34 @@ enum WhatsNewCatalog {
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "7.0": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "magnifyingglass",
+                title: "Search with verified coverage",
+                body: "Search terms, phrases, prefixes, Boolean queries, and complete session IDs across every enabled agent. Press Return to verify the eligible local history and see what was complete, incomplete, or unresolved."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "text.page",
+                title: "Smoother large transcripts",
+                body: "Fast scrolling defers directory and Presence scans until input settles, while large sessions reuse transcript work and reliably replace provisional content with the full conversation."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "chart.bar.xaxis",
+                title: "Economics in Analytics",
+                body: "Compare API-equivalent value and attributed quota by agent, model, and thinking effort. Coverage limits and unavailable evidence stay explicit."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "6.5": [
             WhatsNewItem(
                 kind: .highlight,

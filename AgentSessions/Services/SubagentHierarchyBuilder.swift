@@ -36,6 +36,30 @@ enum SessionGroupFolding: CaseIterable, Sendable {
         case .expanded: false
         }
     }
+
+    /// Materializes a global folding mode before one parent is toggled. IDs that
+    /// are currently outside the hierarchy stay in the persisted standard set.
+    func standardCollapsedParents(
+        afterToggling id: String,
+        expandableParentIDs: Set<String>,
+        standard: Set<String>
+    ) -> Set<String> {
+        var collapsed = standard
+        switch self {
+        case .standard:
+            break
+        case .collapsed:
+            collapsed.formUnion(expandableParentIDs)
+        case .expanded:
+            collapsed.subtract(expandableParentIDs)
+        }
+        if collapsed.contains(id) {
+            collapsed.remove(id)
+        } else {
+            collapsed.insert(id)
+        }
+        return collapsed
+    }
 }
 
 enum SubagentHierarchyBuilder {
@@ -45,6 +69,9 @@ enum SubagentHierarchyBuilder {
         let sessions: [Session]
         /// Per-session row metadata keyed by `session.id`.
         let rowMeta: [String: SubagentRowMeta]
+        /// Every in-scope parent that has a resolved child, including nested
+        /// parents hidden by a folded ancestor.
+        let expandableParentIDs: Set<String>
     }
 
     /// URL-free equivalent of URL(fileURLWithPath:).deletingPathExtension()
@@ -179,7 +206,8 @@ enum SubagentHierarchyBuilder {
             }
         }
 
-        return Result(sessions: flatSessions, rowMeta: rowMeta)
+        return Result(sessions: flatSessions, rowMeta: rowMeta,
+                      expandableParentIDs: Set(childrenByParentID.keys))
     }
 
     /// Returns a flat result with all sessions at depth 0 (no hierarchy nesting).
@@ -189,7 +217,7 @@ enum SubagentHierarchyBuilder {
         for s in sessions {
             rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: false, childCount: 0)
         }
-        return Result(sessions: sessions, rowMeta: rowMeta)
+        return Result(sessions: sessions, rowMeta: rowMeta, expandableParentIDs: [])
     }
 
     private static func resolvedParentID(

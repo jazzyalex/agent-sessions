@@ -816,6 +816,10 @@ final class ClaudeUsageModel: ObservableObject {
         applyLimitSnapshot(snapshot)
     }
 
+    func applyLegacyUsageSnapshotForTesting(_ snapshot: ClaudeUsageSnapshot) {
+        apply(snapshot)
+    }
+
     func setWeeklyCalibrationInputForTesting(_ snapshot: ClaudeLimitSnapshot,
                                               priceRevision: Int? = nil) {
         weeklyCalibrationInput = (snapshot, priceRevision)
@@ -837,7 +841,10 @@ final class ClaudeUsageModel: ObservableObject {
 
     /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {
-        weeklyCalibrationInput = nil
+        if currentSnapshotOwnership != nil || weeklyCalibrationInput != nil {
+            invalidateWeeklyCalibrationOwner()
+        }
+        currentSnapshotOwnership = nil
         let now = Date()
         if transientReason != nil { transientReason = nil }
         prepareWeeklyBurnRateTracker(for: .tmuxUsage)

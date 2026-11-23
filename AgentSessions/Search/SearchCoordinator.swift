@@ -157,7 +157,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     func setAppActive(_ active: Bool) {
         appIsActive = active
         if !active {
-            cancel(clearResults: false)
+            if isRunning { cancel(clearResults: false) }
             prewarmTasksByID.values.forEach { $0.cancel() }
             prewarmTasksByID.removeAll()
             prewarmInFlight.removeAll()
@@ -183,32 +183,35 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }
 
+    @MainActor
     func cancel() { cancel(clearResults: false) }
+    @MainActor
     func clear() { cancel(clearResults: true) }
 
+    @MainActor
     private func cancel(clearResults: Bool) {
+        let shouldReportCancellation = !clearResults
+            && (isRunning || currentTask != nil || deepScanTask != nil)
         SearchResponsivenessMetrics.shared.record(.searchCancelRequested, operationID: metricOperation, status: .cancelled)
         currentTask?.cancel()
         currentTask = nil
         deepScanTask?.cancel()
         deepScanTask = nil
-        cancelledVerificationRunID = clearResults ? nil : runID
-        let cancellationRun = UUID()
-        runID = cancellationRun
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.runID == cancellationRun else { return }
-            self.isRunning = false
-            self.wasCanceled = true
-            self.deepScanEnabled = false
-            self.progress = .init()
-            if clearResults {
-                self.results = []
-                self.queryError = nil
-                self.eligibleCount = 0
-                self.completeCount = 0
-                self.incompleteCount = 0
-                self.unresolvedCount = 0
-            }
+        cancelledVerificationRunID = shouldReportCancellation ? runID : nil
+        runID = UUID()
+        isRunning = false
+        wasCanceled = shouldReportCancellation
+        deepScanEnabled = false
+        progress = .init()
+        if clearResults {
+            results = []
+            verifiedKeys = []
+            snippets = [:]
+            queryError = nil
+            eligibleCount = 0
+            completeCount = 0
+            incompleteCount = 0
+            unresolvedCount = 0
         }
     }
 

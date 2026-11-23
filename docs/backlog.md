@@ -47,6 +47,56 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Search and Transcript Integrity
 
+### Align bounded OpenCode legacy search with shared-store ownership
+> **open** · sev: med · urg: low · verified 2026-11-22
+
+- **What:** a legacy OpenCode session may scan the shared message tree up to the global 256 MiB raw-read bound, and one unrelated candidate above the per-file limit can make every affected old session report incomplete before its own parts are parsed. The bounded adapter also recognizes only the exact string `"2"` marker while the display parser accepts a trimmed integer value.
+- **Where:** `AgentSessions/Search/SearchBoundedFileAdapter.swift` OpenCode legacy discovery/marker projection and `AgentSessions/Services/OpenCodeSessionParser.swift` schema-marker parsing.
+- **Fix shape:** build one bounded shared-tree ownership inventory per store revision, isolate an oversized foreign candidate to its own owner/incomplete reason, and parse the marker with the same bounded integer policy as the transcript parser.
+- **Why deferred:** the current behavior is explicit incomplete coverage rather than a false result, and generated v2 stores use canonical markers. Changing the shared legacy budget needs multi-session allocation and cancellation fixtures.
+- **Risk if wrong:** migrated or noncanonical OpenCode stores can do repeated shared-directory work or lose otherwise readable legacy search coverage.
+- **To close:** cover two legacy sessions sharing an oversized foreign part, canonical and whitespace/integer marker variants, cancellation, raw-read totals, and one-inventory-per-revision reuse.
+
+### Coalesce deep-search publications and batch temporary eligibility writes
+> **open** · sev: low · urg: low · verified 2026-11-22
+
+- **What:** Return verification republishes full result, verified-key, and snippet collections on each 100 ms progress tick even when the hit set is unchanged. Large FTS eligibility sets are inserted into the temporary table one autocommit row at a time.
+- **Where:** `AgentSessions/Search/SearchCoordinator.swift` deep-verification publication loop and `AgentSessions/Indexing/DB.swift` `installSearchEligibleIDs`.
+- **Fix shape:** gate collection publication on a dirty hit/verification state while continuing progress counters, and wrap temporary membership replacement in a savepoint or actor-local transaction compatible with existing callers.
+- **Why deferred:** the current work fixed correctness and source bounds; this optimization needs SwiftUI invalidation metrics and nested-transaction tests before changing the search hot path.
+- **Risk if wrong:** long Return searches can spend avoidable main-thread and SQLite CPU without changing visible results.
+- **To close:** measure publication count and eligibility installation time on a large library, then prove cancellation and query replacement leave no stale temporary membership.
+
+### Match OpenCode legacy search ownership for UTF-16 parts
+> **open** · sev: med · urg: low · verified 2026-11-22
+
+- **What:** the OpenCode transcript parser accepts UTF-16LE/BE JSON through Foundation, while the bounded legacy owner projection recognizes only byte-compatible UTF-8 JSON. An imported UTF-16 flat part can be omitted from search without an explicit incomplete-coverage reason.
+- **Where:** `AgentSessions/Search/SearchBoundedFileAdapter.swift` legacy `messageID` projection and `AgentSessions/Services/OpenCodeSessionParser.swift` legacy part loading.
+- **Fix shape:** detect supported UTF-16 BOM/encoding under the existing per-record bound and use a bounded Foundation owner projection, or record incomplete coverage whenever ownership cannot be classified.
+- **Why deferred:** current OpenCode-generated stores use UTF-8 and all release-blocking UTF-8 layouts now match the display parser; adding encoding fallback needs UTF-16LE/BE fixtures and allocation measurements.
+- **Risk if wrong:** manually imported or externally rewritten UTF-16 legacy parts can appear in the transcript but not in search results.
+- **To close:** add LE/BE owner, duplicate-key, positive, negative, and resource-limit tests and prove the fallback stays within the scanner allocation budget.
+
+### Restart active search when visibility preferences change
+> **open** · sev: med · urg: low · verified 2026-11-22
+
+- **What:** changing the zero-message, 1–2-message, or housekeeping visibility preferences recomputes the session list, but an in-flight or completed Return search keeps the eligibility scope captured when its request began.
+- **Where:** `AgentSessions/Views/Preferences/PreferencesView+General.swift`, `AgentSessions/Views/UnifiedSessionsView.swift`, and `AgentSessions/Services/UnifiedSessionIndexer.swift` search-candidate construction.
+- **Fix shape:** publish these three preference changes through an observable revision and restart the active query, while preserving the sort-only display path for authoritative eventless search rows.
+- **Why deferred:** the stale scope clears on the next query and the search display correction must not reintroduce the Has Commands or side-chat double-filter bug; a proper change needs preference-notification and in-flight cancellation tests.
+- **Risk if wrong:** after changing one of these filters, search results can temporarily reflect the old visibility scope even though the ordinary list has already refreshed.
+- **To close:** toggle each preference during Return verification and after completion, then prove the old request is cancelled and the replacement uses the new candidate set.
+
+### Remove or implement the large tool-output search preference
+> **open** · sev: low · urg: low · verified 2026-11-22
+
+- **What:** Settings offers “Include large tool outputs in global search,” but Return search always scans supported output fields and the preference reader has no caller.
+- **Where:** `AgentSessions/Views/Preferences/PreferencesView+General.swift`, `AgentSessions/Search/SearchCoordinator.swift`, and `AgentSessions/Search/SearchTextSegment.swift`.
+- **Fix shape:** either remove the obsolete control and help copy, or make it an explicit coverage policy whose omissions are visible in search coverage. Do not silently skip source fields.
+- **Why deferred:** Return search is intentionally exhaustive for supported fields; changing that contract or removing localized UI copy is not required to close the v7 search correctness blockers.
+- **Risk if wrong:** users may believe disabling the setting reduces search work when it currently changes nothing.
+- **To close:** choose the product contract, add preference/coverage tests, and verify the Settings copy against actual search behavior.
+
 ### Back off stable unsupported search-ingest revisions
 > **open** · sev: low · urg: low · verified 2026-11-22
 
@@ -78,6 +128,16 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **To close:** add rewrite-plus-append tests for supported appendable providers and repeat the large-session scroll/open profile.
 
 ## Analytics Performance
+
+### Coalesce cold Economics aggregation off the main actor
+> **open** · sev: med · urg: low · verified 2026-11-22
+
+- **What:** cold Economics progress rebuilds totals, rows, and trends over the growing observation set after every four completed sessions. The cumulative aggregation work is quadratic in session count and currently runs on the main actor.
+- **Where:** `AgentSessions/Analytics/Services/AnalyticsService.swift` progress publication and `AgentSessions/Analytics/Models/EconomicsAnalytics.swift` snapshot aggregation.
+- **Fix shape:** keep progress publication cheap, coalesce snapshot construction on a bounded background task, and revalidate calculation generation, price revision, quota owner, and cancellation before publication.
+- **Why deferred:** source inspection confirms the repeated full aggregation, but representative cold-library frame latency has not been measured and the change needs cancellation/ownership tests.
+- **Risk if wrong:** opening Economics on a large uncached history can cause avoidable main-thread pauses and CPU drain.
+- **To close:** profile a representative cold backfill, add generation and owner-replacement tests, and prove snapshot rebuild count is bounded rather than proportional to every four sessions.
 
 ### Clear already-displayed Economics quota on owner revocation
 > **open** · sev: med · urg: low · verified 2026-11-22

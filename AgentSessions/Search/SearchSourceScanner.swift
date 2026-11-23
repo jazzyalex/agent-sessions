@@ -93,13 +93,25 @@ enum SearchSourceScanner {
                     try Task.checkCancellation()
                     let predicate = SearchPredicateAccumulator(query: query, tokenizer: tokenizer)
                     var snippet: String?
-                    let summary = scanSegments(session: session) { segment in
+                    var matchingReasons: Set<SearchCoverageReason> = []
+                    var summary = scanSegments(session: session) { segment in
                         let before = predicate.witnesses.count
-                        try metrics.measured(.searchMatching, operationID: operation, parentID: parent, context: context) { try predicate.consume(field: segment.text) }
+                        do {
+                            try metrics.measured(.searchMatching, operationID: operation, parentID: parent, context: context) {
+                                try predicate.consume(field: segment.text)
+                            }
+                        } catch SearchTokenizer.Failure.resourceLimit {
+                            // One oversized field must not prevent the scanner from proving
+                            // the source revision or finding witnesses in later records.
+                            // Coverage remains incomplete, so negative/NOT results stay unknown.
+                            matchingReasons.insert(.resourceLimit)
+                            return
+                        }
                         if snippet == nil, predicate.witnesses.count > before {
                             snippet = String(decoding: segment.text.utf16.prefix(512), as: UTF16.self)
                         }
                     }
+                    summary.reasons.formUnion(matchingReasons)
                     metrics.record(.searchCoverageCounters, operationID: operation, parentID: parent, context: context,
                         status: summary.complete ? .succeeded : .partial,
                         counters: [.physicalBytes: Int64(summary.bytesRead), .decodedBytes: Int64(summary.decompressedBytes),

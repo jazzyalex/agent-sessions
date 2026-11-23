@@ -102,5 +102,35 @@ final class SearchCoordinatorVerificationTests: XCTestCase {
         coordinator.clear()
         await Task.yield()
         XCTAssertEqual(coordinator.eligibleCount, 0)
+        XCTAssertTrue(coordinator.verifiedKeys.isEmpty)
+        XCTAssertTrue(coordinator.snippets.isEmpty)
+        XCTAssertTrue(coordinator.results.isEmpty)
+        XCTAssertFalse(coordinator.wasCanceled)
+    }
+
+    func testAppDeactivationDoesNotRelabelSettledSearchAsCanceled() async throws {
+        let input = try row("settled", text: "needle")
+        let coordinator = SearchCoordinator(store: VerificationStore(), db: nil)
+        coordinator.start(query: "needle", filters: Filters(query: "needle"),
+                          allowed: [.claude], enableDeepScan: true, all: [input])
+        try await settled(coordinator)
+        XCTAssertEqual(coordinator.results.map(\.id), [input.id])
+        XCTAssertEqual(coordinator.verifiedKeys.count, 1)
+        XCTAssertFalse(coordinator.wasCanceled)
+
+        coordinator.setAppActive(false)
+        await Task.yield()
+
+        XCTAssertEqual(coordinator.results.map(\.id), [input.id])
+        XCTAssertEqual(coordinator.verifiedKeys.count, 1)
+        XCTAssertFalse(coordinator.wasCanceled)
+
+        coordinator.clear()
+        coordinator.setAppActive(false)
+
+        XCTAssertTrue(coordinator.results.isEmpty)
+        XCTAssertTrue(coordinator.verifiedKeys.isEmpty)
+        XCTAssertTrue(coordinator.snippets.isEmpty)
+        XCTAssertFalse(coordinator.wasCanceled)
     }
 }

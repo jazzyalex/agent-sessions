@@ -205,9 +205,7 @@ enum SessionRowsBuilder {
 
         let cachedExpandableParentIDs: Set<String>
         if input.isHierarchyBrowsing {
-            cachedExpandableParentIDs = Set(newRows.compactMap { session in
-                hierarchyResult.rowMeta[session.id]?.hasChildren == true ? session.id : nil
-            })
+            cachedExpandableParentIDs = hierarchyResult.expandableParentIDs
         } else {
             cachedExpandableParentIDs = []
         }

@@ -2,6 +2,12 @@ import XCTest
 @testable import AgentSessions
 
 final class EconomicsSnapshotBuilderTests: XCTestCase {
+
+    func testShortDurationDistinguishesZeroFromSubminuteActivity() {
+        XCTAssertEqual(EconomicsAnalyticsView.shortDuration(0), "0m")
+        XCTAssertEqual(EconomicsAnalyticsView.shortDuration(30), "<1m")
+        XCTAssertEqual(EconomicsAnalyticsView.shortDuration(60), "1m")
+    }
     private let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

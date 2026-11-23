@@ -62,7 +62,7 @@ struct ToolOutputSyntax: Equatable, Sendable {
     private static let blameCommand = try! NSRegularExpression(pattern:
         #"\Agit[ \t]+blame(?:[ \t]+-L[ \t]+[1-9][0-9]*,[1-9][0-9]*)?[ \t]+(?:--[ \t]+)?('[^'\r\n]+'|"[^"\r\n]+"|[A-Za-z0-9_./+\-]+)\z"#)
     private static let blameLine = try! NSRegularExpression(pattern:
-        #"(?m)^\^?[0-9a-f]{7,40}[ \t]+\([^\r\n)]* [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}[ \t]+([1-9][0-9]*)\)[ \t](.*)$"#)
+        #"(?m)^\^?[0-9a-f]{7,40}[ \t]+\([^\r\n)]* [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}[ \t]+([1-9][0-9]*)\)[ \t]([^\r\n]*)$"#)
 
     static func blameRead(_ input: ToolPayloadValue?) -> Self? {
         guard case .string(let command) = input, command.utf8.count <= 8_192 else { return nil }
@@ -248,6 +248,7 @@ struct ToolOutputSyntax: Equatable, Sendable {
         let ns = output as NSString
         var snippets: [TranscriptSyntaxSnippet] = []
         var text = ""
+        var textUTF16Length = 0
         var spans: [TranscriptSyntaxSpan] = []
         var previousLine: Int?
         var previousEnd = 0
@@ -257,18 +258,29 @@ struct ToolOutputSyntax: Equatable, Sendable {
                 snippets.append(TranscriptSyntaxSnippet(key: .init(language: language, text: text), spans: spans))
             }
             text = ""
+            textUTF16Length = 0
             spans = []
         }
         Self.blameLine.enumerateMatches(in: output, range: NSRange(location: 0, length: ns.length)) { match, _, _ in
             guard let match, let line = Int(ns.substring(with: match.range(at: 1))) else { return }
-            if previousLine.map({ line != $0 + 1 }) == true || match.range.location > previousEnd + 1 {
+            let separator: String? = previousLine.flatMap { _ in
+                guard match.range.location >= previousEnd else { return nil }
+                return ns.substring(with: NSRange(location: previousEnd,
+                                                  length: match.range.location - previousEnd))
+            }
+            if previousLine.map({ line != $0 + 1 }) == true
+                || separator.map({ $0 != "\n" && $0 != "\r\n" }) == true {
                 finish()
             }
-            if !text.isEmpty { text.append("\n") }
+            if !text.isEmpty {
+                text.append("\n")
+                textUTF16Length += 1
+            }
             let range = match.range(at: 2)
-            spans.append(TranscriptSyntaxSpan(source: NSRange(location: text.utf16.count, length: range.length),
+            spans.append(TranscriptSyntaxSpan(source: NSRange(location: textUTF16Length, length: range.length),
                                               renderedLocation: range.location))
             text += ns.substring(with: range)
+            textUTF16Length += range.length
             previousLine = line
             previousEnd = NSMaxRange(match.range)
         }

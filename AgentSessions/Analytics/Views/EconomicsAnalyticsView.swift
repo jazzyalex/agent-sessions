@@ -537,7 +537,8 @@ struct EconomicsAnalyticsView: View {
         "\(value.formatted(.number.precision(.fractionLength(value < 10 ? 2 : 1))))%"
     }
 
-    private static func shortDuration(_ seconds: TimeInterval) -> String {
+    static func shortDuration(_ seconds: TimeInterval) -> String {
+        if seconds <= 0 { return "0m" }
         if seconds < 60 { return "<1m" }
         if seconds < 3600 { return "\(Int(seconds / 60))m" }
         return String(format: "%.1fh", seconds / 3600)

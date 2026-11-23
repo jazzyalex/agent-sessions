@@ -158,6 +158,21 @@ final class ToolDetailRendererTests: XCTestCase {
         }
     }
 
+    func testBlameSyntaxKeepsLFAndCRLFLinesInOneSnippet() throws {
+        let sourceLines = (1...140).map { line in
+            "1a7a90d6 (Alex 2026-10-07 14:13:51 -0700 \(line)) let value\(line) = \(line)"
+        }
+        let hint = try XCTUnwrap(ToolOutputSyntax.blameRead(.string("git blame a.swift")))
+        let lf = hint.snippets(in: decoded(sourceLines.joined(separator: "\n")))
+        let crlf = hint.snippets(in: decoded(sourceLines.joined(separator: "\r\n")))
+
+        XCTAssertEqual(lf.count, 1)
+        XCTAssertEqual(crlf.count, 1)
+        XCTAssertEqual(crlf.first?.key.text, lf.first?.key.text)
+        XCTAssertFalse(crlf.first?.key.text.contains("\r") ?? true)
+        XCTAssertEqual(crlf.first?.spans.count, 140)
+    }
+
     func testBlameDoesNotJoinCommentStateAcrossDifferentFiles() throws {
         // These adjacent line numbers would otherwise be tokenized as one open
         // comment, incorrectly hiding the declaration from the second file.

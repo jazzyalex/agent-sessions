@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import SQLite3
 
 extension SearchSourceScanner {
@@ -8,14 +9,23 @@ extension SearchSourceScanner {
     static func scanBoundedFiles(session: Session, summary: inout SearchScanSummary,
                                  metadata: ((Session) -> Void)? = nil,
                                  consume: (SearchTextSegment) throws -> Void) throws {
+        if session.source == .opencode {
+            try scanBoundedOpenCode(session: session, summary: &summary, metadata: metadata, consume: consume)
+            return
+        }
+        let fileManager = FileManager.default
         let primary = URL(fileURLWithPath: session.filePath).standardizedFileURL
-        let root = session.source == .kimi
-            ? KimiSessionDiscovery.stateFile(forWireFile: primary).deletingLastPathComponent()
-            : primary.deletingLastPathComponent()
+        let root: URL
+        if session.source == .kimi {
+            root = KimiSessionDiscovery.stateFile(forWireFile: primary).deletingLastPathComponent()
+        } else {
+            root = primary.deletingLastPathComponent()
+        }
         var paths = [primary]
+        var additionalDirectories: [URL] = []
         func optional(_ name: String) {
             let url = root.appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: url.path) { paths.append(url) }
+            if fileManager.fileExists(atPath: url.path) { paths.append(url) }
         }
         switch session.source {
         case .cline: paths.append(ClineSessionDiscovery.messagesFile(forManifest: primary))
@@ -25,7 +35,7 @@ extension SearchSourceScanner {
         case .fx:
             for name in ["session.json", "checkpoint.json", "authority.json", "display.json", "recovery.json", "events.jsonl"] { optional(name) }
             let artifacts = root.appendingPathComponent("tool-results")
-            if let enumerator = FileManager.default.enumerator(at: artifacts, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+            if let enumerator = fileManager.enumerator(at: artifacts, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
                 for case let file as URL in enumerator {
                     try Task.checkCancellation()
                     guard paths.count < 4096 else { throw Failure.resourceLimit }
@@ -36,7 +46,7 @@ extension SearchSourceScanner {
             if CursorACPStoreReader.isACPStore(primary) {
                 optional("meta.json"); optional("store.db-wal")
             }
-        case .opencode: throw Failure.unsupported // Historical split storage requires a dedicated adapter.
+        case .opencode: throw Failure.unsupported
         case .codex, .claude, .antigravity, .droid, .pi, .hermes, .qwen, .deepseekHarness: break
         default: throw Failure.unsupported
         }
@@ -44,7 +54,7 @@ extension SearchSourceScanner {
         paths = paths.filter { seen.insert($0.path).inserted }
         // Nested artifact directories participate in the source proof too: adding a
         // sibling tool-result file must invalidate the frozen snapshot.
-        let directories = Set(paths.map { $0.deletingLastPathComponent() } + [root] + (session.source == .fx ? [root.appendingPathComponent("tool-results")] : []))
+        let directories = Set(paths.map { $0.deletingLastPathComponent() } + additionalDirectories + [root] + (session.source == .fx ? [root.appendingPathComponent("tool-results")] : []))
         let directoryProofs = directories.map { ($0, SessionFileStat.precise(from: $0)) }
         let directoryBefore = SessionFileStat.precise(from: root)
         let artifactBefore = session.source.descriptor.artifactRevision?(primary)
@@ -220,5 +230,328 @@ extension SearchSourceScanner {
                   after.manifestRevision == artifactBefore.manifestRevision else { throw Failure.changed }
         }
         summary.revision = .init(files: proofs)
+    }
+
+    /// OpenCode stores one transcript across session, message, and part files. Freeze the
+    /// exact files used by the display parser once, then derive both search text and the
+    /// published revision from that private snapshot.
+    private static func scanBoundedOpenCode(session: Session, summary: inout SearchScanSummary,
+                                            metadata: ((Session) -> Void)?,
+                                            consume: (SearchTextSegment) throws -> Void) throws {
+        let fileManager = FileManager.default
+        let primary = URL(fileURLWithPath: session.filePath).standardizedFileURL
+        let root = primary.deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let messageRoot = root.appendingPathComponent("message", isDirectory: true)
+            .appendingPathComponent(session.id, isDirectory: true)
+        let partRoot = root.appendingPathComponent("part", isDirectory: true)
+        let container = fileManager.temporaryDirectory.appendingPathComponent("as-search-" + UUID().uuidString)
+        let temporary = container.appendingPathComponent(root.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        try fileManager.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: container) }
+
+        var directoryProofs: [(url: URL, stat: SessionFileStat?)] = []
+        var provedDirectories = Set<String>()
+        var proofs: [SearchSourceRevision.File] = []
+        var frozenPaths = Set<String>()
+        var payloadCharge = chunkBytes * 2
+        var visitedEntries = 0
+        let maximumVisitedEntries = 65_536
+        var legacyLookupBytes = 0
+        let maximumLegacyLookupBytes = 256 * 1024 * 1024
+        var legacyLookupProofs: [(url: URL, stat: SessionFileStat)] = []
+        var legacyLookupDigest = SHA256()
+        var unresolvedLegacyIDs = Set<String>()
+
+        func checkInventoryLimit() throws {
+            guard proofs.count < 4096 else { throw Failure.resourceLimit }
+        }
+
+        func proveDirectory(_ directory: URL) throws {
+            let standardized = directory.standardizedFileURL
+            guard provedDirectories.insert(standardized.path).inserted else { return }
+            guard directoryProofs.count < maximumVisitedEntries else { throw Failure.resourceLimit }
+            directoryProofs.append((standardized, SessionFileStat.precise(from: standardized)))
+        }
+
+        func walkDirectory(_ directory: URL, recursive: Bool,
+                           visit: (URL, URLResourceValues) throws -> Void) throws {
+            try proveDirectory(directory)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory) else { return }
+            guard isDirectory.boolValue else { throw Failure.changed }
+            guard let enumerator = fileManager.enumerator(
+                at: directory,
+                includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { throw Failure.changed }
+            while let url = enumerator.nextObject() as? URL {
+                try Task.checkCancellation()
+                visitedEntries += 1
+                guard visitedEntries <= maximumVisitedEntries else { throw Failure.resourceLimit }
+                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+                if values.isDirectory == true {
+                    try proveDirectory(url)
+                    if !recursive { enumerator.skipDescendants() }
+                }
+                try visit(url, values)
+            }
+        }
+
+        func recordLegacyLookupProof(path: URL, stat: SessionFileStat) {
+            let resolved = path.resolvingSymlinksInPath()
+            legacyLookupProofs.append((resolved, stat))
+            let identity = [resolved.path, String(stat.mtime), String(stat.size),
+                            stat.fingerprint ?? "", stat.changeTime.map(String.init) ?? ""]
+                .joined(separator: "\u{1f}") + "\n"
+            legacyLookupDigest.update(data: Data(identity.utf8))
+        }
+
+        func commitFrozen(_ standardized: URL, before: SessionFileStat, data: Data,
+                          json: Bool, validatedJSONCharge: Int? = nil) throws {
+            if json {
+                do {
+                    let charge = try validatedJSONCharge ?? validateJSON(data)
+                    payloadCharge += charge - chunkBytes * 2
+                    if (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) == nil {
+                        summary.reasons.insert(.malformedRecord)
+                    }
+                } catch Failure.malformed {
+                    summary.reasons.insert(.malformedRecord)
+                    payloadCharge += data.count * 24
+                }
+                summary.records += 1
+            } else {
+                payloadCharge += data.count * 24
+            }
+            guard payloadCharge <= payloadBytes else { throw Failure.resourceLimit }
+            summary.peakPayloadCharge = max(summary.peakPayloadCharge, payloadCharge)
+            let relative = String(standardized.path.dropFirst(root.path.count + 1))
+            guard !relative.isEmpty, !relative.hasPrefix("..") else { throw Failure.unsupported }
+            let target = temporary.appendingPathComponent(relative)
+            try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: target)
+            proofs.append(.init(path: standardized.resolvingSymlinksInPath().path, stat: before))
+        }
+
+        /// Returns bytes from the same descriptor-backed read that is written into the
+        /// snapshot and recorded in `proofs`. Callers may decode this value, but never
+        /// reread the live source to build semantic events.
+        @discardableResult
+        func freeze(_ path: URL, json: Bool) throws -> Data {
+            let standardized = path.standardizedFileURL
+            guard frozenPaths.insert(standardized.path).inserted else { throw Failure.changed }
+            try checkInventoryLimit()
+
+            let handle = try FileHandle(forReadingFrom: standardized)
+            let descriptor = handle.fileDescriptor
+            defer { try? handle.close() }
+            guard let before = SessionFileStat.precise(fromFileDescriptor: descriptor), before.size >= 0 else {
+                throw Failure.changed
+            }
+            guard before.size <= recordBytes else { throw Failure.resourceLimit }
+            var data = Data()
+            while true {
+                try Task.checkCancellation()
+                let chunk = try handle.read(upToCount: chunkBytes) ?? Data()
+                guard data.count + chunk.count <= recordBytes,
+                      payloadCharge + (data.count + chunk.count) * 24 <= payloadBytes else {
+                    throw Failure.resourceLimit
+                }
+                if chunk.isEmpty { break }
+                data.append(chunk)
+            }
+            guard data.count == Int(before.size),
+                  SessionFileStat.precise(fromFileDescriptor: descriptor) == before,
+                  SessionFileStat.precise(from: standardized) == before else { throw Failure.changed }
+            summary.bytesRead += UInt64(data.count)
+            summary.decompressedBytes += UInt64(data.count)
+            try commitFrozen(standardized, before: before, data: data, json: json)
+            return data
+        }
+
+        /// Legacy indexing must inspect the shared part tree, but foreign sessions do
+        /// not consume this transcript's retained-payload budget. Each candidate is
+        /// descriptor-bounded, decoded one at a time, and retained only as a compact
+        /// revision proof.
+        func inspectLegacyPart(_ path: URL) throws {
+            let standardized = path.standardizedFileURL
+            let handle = try FileHandle(forReadingFrom: standardized)
+            let descriptor = handle.fileDescriptor
+            defer { try? handle.close() }
+            guard let before = SessionFileStat.precise(fromFileDescriptor: descriptor), before.size >= 0 else {
+                throw Failure.changed
+            }
+            guard before.size <= recordBytes,
+                  legacyLookupBytes + Int(before.size) <= maximumLegacyLookupBytes else {
+                throw Failure.resourceLimit
+            }
+            var data = Data()
+            while true {
+                try Task.checkCancellation()
+                let chunk = try handle.read(upToCount: chunkBytes) ?? Data()
+                guard data.count + chunk.count <= recordBytes else { throw Failure.resourceLimit }
+                if chunk.isEmpty { break }
+                data.append(chunk)
+            }
+            guard data.count == Int(before.size),
+                  SessionFileStat.precise(fromFileDescriptor: descriptor) == before,
+                  SessionFileStat.precise(from: standardized) == before else { throw Failure.changed }
+            legacyLookupBytes += data.count
+            summary.bytesRead += UInt64(data.count)
+            recordLegacyLookupProof(path: standardized, stat: before)
+
+            let projectedOwner = openCodeTopLevelString(in: data, key: "messageID")
+            try Task.checkCancellation()
+            guard let messageID = projectedOwner,
+                  unresolvedLegacyIDs.contains(messageID) else { return }
+            let charge = try validateJSON(data)
+            guard frozenPaths.insert(standardized.path).inserted else { throw Failure.changed }
+            try checkInventoryLimit()
+            summary.decompressedBytes += UInt64(data.count)
+            try commitFrozen(standardized, before: before, data: data, json: true, validatedJSONCharge: charge)
+        }
+
+        try proveDirectory(root)
+        _ = try freeze(primary, json: true)
+
+        var usesV2Layout = false
+        let migration = root.appendingPathComponent("migration")
+        if fileManager.fileExists(atPath: migration.path) {
+            let data = try freeze(migration, json: false)
+            usesV2Layout = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) == "2"
+        }
+
+        var messageIDs = Set<String>()
+        try walkDirectory(messageRoot, recursive: true) { url, values in
+            guard values.isRegularFile == true,
+                  url.lastPathComponent.hasPrefix("msg_"),
+                  url.pathExtension.lowercased() == "json" else { return }
+            let data = try freeze(url, json: true)
+            guard let message = try? JSONDecoder().decode(OpenCodeSessionParser.MessageJSON.self, from: data) else {
+                summary.reasons.insert(.malformedRecord)
+                return
+            }
+            guard message.sessionID == nil || message.sessionID == session.id else { return }
+            messageIDs.insert(message.id ?? url.deletingPathExtension().lastPathComponent)
+        }
+
+        for messageID in messageIDs.sorted() {
+            let directory = partRoot.appendingPathComponent(messageID, isDirectory: true)
+            var foundDirectPart = false
+            try walkDirectory(directory, recursive: false) { url, values in
+                guard values.isRegularFile == true,
+                      url.pathExtension.lowercased() == "json" else { return }
+                foundDirectPart = true
+                _ = try freeze(url, json: true)
+            }
+            if !foundDirectPart, !usesV2Layout { unresolvedLegacyIDs.insert(messageID) }
+        }
+
+        // A markerless store falls back to the legacy messageID index only for messages
+        // that had no direct part directory. Every inspected candidate participates in
+        // the revision so an in-place change cannot turn an ignored record into a match.
+        if !unresolvedLegacyIDs.isEmpty {
+            try walkDirectory(partRoot, recursive: true) { url, values in
+                guard values.isRegularFile == true,
+                      url.lastPathComponent.hasPrefix("prt_"),
+                      url.pathExtension.lowercased() == "json",
+                      !frozenPaths.contains(url.standardizedFileURL.path) else { return }
+                try inspectLegacyPart(url)
+            }
+        }
+
+        try Task.checkCancellation()
+        let snapshot = temporary.appendingPathComponent(String(primary.path.dropFirst(root.path.count + 1)))
+        guard let parsed = OpenCodeSessionParser.parseFileFull(at: snapshot) else { throw Failure.unsupported }
+        metadata?(parsed)
+        if parsed.sourceSearchHasOmissions { summary.reasons.insert(.omittedRecord) }
+        for event in parsed.events {
+            try Task.checkCancellation()
+            count(event, into: &summary)
+            for segment in SearchSourceText.segments(event: event, source: .opencode) {
+                try consume(segment)
+            }
+        }
+
+        for proof in directoryProofs {
+            guard SessionFileStat.precise(from: proof.url) == proof.stat else { throw Failure.changed }
+        }
+        for proof in proofs {
+            guard SessionFileStat.precise(from: URL(fileURLWithPath: proof.path)) == proof.stat else { throw Failure.changed }
+        }
+        for proof in legacyLookupProofs {
+            guard SessionFileStat.precise(from: proof.url) == proof.stat else { throw Failure.changed }
+        }
+        let lookupRevision = legacyLookupProofs.isEmpty
+            ? nil
+            : legacyLookupDigest.finalize().map { String(format: "%02x", $0) }.joined()
+        summary.revision = .init(files: proofs, logical: lookupRevision)
+    }
+
+    /// Extract one top-level JSON string without materializing unrelated values. OpenCode
+    /// legacy lookup uses this before semantic preflight so a large foreign output cannot
+    /// consume the selected transcript's allocation budget.
+    private static func openCodeTopLevelString(in data: Data, key: String) -> String? {
+        func decodedString(_ range: Range<Int>, maximumBytes: Int) -> String? {
+            guard range.count <= maximumBytes else { return nil }
+            let quoted = Data(data[range])
+            return try? JSONDecoder().decode(String.self, from: quoted)
+        }
+        func closingQuote(from start: Int) -> Int? {
+            var index = start + 1
+            while index < data.count {
+                if data[index] == 92 {
+                    index += 2
+                } else if data[index] == 34 {
+                    return index
+                } else {
+                    index += 1
+                }
+            }
+            return nil
+        }
+        func skipWhitespace(_ start: Int) -> Int {
+            var index = start
+            while index < data.count, [UInt8(9), 10, 13, 32].contains(data[index]) { index += 1 }
+            return index
+        }
+
+        var depth = 0
+        var index = 0
+        while index < data.count {
+            if index % chunkBytes == 0, Task.isCancelled { return nil }
+            switch data[index] {
+            case 123, 91:
+                depth += 1
+                index += 1
+            case 125, 93:
+                depth -= 1
+                guard depth >= 0 else { return nil }
+                index += 1
+            case 34:
+                guard let close = closingQuote(from: index) else { return nil }
+                if depth == 1 {
+                    let afterKey = skipWhitespace(close + 1)
+                    if afterKey < data.count, data[afterKey] == 58,
+                       decodedString(index..<(close + 1), maximumBytes: 256) == key {
+                        let valueStart = skipWhitespace(afterKey + 1)
+                        if valueStart < data.count, data[valueStart] == 34,
+                           let valueEnd = closingQuote(from: valueStart) {
+                            return decodedString(valueStart..<(valueEnd + 1), maximumBytes: 4096)
+                        }
+                        // Foundation keeps the first semantic duplicate key, including
+                        // a non-string value. Do not allow a later duplicate to claim it.
+                        return nil
+                    }
+                }
+                index = close + 1
+            default:
+                index += 1
+            }
+        }
+        return nil
     }
 }

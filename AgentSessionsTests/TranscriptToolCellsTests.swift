@@ -1016,8 +1016,13 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertNil(cell.hoveredActionIndex)
 
         cell.setHoveredAction(1)
+        cell.bodyText.syntaxSnippets = [TranscriptSyntaxSnippet(
+            key: .init(language: .swift, text: "let stale = true"),
+            spans: [TranscriptSyntaxSpan(source: NSRange(location: 0, length: 4), renderedLocation: 0)]
+        )]
         cell.prepareForReuse()
         XCTAssertNil(cell.hoveredActionIndex)
+        XCTAssertTrue(cell.bodyText.syntaxSnippets.isEmpty)
     }
 
     func testShowRawMentionsShortenedStrings() throws {

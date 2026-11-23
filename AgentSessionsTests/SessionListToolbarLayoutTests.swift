@@ -12,6 +12,25 @@ private final class ToolbarTestSearchStore: SearchSessionStoring {
 /// The session list owns its controls and reserves a separate row for feedback.
 final class SessionListToolbarLayoutTests: XCTestCase {
     @MainActor
+    func testSearchDisplayRowsAreSortedWithoutReapplyingEligibilityFilters() {
+        let unified = UnifiedSessionIndexer(catalog: SessionProviderCatalog())
+        let oldHasCommandsOnly = unified.hasCommandsOnly
+        defer { unified.hasCommandsOnly = oldHasCommandsOnly }
+        unified.hasCommandsOnly = true
+        let acceptedLightweightRow = Session(
+            id: "accepted", source: .claude, startTime: nil, endTime: Date(), model: nil,
+            filePath: "/tmp/accepted.jsonl", eventCount: 0, events: [],
+            cwd: nil, repoName: nil,
+            lightweightTitle: "Accepted search result", lightweightCommands: nil,
+            parentSessionID: "parent"
+        )
+
+        XCTAssertEqual(unified.sortSearchResultsForDisplay([acceptedLightweightRow]).map(\.id), ["accepted"])
+        XCTAssertTrue(unified.applyFiltersAndSort(to: [acceptedLightweightRow]).isEmpty,
+                      "the old second filtering pass rejected the coordinator's accepted lightweight row")
+    }
+
+    @MainActor
     func testFocusedCommandsPublishAvailabilityOnlyWhenItChanges() {
         let unified = UnifiedSessionIndexer(catalog: SessionProviderCatalog())
         let commands = SessionWindowCommands(archiveIndexer: unified)

@@ -4,38 +4,48 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Search refreshes commit each session atomically across concurrent providers and remember quiet, cooled-down, cancelled, or failed work until it is eligible to retry.
-- Economics calculations use one captured price revision from quota attribution through stored-session repricing. Claude drops weekly calibration when its Web credential owner changes.
-- Fast transcript scrolling defers directory and Presence scans until wheel, keyboard, or scrollbar input settles, then coalesces the delayed refresh. Large Codex cold opens reliably replace their provisional tail with the full transcript. Jump controls keep a stable view hierarchy as their visibility changes.
-- Fast transcript scrolling does less work updating the tool row under the pointer. Copy and Raw reappear when scrolling settles.
-- Live session polling matches agent processes in one pass. Claude keeps CLI and Desktop scan caches separate and shares overlapping reads. Codex skips decoding log headers without account metadata.
-- Scrolling reuses cleaned session titles. Live transcript updates do less work on long records and image attachments, and Codex Runway reads its session folders once per refresh.
-- Sessions window menu actions keep a stable focus binding while switching transcripts.
-- Claude session refreshes resolve the usage-probe folder once per batch, reducing disk work while browsing sessions.
-- Background search indexing stops at the first unreadable record in a Codex or Claude transcript and waits for changes before retrying that transcript again in the same app run.
-- Weekly quota estimates and session search indexing do less transcript parsing during startup. A Claude quota history scan stops when its calibration scope changes.
-- Small variations in the reported quota reset time no longer trigger repeat history scans.
-- Search index migrations skip current sessions that share a database with older entries.
-- The Sessions filter summary omits agents disabled in Settings. Transcript filter controls reuse the displayed session to avoid repeated lookups during layout.
-- Session search and filters now stay inside the session-list pane. Search status sits below the controls, and Resume keeps a readable label beside its menu.
-- See which filters are narrowing session search and restore hidden projects from View. Search shows matches so far and puts detailed coverage behind a menu. Resume has one button with its destination choices, and Saved, Archived, and group folding take less toolbar space.
-- The website's mobile header links directly to The Rollout, Guides, Bench, and GitHub. The README summarizes the three latest releases and links to the full notes.
-- The README puts the first search next to installation. The website has a phone-sized app preview, an on-demand notch demo, and a privacy note. Both pages show the same resume support and verification details.
-- Hide a project from the session list and search with **Hide Project** in the session menu. Undo immediately or unhide it from the session list toolbar. Contributed by @buildfolk in #90.
-- Session Info estimates costs for GPT-6.2 Astra and Sol, Claude Fable and Mythos 5.2, MAI Code 2 Flash, and two verified free routes. Antigravity estimates use the model recorded on each response when available.
-- Kimi explains when a session has incomplete cache-read usage instead of describing the record as malformed.
+### Highlights
 
-- List search supports complete session IDs and consistent terms, phrases, prefixes and Boolean queries. Return verifies eligible source sessions with explicit complete, incomplete and unresolved counts; Escape cancels without discarding results.
+- **Search every local session with explicit coverage.** Search supports terms, phrases, prefixes, Boolean queries, and complete session IDs across enabled agents. Results appear as they are found; Return verifies eligible source sessions and reports complete, incomplete, and unresolved coverage without discarding partial results.
+- **Compare agent economics.** Analytics adds API-equivalent value and attributed quota by agent, model, and thinking effort. It states timing and coverage limits, excludes untimed spend from hourly rates, and keeps provider-wide quota left separate from quota attributable to the selected sessions.
+- **Smoother large transcripts.** Transcript presentation shares message grouping, timing, navigation, and syntax work off the main thread. Fast scrolling defers directory and Presence scans until input settles, reduces repeated row layout, and reliably replaces a large Codex session's provisional tail with the full transcript.
+
+### Search and Organization
+
+- Search and filters stay inside the session-list pane, with active scopes, progress, and detailed coverage kept next to the results. Resume uses one readable button and destination menu; Saved, Archived, and group folding take less toolbar space.
 - Search indexing and verification use bounded source readers, preserve structured tool fields, and rebuild older ordinary and Tool I/O indexes without waiting for content cooldowns.
-- Claude web credentials load asynchronously; changing or removing a credential invalidates older requests, cached responses and usage publications.
-- Session presentation shares markers, message groups, timing and navigation counts off the main thread, with revision checks for same-size edits and provisional-to-full refreshes. Large-session timing still awaits profiling.
+- Hide a project from the session list and search with **Hide Project**, then undo immediately or restore it from View → Unhide Projects. Contributed by @buildfolk in #90.
+- Disabled agents no longer appear in the active-filter summary, and search index migrations skip sessions that are already current in a shared database.
 
-- The Session transcript colors supported fenced code, interpreter heredocs, and verified source text in expanded tool results, including source lines in git blame output.
-- Blame highlighting stays plain for unproven multiline commands or reads of different files, preventing wrong-language colors and comment state leaking across files.
-- Claude sub-sessions show their task name and recorded thinking effort. Session info counts the sub-session's own usage separately from work it delegates.
+### Session View
 
-- Analytics has a new Economics view for API-equivalent value and timestamped comparisons by agent, model and thinking effort. Normal session ingestion populates a persistent event index so repeat views and filter changes avoid transcript rereads; missing rows backfill with bounded concurrency, current model prices reprice stored token evidence, and attributed quota/hour uses Quota Meter's provider-wide local calibration only inside the observed provider window. Hourly rates use exact request timing or nearby same-configuration usage intervals up to 30 minutes, exclude untimed spend, and require 15 minutes of separately covered API or quota time. Quota Meter keeps the provider-reported account quota left, while Economics shows the quota spent that can be attributed to the selected sessions, separately by provider.
-- Quota Meter picks up new model prices in the open app. The $ and Wk views recalculate from existing usage, and failed price checks retry automatically.
+- Supported fenced code, interpreter heredocs, and verified source text in expanded tool output use syntax color. Unproven multiline commands and mixed-file reads stay plain rather than guessing a language.
+- Git-blame syntax stays contiguous for LF and CRLF output without repeatedly recounting the growing text. Reused tool rows discard old syntax state before displaying new content.
+- Claude sub-sessions show their task name and recorded thinking effort. Session Info counts their own usage separately from work they delegate.
+- Tool-row hover actions do less work while scrolling; Copy and Raw return when scrolling settles. Jump controls keep a stable view hierarchy as their visibility changes.
+- Toggling one hierarchy group after Collapse All or Expand All preserves every other group's visible state.
+
+### Economics, Quota, and Pricing
+
+- Session Info adds prices for GPT-6.2 Astra and Sol, Claude Fable and Mythos 5.2, MAI Code 2 Flash, and two verified free routes. Antigravity uses the response model recorded for each request when available.
+- Quota Meter picks up new model prices in the open app. The $ and Wk views recalculate existing usage, and failed price checks retry automatically.
+- Economics uses one captured price revision from quota attribution through stored-session repricing. Claude discards weekly calibration when its Web credential owner changes.
+- Economics labels zero timed activity as `0m` instead of implying that some activity was measured.
+- Kimi explains incomplete cache-read usage instead of describing the session record as malformed.
+
+### Reliability and Performance
+
+- Search refreshes commit each session atomically across concurrent providers. Quiet, cooled-down, cancelled, failed, or unsupported work remains eligible for a later retry instead of being silently stranded.
+- Background indexing stops at the first incomplete Codex or Claude record and skips unchanged incomplete files on later passes. Search ingest scans newly read JSONL bytes and avoids redundant decoding.
+- Claude Web credentials load asynchronously; changing or removing a credential invalidates older requests, cached responses, quota calibration, and usage publications.
+- Switching apps no longer relabels a completed search as cancelled, and clearing search removes its verification and snippet state. A legacy Claude tmux hard probe now closes any previous Web quota-calibration owner before publishing CLI usage.
+- Live polling matches processes in one pass. Claude keeps CLI and Desktop scan caches separate and shares overlapping reads; Codex shares one session-folder inventory and skips log headers without account metadata.
+- Sessions reuse cleaned titles, transcript cells skip redundant layout, Claude image discovery skips long string runs, and quota scans avoid repeat work for small reset-time variations.
+- Sessions window commands retain a stable focus binding while switching transcripts, avoiding repeated AppKit layout work.
+
+### Website and Documentation
+
+- The README puts the first search next to installation and links the three latest release highlights. The website adds a phone-sized preview, an on-demand notch demo, clearer privacy copy, and direct mobile links to The Rollout, Guides, Bench, and GitHub.
 
 ## [6.6] - 2026-11-18
 

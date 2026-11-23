@@ -21,6 +21,104 @@ final class SearchSourceScannerTests: XCTestCase {
         return await SearchSourceScanner.scan(session: session, query: try SearchQuery(query, tokenizer: tokenizer))
     }
 
+    private func openCodeFixture(v2: Bool, unrelatedLegacyParts: Int = 0,
+                                 largeForeignPartBytes: Int = 0) throws -> Session {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let storage = directory.appendingPathComponent("storage", isDirectory: true)
+        let sessionDirectory = storage.appendingPathComponent("session/project", isDirectory: true)
+        let messageDirectory = storage.appendingPathComponent("message/ses_search", isDirectory: true)
+        let partDirectory = v2
+            ? storage.appendingPathComponent("part/msg_search", isDirectory: true)
+            : storage.appendingPathComponent("part", isDirectory: true)
+        for item in [sessionDirectory, messageDirectory, partDirectory] {
+            try FileManager.default.createDirectory(at: item, withIntermediateDirectories: true)
+        }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+        let sessionURL = sessionDirectory.appendingPathComponent("ses_search.json")
+        try #"{"id":"ses_search","directory":"/tmp/project","title":"Search fixture"}"#
+            .write(to: sessionURL, atomically: true, encoding: .utf8)
+        try #"{"id":"msg_search","sessionID":"ses_search","role":"assistant"}"#
+            .write(to: messageDirectory.appendingPathComponent("msg_search.json"), atomically: true, encoding: .utf8)
+        try #"{"id":"prt_search","messageID":"msg_search","type":"text","text":"splitfileuniqueneedle"}"#
+            .write(to: partDirectory.appendingPathComponent("prt_search.json"), atomically: true, encoding: .utf8)
+        if !v2, unrelatedLegacyParts > 0 {
+            let padding = String(repeating: "x", count: 48 * 1024)
+            for index in 0..<unrelatedLegacyParts {
+                let foreign = "{\"id\":\"foreign_\(index)\",\"messageID\":\"foreign_message_\(index)\",\"type\":\"text\",\"text\":\"\(padding)\"}"
+                try foreign.write(
+                    to: partDirectory.appendingPathComponent("prt_foreign_\(index).json"),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
+        }
+        if !v2, largeForeignPartBytes > 0 {
+            let foreign = "{\"id\":\"large_foreign\",\"messageID\":\"foreign_large\",\"type\":\"text\",\"text\":\"\(String(repeating: "y", count: largeForeignPartBytes))\"}"
+            try foreign.write(
+                to: partDirectory.appendingPathComponent("prt_large_foreign.json"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        if v2 {
+            try "2\n".write(to: storage.appendingPathComponent("migration"), atomically: true, encoding: .utf8)
+        }
+        let full = try XCTUnwrap(OpenCodeSessionParser.parseFileFull(at: sessionURL))
+        XCTAssertTrue(full.events.contains { $0.text == "splitfileuniqueneedle" }, v2 ? "v2 fixture" : "legacy fixture")
+        return try XCTUnwrap(OpenCodeSessionParser.parseFile(at: sessionURL))
+    }
+
+    private func markerlessOpenCodeDirectFixture(includeLegacyShadow: Bool) throws -> Session {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let storage = directory.appendingPathComponent("storage", isDirectory: true)
+        let sessionDirectory = storage.appendingPathComponent("session/project", isDirectory: true)
+        let messageDirectory = storage.appendingPathComponent("message/ses_search", isDirectory: true)
+        let directPartDirectory = storage.appendingPathComponent("part/msg_search", isDirectory: true)
+        for item in [sessionDirectory, messageDirectory, directPartDirectory] {
+            try FileManager.default.createDirectory(at: item, withIntermediateDirectories: true)
+        }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+        let sessionURL = sessionDirectory.appendingPathComponent("ses_search.json")
+        try #"{"id":"ses_search","directory":"/tmp/project","title":"Search fixture"}"#
+            .write(to: sessionURL, atomically: true, encoding: .utf8)
+        try #"{"id":"msg_search","sessionID":"ses_search","role":"assistant"}"#
+            .write(to: messageDirectory.appendingPathComponent("msg_search.json"), atomically: true, encoding: .utf8)
+        // Markerless stores still prefer the direct folder. Direct records need neither
+        // a prt_ filename nor an embedded messageID.
+        try #"{"id":"direct_part","type":"text","text":"markerlessdirectneedle"}"#
+            .write(to: directPartDirectory.appendingPathComponent("content.json"), atomically: true, encoding: .utf8)
+        if includeLegacyShadow {
+            try #"{"id":"legacy_shadow","messageID":"msg_search","type":"text","text":"legacyshadowneedle"}"#
+                .write(to: storage.appendingPathComponent("part/prt_shadow.json"), atomically: true, encoding: .utf8)
+        }
+
+        let full = try XCTUnwrap(OpenCodeSessionParser.parseFileFull(at: sessionURL))
+        XCTAssertTrue(full.events.contains { $0.text == "markerlessdirectneedle" })
+        XCTAssertFalse(full.events.contains { $0.text == "legacyshadowneedle" }, "direct parts must win over legacy fallback")
+        return try XCTUnwrap(OpenCodeSessionParser.parseFile(at: sessionURL))
+    }
+
+    private func legacyOpenCodePartFixture(_ partJSON: String) throws -> Session {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let storage = directory.appendingPathComponent("storage", isDirectory: true)
+        let sessionDirectory = storage.appendingPathComponent("session/project", isDirectory: true)
+        let messageDirectory = storage.appendingPathComponent("message/ses_search", isDirectory: true)
+        let partDirectory = storage.appendingPathComponent("part", isDirectory: true)
+        for item in [sessionDirectory, messageDirectory, partDirectory] {
+            try FileManager.default.createDirectory(at: item, withIntermediateDirectories: true)
+        }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let sessionURL = sessionDirectory.appendingPathComponent("ses_search.json")
+        try #"{"id":"ses_search","directory":"/tmp/project","title":"Search fixture"}"#
+            .write(to: sessionURL, atomically: true, encoding: .utf8)
+        try #"{"id":"msg_search","sessionID":"ses_search","role":"assistant"}"#
+            .write(to: messageDirectory.appendingPathComponent("msg_search.json"), atomically: true, encoding: .utf8)
+        try partJSON.write(to: partDirectory.appendingPathComponent("prt_duplicate.json"), atomically: true, encoding: .utf8)
+        return try XCTUnwrap(OpenCodeSessionParser.parseFile(at: sessionURL))
+    }
+
     func testAndAccumulatesAcrossEventsWhilePhraseStaysWithinField() async throws {
         let session = try fixture([message("alpha"), message("beta")])
         let and = try await scan(session, "alpha AND beta")
@@ -102,16 +200,105 @@ final class SearchSourceScannerTests: XCTestCase {
         XCTAssertThrowsError(try tokenizer.enumerate(String(repeating: "a", count: 65_537)) { _ in })
     }
 
-    func testEarlierWitnessCannotBecomePositiveWhenLaterTokenStopsExtraction() async throws {
-        let text = "alpha " + String(repeating: "z", count: 65_537)
-        let session = try fixture([message(text)])
+    func testOversizedFieldKeepsStablePositiveWitnessesButCannotProveAbsence() async throws {
+        let session = try fixture([
+            message("alpha"),
+            message(String(repeating: "z", count: 65_537)),
+            message("omega")
+        ])
 
-        let result = try await scan(session, "alpha")
+        let before = try await scan(session, "alpha")
+        XCTAssertEqual(before.truth, .yes)
+        XCTAssertNotNil(before.summary.revision)
+        XCTAssertTrue(before.summary.reasons.contains(.resourceLimit))
 
-        XCTAssertFalse(result.summary.complete)
-        XCTAssertTrue(result.summary.reasons.contains(.resourceLimit))
-        XCTAssertTrue(result.truth == .unknown,
-                      "an earlier token witness is not verified after extraction stops before the source proof")
+        let after = try await scan(session, "omega")
+        XCTAssertEqual(after.truth, .yes, "scanning must continue after the oversized field")
+        XCTAssertNotNil(after.summary.revision)
+        XCTAssertTrue(after.summary.reasons.contains(.resourceLimit))
+
+        let incompleteNegative = try await scan(session, "alpha NOT beta")
+        XCTAssertEqual(incompleteNegative.truth, .unknown)
+        XCTAssertNotNil(incompleteNegative.summary.revision)
+        XCTAssertTrue(incompleteNegative.summary.reasons.contains(.resourceLimit))
+    }
+
+    func testOpenCodeSplitFileSearchSupportsV2AndLegacyLayouts() async throws {
+        for v2 in [true, false] {
+            let result = try await scan(openCodeFixture(v2: v2), "splitfileuniqueneedle")
+            XCTAssertEqual(result.truth, .yes, v2 ? "v2" : "legacy")
+            XCTAssertTrue(result.summary.complete, v2 ? "v2" : "legacy")
+            XCTAssertNotNil(result.summary.revision, v2 ? "v2" : "legacy")
+            XCTAssertTrue(result.summary.revision?.files.contains { $0.path.hasSuffix("prt_search.json") } == true,
+                          "missing part proof: \(result.summary.revision?.files.map(\.path) ?? [])")
+            XCTAssertTrue(result.summary.revision?.files.contains { $0.path.hasSuffix("msg_search.json") } == true,
+                          "missing message proof: \(result.summary.revision?.files.map(\.path) ?? [])")
+            if v2 {
+                XCTAssertTrue(result.summary.revision?.files.contains { $0.path.hasSuffix("/migration") } == true,
+                              "missing migration proof: \(result.summary.revision?.files.map(\.path) ?? [])")
+            }
+            XCTAssertGreaterThan(result.summary.messages, 0, "snapshot parser produced no messages")
+        }
+    }
+
+    func testOpenCodeMarkerlessDirectPartsAndPrecedenceMatchTranscriptParser() async throws {
+        for includeLegacyShadow in [false, true] {
+            let session = try markerlessOpenCodeDirectFixture(includeLegacyShadow: includeLegacyShadow)
+            let direct = try await scan(session, "markerlessdirectneedle")
+            XCTAssertEqual(direct.truth, .yes)
+            XCTAssertTrue(direct.summary.complete)
+            XCTAssertTrue(direct.summary.revision?.files.contains { $0.path.hasSuffix("/content.json") } == true)
+
+            let legacy = try await scan(session, "legacyshadowneedle")
+            XCTAssertEqual(legacy.truth, .no)
+            XCTAssertTrue(legacy.summary.complete)
+        }
+    }
+
+    func testOpenCodeLegacyForeignPartsDoNotConsumeTranscriptPayloadBudget() async throws {
+        // The foreign inventory exceeds the transcript payload budget under the old
+        // cumulative 24x charge, but each candidate is small enough for bounded lookup.
+        let result = try await scan(openCodeFixture(v2: false, unrelatedLegacyParts: 64), "splitfileuniqueneedle")
+        XCTAssertEqual(result.truth, .yes)
+        XCTAssertTrue(result.summary.complete)
+        XCTAssertGreaterThan(result.summary.bytesRead, 3 * 1024 * 1024)
+        XCTAssertLessThan(result.summary.peakPayloadCharge, SearchSourceScanner.payloadBytes)
+        XCTAssertEqual(result.summary.revision?.files.filter { $0.path.contains("prt_foreign_") }.count, 0)
+        XCTAssertNotNil(result.summary.revision?.logical)
+    }
+
+    func testOpenCodeLargeForeignPartDoesNotEnterSemanticAllocationBudget() async throws {
+        let result = try await scan(
+            openCodeFixture(v2: false, largeForeignPartBytes: 3 * 1024 * 1024),
+            "splitfileuniqueneedle"
+        )
+        XCTAssertEqual(result.truth, .yes)
+        XCTAssertTrue(result.summary.complete)
+        XCTAssertGreaterThan(result.summary.bytesRead, 3 * 1024 * 1024)
+        XCTAssertLessThan(result.summary.peakPayloadCharge, SearchSourceScanner.payloadBytes)
+        XCTAssertEqual(result.summary.revision?.files.filter { $0.path.hasSuffix("prt_large_foreign.json") }.count, 0)
+    }
+
+    func testOpenCodeLegacyOwnerProjectionMatchesFoundationDuplicateKeyRules() async throws {
+        let firstStringWins = try legacyOpenCodePartFixture(
+            #"{"id":"duplicate","messageID":"msg_search","message\u0049D":"foreign","type":"text","text":"duplicateownerneedle"}"#
+        )
+        let positive = try await scan(firstStringWins, "duplicateownerneedle")
+        XCTAssertEqual(positive.truth, .yes)
+        XCTAssertTrue(positive.summary.complete)
+        let presentNegation = try await scan(firstStringWins, "NOT duplicateownerneedle")
+        XCTAssertEqual(presentNegation.truth, .no)
+        XCTAssertTrue(presentNegation.summary.complete)
+
+        let firstNonStringWins = try legacyOpenCodePartFixture(
+            #"{"id":"duplicate","messageID":12,"messageID":"msg_search","type":"text","text":"duplicateownerneedle"}"#
+        )
+        let absent = try await scan(firstNonStringWins, "duplicateownerneedle")
+        XCTAssertEqual(absent.truth, .no)
+        XCTAssertTrue(absent.summary.complete)
+        let absentNegation = try await scan(firstNonStringWins, "NOT duplicateownerneedle")
+        XCTAssertEqual(absentNegation.truth, .yes)
+        XCTAssertTrue(absentNegation.summary.complete)
     }
 
     func testMutationFromSegmentConsumerReportsSourceChanged() throws {

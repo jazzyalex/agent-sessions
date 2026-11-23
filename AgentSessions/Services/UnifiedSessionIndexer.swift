@@ -3168,6 +3168,14 @@ final class UnifiedSessionIndexer: ObservableObject {
         return results
     }
 
+    /// SearchCoordinator has already applied the authoritative eligibility filters to
+    /// hydrated sessions. Its lightweight result rows intentionally omit transcript
+    /// events, so applying those filters again can reject valid command or side-chat
+    /// matches. The view may only apply the user's display ordering here.
+    func sortSearchResultsForDisplay(_ sessions: [Session]) -> [Session] {
+        applySort(sessions, descriptor: sortDescriptor)
+    }
+
     private func applySort(_ list: [Session], descriptor: SessionSortDescriptor) -> [Session] {
         switch descriptor.key {
         case .modified:

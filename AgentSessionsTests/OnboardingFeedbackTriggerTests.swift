@@ -220,6 +220,24 @@ final class OnboardingFeedbackTriggerTests: XCTestCase {
 }
 
 final class WhatsNewCatalogTests: XCTestCase {
+    func testRelease70HasSearchPerformanceAndEconomicsHighlights() {
+        let teaser = WhatsNewCatalog.teaser(for: "7.0")
+        XCTAssertNotNil(teaser)
+        XCTAssertTrue(
+            teaser.map { String(localized: $0) }?.contains("verified coverage") ?? false,
+            "teaser: \(teaser.map { String(localized: $0) } ?? "nil")"
+        )
+
+        let items = WhatsNewCatalog.assemble(for: "7.0")
+        XCTAssertEqual(items.map { String(localized: $0.title) }, [
+            "Search with verified coverage",
+            "Smoother large transcripts",
+            "Economics in Analytics",
+            "Support the project"
+        ])
+        XCTAssertEqual(items.map(\.kind), [.highlight, .highlight, .highlight, .support])
+    }
+
     func testAssembleForCurrentReleaseHasHighlights() {
         let items = WhatsNewCatalog.assemble(for: "5.6")
         XCTAssertFalse(items.isEmpty)

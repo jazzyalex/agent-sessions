@@ -199,6 +199,28 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
                              "replacement publication must invalidate A synchronously before an observer can inspect B")
     }
 
+    func testLegacyTmuxHardProbeInvalidatesWebCalibrationOwner() {
+        let model = ClaudeUsageModel()
+        var web = Self.sampleSnapshot(source: .webEndpoint)
+        web.ownership = "web:tmux-replacement-fixture"
+        model.applyLimitSnapshotForTesting(web)
+        model.setWeeklyCalibrationInputForTesting(web)
+        let webGeneration = model.weeklyCalibrationGenerationForTesting
+        XCTAssertTrue(model.hasWeeklyCalibrationInputForTesting)
+
+        model.applyLegacyUsageSnapshotForTesting(ClaudeUsageSnapshot(
+            sessionRemainingPercent: 80,
+            sessionResetText: "",
+            weekAllModelsRemainingPercent: 70,
+            weekAllModelsResetText: ""
+        ))
+
+        XCTAssertFalse(model.hasWeeklyCalibrationInputForTesting)
+        XCTAssertGreaterThan(model.weeklyCalibrationGenerationForTesting, webGeneration,
+                             "tmux publication must close the previous Web quota scope")
+        XCTAssertEqual(model.currentSource, .tmuxUsage)
+    }
+
     func testStoppingUsageTrackingInvalidatesCalibrationBeforeRemovingCredentialObservers() {
         let model = ClaudeUsageModel()
         let generation = model.weeklyCalibrationGenerationForTesting

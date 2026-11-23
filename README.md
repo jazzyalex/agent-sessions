@@ -38,17 +38,18 @@ Updates are signed, notarized, and delivered through Sparkle.
 
 ## What it does
 
-- **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
+- **Find past work.** Search terms, phrases, file paths, complete session IDs, prefixes, and Boolean queries across local agent histories. Press Return to verify the full eligible history and see explicit coverage.
 - **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, Warp, Ghostty, or Macterm. Ghostty requires AppleScript support (verified with 1.4.0).
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows, plus each OpenCode session's token or cost rate; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
+- **Compare agent economics.** Analytics compares API-equivalent value and attributed quota by agent, model, and thinking effort, with explicit timing and coverage limits.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
 
 ## What's new
 
+- [7.0](https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0) verifies search coverage across local agent history, keeps large transcripts smoother, and adds Economics to Analytics.
 - [6.6](https://github.com/jazzyalex/agent-sessions/releases/tag/v6.6) adds Claude Code resume in VS Code, Macterm support, and updated model pricing.
 - [6.5](https://github.com/jazzyalex/agent-sessions/releases/tag/v6.5) puts prompts and answers first, with tool activity available through the Tools chip.
-- [6.4](https://github.com/jazzyalex/agent-sessions/releases/tag/v6.4) gives parallel tool calls separate rows and opens folded output when Find matches inside it.
 
 Browse [all release notes](https://github.com/jazzyalex/agent-sessions/releases) or read the [changelog](docs/CHANGELOG.md).
 

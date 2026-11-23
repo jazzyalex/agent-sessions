@@ -1,5 +1,56 @@
-## 2026-11-22 · search-responsiveness-main-integration-preflight · plan reviewed; merge pending
+## 2026-11-22 21:41 · v7-release-preparation · reviewed, tested, and backed up locally
 status: in-progress
+
+**State:** Release preparation is uncommitted on `refactor/search-responsiveness` at `be541ac5d73b2ab95b7f01b239401807c6716216`. The worktree contains 31 modified tracked files and no untracked files. Product metadata is still 6.6 build 91; no version bump, commit, push, tag, notarization, appcast change, Homebrew update, release, or publication was performed.
+
+**Release story:** The 7.0 copy now presents three consistent highlights across What's New, README, the public site, CHANGELOG, and the November summary: verified local-history search with explicit coverage, Economics comparisons, and smoother large transcripts. The committed localization catalog and validator baseline contain 1,761 app keys plus six Info.plist keys.
+
+**Gemini review disposition:** Six findings were source-confirmed and fixed. App deactivation now cancels only an active search, so completed results keep their status; clear synchronously removes results, verification keys, snippets, and counts before an immediate deactivation can supersede it. A legacy Claude tmux hard probe invalidates any prior Web calibration owner before publishing CLI usage. A row toggle materializes Collapse All or Expand All from the full in-scope hierarchy graph before changing one parent, preserving visible, nested, and offscreen parents. Blame syntax accepts LF and CRLF as contiguous, excludes line endings from source text, and advances UTF-16 offsets incrementally. Reused tool cells clear prior syntax snippets, and zero timed Economics activity reads `0m` rather than `<1m`. The proposed `@FocusedObject`-on-`App` P1 was not source-confirmed; current SDK support plus the stable focus binding leave runtime menu availability and window targeting as a manual smoke item. Deep-search batching and bounded shared-store OpenCode legacy lookup/marker parity remain in `docs/backlog.md`.
+
+**Review:** The final Sol 6.2 High integral review and post-fix follow-up returned SHIP with no P0/P1. The reviewer found the nested folding-cache gap and asynchronous clear/deactivation race; both were fixed and rereviewed to SHIP. The remaining verified issues are P2/P3 follow-ups in `docs/backlog.md`, including cold Economics aggregation on the main actor, deep-search publication/temp-table batching, shared legacy OpenCode lookup, UTF-16 ownership, active-search visibility preference changes, and the inactive large-output search preference.
+
+**Verified:** The authoritative stable suite is `.deriveddata-tests/Logs/Test/Run-AgentSessions-2026.11.22_22-11-17--0800.xcresult`: 4,790 total, 4,780 passed, 10 skipped, zero failed/expected failures. The previous passed baseline was 4,776; the exact +4 passed-test delta adds two folding regressions, blame LF/CRLF, and Economics duration coverage with no test removals, and `tools/release/test-count-baseline.txt` is 4,780. The final hierarchy/search set passed 21/21; the four original affected suites passed 135 with one existing skip and zero failures. Earlier SearchSourceScanner coverage passed 14/14, and the combined SearchCoordinator/Claude ownership set passed 29/29. Python release/script tests passed 646 plus five subtests; localization unit tests passed 27. The pinned Xcode 26.3 CI-parity no-signing Debug clean build passed after every final fix. Committed and extraction-aware localization validation passed 1,761 app keys, six Info.plist keys, and 492 stringsdata files. Deploy-doc drift, docs-publication, and `git diff --check` pass. Existing compiler warnings remain.
+
+**Performance limit:** The accepted optimized Release evidence remains materially improved but not stall-free, including the measured 338.57 ms SwiftUI/AppKit layout stall. No new Release Instruments replay was run after the current uncommitted search and quota-ownership fixes. Cold Economics aggregation remains a verified P2 performance risk until measured and moved/coalesced off the main actor.
+
+**Release limit:** This is a prepared code candidate, not a deployable QA-stamped release. The canonical release tool requires a clean `main` checkout synchronized with `origin/main`, then `tools/release/deploy qa --version 7.0`, `tools/release/deploy bump major`, a separately authorized push, exact-commit QA, release-notes approval, and the signed/notarized release flow. Manual major-release smoke remains required: core windows and menu targeting, search complete/deactivate/clear, Return verification and filters, Collapse/Expand transitions, Economics cold/warm views, onboarding, light/dark/system appearance, window switching, and a 3–5 minute idle CPU check.
+
+**Recovery:** A final binary patch for every tracked uncommitted change is stored in `/private/tmp` and is verified with `git apply --check --reverse` against this worktree; its exact timestamped path and SHA-256 are reported in the session handoff. Earlier complete-history bundles for `be541ac5` remain valid for committed-state recovery.
+
+**Next:** Commit the reviewed preparation on the existing branch only with owner authorization, fast-forward local `main` to that exact commit if needed, fetch and reconcile remote state, run the manual smoke list, then run the official clean-main 7.0 QA/bump/push/QA/release sequence. Do not use the current dirty branch to write a QA stamp or deploy.
+
+## 2026-11-22 19:36 · search-responsiveness-main-promotion · validated candidate fast-forwarded to local main
+status: done
+
+**State:** The clean local `main` worktree at `/Users/alexm/.codex/worktrees/quota-live-price-refresh/Codex-History` was fast-forwarded from `9f50d1cb` to `be541ac5d73b2ab95b7f01b239401807c6716216`. Local `main` and `refactor/search-responsiveness` now name the same validated commit. No rebase, force update, push, release or publication was performed.
+
+**Verified:** `git merge --ff-only refactor/search-responsiveness` completed without conflicts. The `main` worktree is clean, `git diff --check` passes, and a clean arm64 no-signing Debug build succeeded from `main` with Xcode 26.3. Existing compiler warnings remain. The earlier authoritative suite on this exact commit remains 4,777 total, 4,767 passed, 10 skipped and zero failures.
+
+**Recovery:** Complete-history post-promotion bundle `/private/tmp/Codex-History-premerge-20261122.vgQrmB/post-main-be541ac5.bundle` passed `git bundle verify`; SHA-256 is `8517104166f3538158372f4742798f83b2011157c4310f410650ff743707dc47`. It records both local `main` and `refactor/search-responsiveness` at `be541ac5`; all earlier recovery bundles remain available.
+
+**Remote state:** Cached `origin/main` remains `3dfa0405`; local `main` is 24 commits ahead and zero behind that cached ref. No fetch was performed, so re-check the remote immediately before any push.
+
+**Next:** Push, release and deployment remain separate explicit actions. Before a push, fetch and confirm the remote has not advanced, then run the repository's pre-push/release gate against the exact `main` commit.
+
+## 2026-11-22 16:47 · search-responsiveness-main-integration-preflight · local main merged; validated and reviewed
+status: done
+
+**State:** Local `main` at `9f50d1cb` was merged into `refactor/search-responsiveness`; the validated candidate is `be541ac5d73b2ab95b7f01b239401807c6716216`. Merge commit: `60272d06`. Integration fixes: `19366f5c`, `e0b04953`, `0cf37057`. Remaining verified cleanup was recorded in `docs/backlog.md` by `be541ac5`. Nothing was pushed, released or published.
+
+**Verified:** The final stable XCTest bundle is `.deriveddata-tests/Logs/Test/Run-AgentSessions-2026.11.22_16-38-43--0800.xcresult`: 4,777 total, 4,767 passed, 10 skipped, zero failed/expected failures. The focused integration set passed 170/170. Python release/script tests passed 646; localization tests passed 27; catalog checks passed 1,754 app keys plus 6 InfoPlist keys; docs/deploy guards and `git diff --check` passed. A clean no-signing Debug build passed with Xcode 26.3; existing warnings remain.
+
+**Review:** The final Sol 6.2 High combined-tree review returned SHIP with no P0/P1. It verified the database transaction boundary, search retry dispatch, price-revision publication guards, Claude quota process ownership and credential-lease invalidation against the final code and XCResult.
+
+**Recovery:** Complete-history bundle `/private/tmp/Codex-History-premerge-20261122.vgQrmB/final-be541ac5.bundle` has SHA-256 `a648db12e61593b759b7779481ef17ee9eebba805bc977185509e56fa794e96c` and passed `git bundle verify`. Restore checkout `/private/tmp/Codex-History-restore-be541ac5` is clean on `refactor/search-responsiveness` at the exact candidate commit. Earlier pre-merge, post-merge and post-fix bundles remain in the same backup directory.
+
+**Deferred:** `docs/backlog.md` holds the verified P2/P3 follow-ups: source-qualified raw-ID collision handling, earlier transcript append rewrites, warm OpenCode Economics revision validation on the main actor, stable unsupported search-ingest retries, and clearing already-displayed Economics quota immediately when its owner is revoked.
+
+**Limit:** The previously accepted optimized Release scroll result remains the performance evidence: materially improved but not stall-free, including the measured 338.57 ms SwiftUI/AppKit layout stall. The post-merge ownership fixes were covered by tests and Debug build, but no new Instruments Release replay was run. Pre-push/release QA remains a separate authorized step.
+
+**Next:** Review the uncommitted handover entry, then fast-forward or merge this validated branch into the chosen `main` worktree only under explicit branch/worktree authorization. Re-run the cheap build/status gates there before any separately authorized push or release.
+
+## 2026-11-22 · search-responsiveness-main-integration-preflight · plan reviewed; merge pending
+status: superseded-by:2026-11-22 16:47
 
 **State:** No merge, commit, checkout, stash, fetch, push or branch/worktree change was performed. The current checkout remains `refactor/search-responsiveness` at `f5531f3c`. Its worktree had 121 modified tracked paths and 33 untracked paths before this handover entry. The separate `main` worktree at `/Users/alexm/.codex/worktrees/quota-live-price-refresh/Codex-History` was verified clean at `9f50d1cb` (`fix(analytics): clarify quota attribution`), seven commits ahead of the cached `origin/main` at `3dfa0405`. The feature branch is 20 commits behind local `main` and nine ahead; merge base `042d2aef`.
 

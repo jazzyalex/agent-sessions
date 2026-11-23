@@ -688,6 +688,7 @@ class ToolCardCellView: NSTableCellView, TranscriptRowCell {
             storage.setAttributedString(NSAttributedString())
         }
         bodyText.setSelectedRange(NSRange(location: 0, length: 0))
+        bodyText.syntaxSnippets = []
         bodyText.blockOrdinal = -1
         bodyText.forceActiveSelectionAppearance(false)
         setSelectionTint(false)
