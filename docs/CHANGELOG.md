@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **A long Codex session opens whole.** Codex stores a long session in several files and starts a new one each time a prompt is sent again. Opening such a session showed that one file alone, so the newest row began in the middle of the session and everything before it was missing. The Session view now starts with the files this one continues, each up to the point where the next took over, and leaves out the attempts that were replaced.
+
 ## [7.0] - 2026-11-23
 
 ### Highlights

@@ -663,4 +663,84 @@ final class CodexRolloutStorageTests: XCTestCase {
         XCTAssertEqual(after.status, .final)
         XCTAssertEqual(try Data(contentsOf: archived), try decodedFixtureBytes())
     }
+
+    // MARK: - Pages of a long session
+
+    /// Three pages of one session, as Codex writes them: each later page names the one it
+    /// continues and where it takes over; what the earlier page held after that point is the
+    /// attempt that was replaced.
+    private func writePagedSession() throws -> (pages: [URL], cuts: [UInt64]) {
+        let session = "01a06900-af0b-7d53-a27e-64ee9619ca31", second = "01a06a11-0c2d-7e4f-8a6b-1c2d3e4f5a6b",
+            third = "01a06b22-1d3e-7f50-9b7c-2d3e4f5a6b7c"
+        func meta(_ time: String, base: String = "") -> String {
+            "{\"timestamp\":\"\(time)\",\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"timestamp\":\"\(time)\",\"cwd\":\"/tmp\",\"originator\":\"Codex Desktop\",\"history_mode\":\"paginated\"\(base)}}"
+        }
+        func message(_ time: String, _ role: String, _ text: String) -> String {
+            "{\"timestamp\":\"\(time)\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"\(role)\",\"content\":[{\"type\":\"\(role == "user" ? "input_text" : "output_text")\",\"text\":\"\(text)\"}]}}"
+        }
+        func base(_ page: String, ordinal: Int, bytes: UInt64) -> String {
+            ",\"history_base\":{\"thread_id\":\"\(page)\",\"end_ordinal_exclusive\":\(ordinal),\"end_byte_offset\":\(bytes)}"
+        }
+        /// Writes the lines and returns the size of the first `kept` of them.
+        func write(_ lines: [String], kept: Int, to url: URL) throws -> UInt64 {
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+            return UInt64(lines.prefix(kept).reduce(0) { $0 + $1.utf8.count + 1 })
+        }
+        let first = root.appendingPathComponent("2026/09/03/rollout-2026-09-03T13-40-47-\(session).jsonl")
+        let firstCut = try write([meta("2026-09-03T13:40:47.000Z"),
+                                  message("2026-09-03T13:40:48.000Z", "user", "prompt one"),
+                                  message("2026-09-03T13:41:00.000Z", "assistant", "reply one"),
+                                  message("2026-09-03T18:51:00.000Z", "user", "prompt two, first try"),
+                                  message("2026-09-03T18:52:00.000Z", "assistant", "abandoned work")], kept: 3, to: first)
+        let middle = root.appendingPathComponent("2026/09/03/rollout-2026-09-03T18-54-59-\(session)_\(second).jsonl")
+        let middleCut = try write([meta("2026-09-03T18:54:59.000Z", base: base(session, ordinal: 3, bytes: firstCut)),
+                                   message("2026-09-03T18:55:00.000Z", "user", "prompt two"),
+                                   message("2026-09-03T18:56:00.000Z", "assistant", "reply two"),
+                                   message("2026-09-04T09:42:00.000Z", "user", "prompt three, first try")], kept: 3, to: middle)
+        let last = root.appendingPathComponent("2026/09/04/rollout-2026-09-04T11-41-54-\(session)_\(third).jsonl")
+        _ = try write([meta("2026-09-04T11:41:54.000Z", base: base(second, ordinal: 6, bytes: middleCut)),
+                       message("2026-09-04T11:41:58.000Z", "user", "prompt three"),
+                       message("2026-09-04T11:43:00.000Z", "assistant", "reply three")], kept: 3, to: last)
+        return ([first, middle, last], [firstCut, middleCut])
+    }
+
+    func testALaterPageNamesThePagesItContinues() throws {
+        let (pages, cuts) = try writePagedSession()
+        XCTAssertNil(CodexRolloutStorage.historyBase(inHeadOf: pages[0]))
+        XCTAssertEqual(CodexRolloutStorage.historyBase(inHeadOf: pages[2]),
+                       CodexRolloutStorage.HistoryBase(page: "01a06a11-0c2d-7e4f-8a6b-1c2d3e4f5a6b", endOrdinal: 6, endByteOffset: cuts[1]))
+        // Found in the day folders, oldest first, each with its cut in bytes and in its own lines.
+        let found = CodexRolloutStorage.basePages(of: pages[2], rollouts: [])
+        XCTAssertEqual(found.map(\.url.lastPathComponent), [pages[0].lastPathComponent, pages[1].lastPathComponent])
+        XCTAssertEqual(found.map(\.byteCount), cuts)
+        XCTAssertEqual(found.map(\.lineCount), [3, 3])
+        XCTAssertEqual(CodexRolloutStorage.basePages(of: pages[2], rollouts: pages.map(\.path)), found)
+        XCTAssertEqual(CodexRolloutStorage.basePages(of: pages[1], rollouts: []).map(\.url.lastPathComponent), [pages[0].lastPathComponent])
+        XCTAssertEqual(CodexRolloutStorage.basePages(of: pages[0], rollouts: []), [])
+        // A page that is gone ends the run: nothing older is joined across the gap.
+        try fm.removeItem(at: pages[1])
+        XCTAssertEqual(CodexRolloutStorage.basePages(of: pages[2], rollouts: []), [])
+    }
+
+    /// Opening the newest page shows the session from its first prompt, without the attempts
+    /// that were replaced; the file read on its own (the list, the index) is unchanged.
+    func testOpeningTheNewestPageShowsTheWholeSession() throws {
+        let (pages, _) = try writePagedSession()
+        let indexer = SessionIndexer()
+        let alone = try XCTUnwrap(indexer.parseFileFull(at: pages[2]))
+        func said(_ session: Session) -> [String] {
+            session.events.filter { $0.kind == .user || $0.kind == .assistant }.compactMap(\.text)
+        }
+        XCTAssertEqual(said(alone), ["prompt three", "reply three"])
+        indexer.installSessionsForReloadTesting([alone])
+        indexer.reloadSession(id: alone.id, force: true, reason: .manualRefresh)
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: alone.id, timeout: 10))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let whole = try XCTUnwrap(indexer.allSessions.first { $0.id == alone.id })
+        XCTAssertEqual(said(whole), ["prompt one", "reply one", "prompt two", "reply two", "prompt three", "reply three"])
+        XCTAssertEqual(Set(whole.events.map(\.id)).count, whole.events.count)
+        XCTAssertEqual(whole.filePath, pages[2].path)
+        XCTAssertEqual(said(try XCTUnwrap(indexer.parseFileFull(at: pages[2]))), ["prompt three", "reply three"])
+    }
 }

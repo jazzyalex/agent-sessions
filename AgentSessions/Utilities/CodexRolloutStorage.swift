@@ -198,6 +198,120 @@ enum CodexRolloutStorage {
         return output
     }
 
+    // MARK: Pages of a long session
+
+    /// Codex stores a long session as several rollout files, its pages. It starts a new page
+    /// when a prompt is sent again; the page's `session_meta` names the page it continues
+    /// (`history_base`) and how much of that page still belongs to the session. What that page
+    /// held after the cut is the attempt that was replaced.
+    struct HistoryBase: Equatable {
+        /// The page continued: the session id for the first page, else the id after the
+        /// underscore in the page's file name.
+        var page: String
+        /// Lines of the whole session up to the cut, counted from its first page.
+        var endOrdinal: Int?
+        /// Bytes of the continued page that belong to the session.
+        var endByteOffset: UInt64
+    }
+
+    /// One page a rollout continues, and the part of it that belongs to the session.
+    struct BasePage: Equatable {
+        var url: URL
+        var byteCount: UInt64
+        /// The same cut in lines of this page, when Codex recorded ordinals.
+        var lineCount: Int?
+    }
+
+    /// The session a rollout belongs to: the first UUID in its file name. Its pages share it.
+    static func sessionID(ofRolloutPath path: String) -> String? {
+        let name = (path as NSString).lastPathComponent
+        guard let range = name.range(of: "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", options: .regularExpression) else { return nil }
+        return String(name[range])
+    }
+
+    /// What the first line of a rollout says it continues; nil for a session in one file and
+    /// for the first page of a long one.
+    static func historyBase(inHeadOf url: URL) -> HistoryBase? {
+        // The key follows the instructions, some 22 KB into the line.
+        guard let data = try? readHead(for: url, maxBytes: 1_048_576) else { return nil }
+        let line = String(decoding: data.prefix { $0 != 0x0A }, as: UTF8.self)
+        guard let key = line.range(of: "\"history_base\":{") else { return nil }
+        let fields = String(line[key.upperBound...].prefix(400))
+        func value(of name: String) -> String? {
+            guard let range = fields.range(of: "\"\(name)\":") else { return nil }
+            let rest = fields[range.upperBound...]
+            if rest.first == "\"" {
+                return rest.dropFirst().split(separator: "\"", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
+            }
+            let digits = rest.prefix { $0.isNumber }
+            return digits.isEmpty ? nil : String(digits)
+        }
+        guard let page = value(of: "thread_id"), let end = value(of: "end_byte_offset").flatMap({ UInt64($0) }) else { return nil }
+        return HistoryBase(page: page, endOrdinal: value(of: "end_ordinal_exclusive").flatMap { Int($0) }, endByteOffset: end)
+    }
+
+    /// Whether a rollout path is the given page of a session: "…-<session>.jsonl" for the
+    /// first page, "…-<session>_<page>.jsonl" for a later one.
+    static func isPage(_ page: String, ofSession session: String, path: String) -> Bool {
+        let name = canonicalURL(for: URL(fileURLWithPath: path)).lastPathComponent
+        return name.hasPrefix("rollout-") && name.hasSuffix(page == session ? "-\(session).jsonl" : "-\(session)_\(page).jsonl")
+    }
+
+    /// The pages a rollout continues, oldest first. Empty for a session in one file and for a
+    /// first page. `paths` are the rollouts already known; the folders around the rollout are
+    /// read for a page that is not among them. A page that cannot be found ends the walk, so
+    /// the result is always the unbroken run of pages just before this one.
+    static func basePages(of url: URL, rollouts paths: [String]) -> [BasePage] {
+        guard let session = sessionID(ofRolloutPath: url.path), var base = historyBase(inHeadOf: url) else { return [] }
+        var known = paths.filter { $0.contains(session) }
+        var searchedFolders = false
+        func path(of page: String) -> String? {
+            if let found = known.first(where: { isPage(page, ofSession: session, path: $0) }) { return found }
+            guard !searchedFolders else { return nil }
+            searchedFolders = true
+            known += rollouts(ofSession: session, near: url)
+            return known.first { isPage(page, ofSession: session, path: $0) }
+        }
+        var pages: [BasePage] = []
+        var ends: [Int?] = []
+        var seen: Set<String> = [url.path]
+        while pages.count < 64, let found = path(of: base.page), seen.insert(found).inserted {
+            let page = URL(fileURLWithPath: found)
+            pages.append(BasePage(url: page, byteCount: base.endByteOffset, lineCount: nil))
+            ends.append(base.endOrdinal)
+            guard let next = historyBase(inHeadOf: page) else { ends.append(0); break }
+            base = next
+        }
+        // Ordinals count from the first page: a page's own lines are its cut less the cut of
+        // the page before it (the cut the last page found names, when the walk stopped early).
+        if ends.count == pages.count { ends.append(base.endOrdinal) }
+        for index in pages.indices {
+            if let end = ends[index], let before = ends[index + 1], end >= before { pages[index].lineCount = end - before }
+        }
+        return pages.reversed()
+    }
+
+    /// The rollouts of a session in the day folders around one of them (sessions/YYYY/MM/DD),
+    /// or in its own folder when it is not in such a tree.
+    private static func rollouts(ofSession session: String, near url: URL) -> [String] {
+        let fileManager = FileManager.default
+        let day = url.deletingLastPathComponent()
+        func files(in folder: URL) -> [String] {
+            ((try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? [])
+                .filter { $0.hasPrefix("rollout-") && $0.contains(session) }
+                .map { canonicalURL(for: folder.appendingPathComponent($0)).path }
+        }
+        func folders(in folder: URL) -> [URL] {
+            ((try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? [])
+                .filter { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+                .map { folder.appendingPathComponent($0, isDirectory: true) }
+        }
+        let month = day.deletingLastPathComponent(), year = month.deletingLastPathComponent()
+        let isDayTree = [day, month, year].allSatisfy { !$0.lastPathComponent.isEmpty && $0.lastPathComponent.allSatisfy(\.isNumber) }
+        guard isDayTree else { return files(in: day) }
+        return folders(in: year.deletingLastPathComponent()).flatMap(folders).flatMap(folders).flatMap(files)
+    }
+
     /// True when the decoded rollout contains `needle`. Streams the bytes and keeps
     /// nothing on disk. A decode error ends the search with what was read so far.
     static func decodedStreamContains(_ needle: String, for url: URL) -> Bool {

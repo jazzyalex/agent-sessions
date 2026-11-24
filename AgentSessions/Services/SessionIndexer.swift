@@ -683,7 +683,9 @@ final class SessionIndexer: ObservableObject {
                 // Force full parse by calling parseFile directly (skip lightweight check).
                 // JSONLReader is bounded to the size captured inside this call, so growth
                 // after the snapshot is left for the next append pass.
-                if let fullResult = self.parseFileFullResult(at: url, forcedID: id),
+                // A long session is stored as several files: the transcript starts with the
+                // pages this file continues, so the session opens whole.
+                if let fullResult = self.parseFileFullResult(at: url, forcedID: id, preceding: self.eventsOfBasePages(of: url)),
                    fullResult.readSucceeded || !hasLoadedEvents {
                     parsedSession = fullResult.session
                     if fullResult.readSucceeded,
@@ -2470,11 +2472,29 @@ final class SessionIndexer: ObservableObject {
         parseFileFullResult(at: url, forcedID: forcedID)?.session
     }
 
-    private func parseFileFullResult(at url: URL, forcedID: String? = nil) -> FullParseResult? {
+    /// The events of the pages a Codex rollout continues, oldest first: the session before
+    /// this file, each page up to the point where the next took over. Only the Session view's
+    /// reload joins them; the list, the index and search read each file on its own. Pages are
+    /// read from the newest back, and one that cannot be read ends the run there.
+    private func eventsOfBasePages(of url: URL) -> [SessionEvent] {
+        let known = allSessions.lazy.filter { $0.source == .codex }.map(\.filePath)
+        var runs: [[SessionEvent]] = []
+        for page in CodexRolloutStorage.basePages(of: url, rollouts: Array(known)).reversed() {
+            guard let result = parseFileFullResultMeasuredBody(at: page.url, forcedID: nil,
+                                                               byteLimit: page.byteCount, lineLimit: page.lineCount),
+                  result.readSucceeded else { break }
+            runs.append(result.session.events)
+        }
+        return runs.reversed().flatMap { $0 }
+    }
+
+    private func parseFileFullResult(at url: URL,
+                                     forcedID: String? = nil,
+                                     preceding: [SessionEvent] = []) -> FullParseResult? {
         let metrics = SearchResponsivenessMetrics.shared
         let span = metrics.beginSpan(.fullReadDecode,
             operationID: metrics.operation(source: SessionSource.codex.rawValue, sessionID: forcedID ?? Self.hash(path: url.path)))
-        let result = parseFileFullResultMeasuredBody(at: url, forcedID: forcedID)
+        let result = parseFileFullResultMeasuredBody(at: url, forcedID: forcedID, preceding: preceding)
         if let span {
             if let result { metrics.end(span, status: result.readSucceeded ? .succeeded : .partial) }
             else { metrics.fail(span, code: .readError) }
@@ -2482,7 +2502,13 @@ final class SessionIndexer: ObservableObject {
         return result
     }
 
-    private func parseFileFullResultMeasuredBody(at url: URL, forcedID: String?) -> FullParseResult? {
+    /// `byteLimit` and `lineLimit` read only the start of the file (a page of a long session
+    /// up to where the next page took over); `preceding` are events to put before the file's own.
+    private func parseFileFullResultMeasuredBody(at url: URL,
+                                                 forcedID: String?,
+                                                 byteLimit: UInt64? = nil,
+                                                 lineLimit: Int? = nil,
+                                                 preceding: [SessionEvent] = []) -> FullParseResult? {
         SessionInfoMetrics.shared.beginTranscript(path: url.path)
         defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
 #if DEBUG
@@ -2509,12 +2535,15 @@ final class SessionIndexer: ObservableObject {
         // Counted at the decoder, before line splitting, so the size is the exact
         // decoded byte count (empty and oversized lines included).
         var decodedByteCount: UInt64 = 0
+        // A compressed rollout is read as a stream, which a byte limit cannot bound: there the
+        // line limit stops the read.
+        let readLimit = byteLimit.map { min(snapshotSize ?? $0, $0) } ?? snapshotSize
         let reader = CodexRolloutStorage.lineReader(for: url,
-                                                    maximumBytes: snapshotSize,
+                                                    maximumBytes: readLimit,
                                                     propagatesReadErrors: true,
                                                     onDecodedBytes: { decodedByteCount += UInt64($0) })
             ?? JSONLReader(url: url,
-                           maximumBytes: snapshotSize,
+                           maximumBytes: readLimit,
                            propagatesReadErrors: true)
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
@@ -2529,6 +2558,7 @@ final class SessionIndexer: ObservableObject {
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
+                if isCompressedStorage, let lineLimit, idx > lineLimit { return }
                 // Only sanitize very large lines (>100KB) - sanitizeLargeLine has its own guards for smaller lines
                 let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
                 let (event, maybeModel) = Self.parseLine(safeLine, eventID: Self.eventID(base: eventIDBase, index: idx))
@@ -2592,6 +2622,7 @@ final class SessionIndexer: ObservableObject {
             let event = SessionEvent(id: Self.eventID(base: eventIDBase, index: 0), timestamp: Date(), kind: .error, role: "system", text: "Failed to read: \(error.localizedDescription)", toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
             events.append(event)
         }
+        if !preceding.isEmpty { events.insert(contentsOf: preceding, at: 0) }
 
         let times = events.compactMap { $0.timestamp }
         var start = times.min()
