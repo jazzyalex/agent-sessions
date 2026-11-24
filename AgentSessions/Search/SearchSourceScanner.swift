@@ -29,7 +29,7 @@ struct SearchScanResult: Sendable {
     let key: SearchCoordinator.SessionKey
     let truth: SearchQuery.Truth
     let summary: SearchScanSummary
-    let snippet: String?
+    let snippet: SearchExcerpt?
 }
 
 /// Each lane owns one worker through physical cleanup, including cancellation during OS I/O.
@@ -92,13 +92,11 @@ enum SearchSourceScanner {
                 for attempt in 0...1 {
                     try Task.checkCancellation()
                     let predicate = SearchPredicateAccumulator(query: query, tokenizer: tokenizer)
-                    var snippet: String?
                     var matchingReasons: Set<SearchCoverageReason> = []
                     var summary = scanSegments(session: session) { segment in
-                        let before = predicate.witnesses.count
                         do {
                             try metrics.measured(.searchMatching, operationID: operation, parentID: parent, context: context) {
-                                try predicate.consume(field: segment.text)
+                                try predicate.consume(field: segment.text, capturePassage: true)
                             }
                         } catch SearchTokenizer.Failure.resourceLimit {
                             // One oversized field must not prevent the scanner from proving
@@ -106,9 +104,6 @@ enum SearchSourceScanner {
                             // Coverage remains incomplete, so negative/NOT results stay unknown.
                             matchingReasons.insert(.resourceLimit)
                             return
-                        }
-                        if snippet == nil, predicate.witnesses.count > before {
-                            snippet = String(decoding: segment.text.utf16.prefix(512), as: UTF16.self)
                         }
                     }
                     summary.reasons.formUnion(matchingReasons)
@@ -133,8 +128,9 @@ enum SearchSourceScanner {
                                        counters: [.sourceChangedRetries: 1])
                     }
                     let stable = summary.revision != nil && !summary.reasons.contains(.sourceChanged)
-                    last = .init(key: .init(session), truth: stable ? predicate.truth(complete: summary.complete) : .unknown,
-                                 summary: summary, snippet: stable ? snippet : nil)
+                    let evidence = query.evidence(witnesses: predicate.witnesses, complete: summary.complete)
+                    last = .init(key: .init(session), truth: stable ? evidence.truth : .unknown,
+                                 summary: summary, snippet: stable ? predicate.excerpt(for: evidence.atom) : nil)
                     if !summary.reasons.contains(.sourceChanged) || attempt == 1 { return last }
                 }
                 return last

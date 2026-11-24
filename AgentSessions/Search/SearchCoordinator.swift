@@ -86,7 +86,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     @Published private(set) var incompleteCount = 0
     @Published private(set) var unresolvedCount = 0
     @Published private(set) var verifiedKeys: Set<SessionKey> = []
-    @Published private(set) var snippets: [SessionKey: String] = [:]
+    @Published private(set) var snippets: [SessionKey: SearchExcerpt] = [:]
+    @Published private(set) var usesRelevanceOrder = false
 
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var wasCanceled: Bool = false
@@ -123,6 +124,21 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     private var appIsActive: Bool = true
     // Throttle guards for progress updates
     private var progressThrottleLastFlush = DispatchTime.now()
+
+    private struct Relevance: Comparable {
+        enum Tier: Int { case title, transcript, metadata, toolIO }
+        let tier: Tier
+        var score = 0.0
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            lhs.tier == rhs.tier ? lhs.score < rhs.score : lhs.tier.rawValue < rhs.tier.rawValue
+        }
+    }
+
+    private struct ExcerptScope: Hashable {
+        let source: SessionSource
+        let corpus: IndexDB.SearchFTSCorpus
+    }
 
     init(store: SearchSessionStoring) {
         self.store = store
@@ -207,6 +223,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             results = []
             verifiedKeys = []
             snippets = [:]
+            usesRelevanceOrder = false
             queryError = nil
             eligibleCount = 0
             completeCount = 0
@@ -288,10 +305,13 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         unresolvedCount = 0
         eligibleCount = 0
         verifiedKeys = []
-        snippets = [:]
         deepScanEnabled = enableDeepScan
         isRunning = true
-        if !preserveResultsUntilRefreshPublishes { results = [] }
+        if !preserveResultsUntilRefreshPublishes {
+            snippets = [:]
+            usesRelevanceOrder = false
+            results = []
+        }
         let store = self.store
         currentTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -312,6 +332,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     let rows = metadata.freeText.isEmpty ? eligible : exact
                     await MainActor.run {
                         guard self.runID == currentRun else { return }
+                        self.snippets = [:]
+                        self.usesRelevanceOrder = false
                         self.results = rows
                         self.verifiedKeys = Set(rows.map(SessionKey.init))
                         self.eligibleCount = rows.count
@@ -324,59 +346,104 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
                 let tokenizer = try SearchTokenizer()
                 let compiled = try SearchQuery(filters.query, tokenizer: tokenizer)
-                var hits: [SessionKey: Session] = [:]
+                var ranks: [SessionKey: Relevance] = [:]
+                var snippets: [SessionKey: SearchExcerpt] = [:]
+                var excerptCorpora: [SessionKey: IndexDB.SearchFTSCorpus] = [:]
                 for session in eligible {
                     try Task.checkCancellation()
                     let predicate = SearchPredicateAccumulator(query: compiled, tokenizer: tokenizer)
-                    for field in [session.listTitle, session.lightweightCwd ?? "", session.lightweightRepoName ?? ""] {
-                        try predicate.consume(field: field)
+                    try predicate.consume(field: session.listTitle)
+                    let titleMatches = predicate.truth(complete: false) == .yes
+                    try predicate.consume(field: session.lightweightCwd ?? "")
+                    try predicate.consume(field: session.lightweightRepoName ?? "")
+                    if predicate.truth(complete: false) == .yes {
+                        ranks[SessionKey(session)] = .init(tier: titleMatches ? .title : .metadata)
                     }
-                    if predicate.truth(complete: false) == .yes { hits[SessionKey(session)] = session }
                 }
                 if FeatureFlags.enableFTSSearch, let db = self.db, let fts = compiled.ftsCandidate {
                     // Scope each source and every metadata predicate before capacity. Source-qualified
                     // keys also avoid dictionary traps when two providers use the same raw ID.
-                    for source in allowed {
+                    let includeProbes = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
+                    let limit = self.ftsResultLimitForTesting ?? FeatureFlags.ftsSearchLimit
+                    for (source, originals) in Dictionary(grouping: candidates, by: \.source) {
                         try Task.checkCancellation()
-                        let scoped = eligible.filter { $0.source == source }
-                        let originals = candidates.filter { $0.source == source }
                         let ids = await Self.indexedCandidates(originals, db: db, toolIO: false)
                         guard !ids.isEmpty else { continue }
-                        let limit = self.ftsResultLimitForTesting ?? FeatureFlags.ftsSearchLimit
-                        let ordinary = (try? await db.searchSessionIDsFTS(
-                            sources: [source.rawValue], model: nil, repoSubstr: nil, pathSubstr: nil,
-                            dateFrom: nil, dateTo: nil, query: fts,
-                            includeSystemProbes: UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"),
+                        let ordinary = (try? await db.searchFTSHits(
+                            corpus: .transcript, sources: [source.rawValue], query: fts, includeSystemProbes: includeProbes,
                             limit: limit, eligibleSessionIDs: ids)) ?? []
-                        var found = Set(ordinary)
-                        if self.toolIOIndexEnabled() {
-                            let tool = (try? await db.searchSessionIDsToolIOFTS(
-                                sources: [source.rawValue], model: nil, repoSubstr: nil, pathSubstr: nil,
-                                dateFrom: nil, dateTo: nil, query: fts,
-                                includeSystemProbes: UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"),
-                                limit: max(0, limit - found.count), eligibleSessionIDs: await Self.indexedCandidates(originals, db: db, toolIO: true),
-                                excludingSessionIDs: found)) ?? []
-                            found.formUnion(tool)
+                        for hit in ordinary {
+                            let key = SessionKey(source: source, id: hit.sessionID)
+                            if ranks[key]?.tier != .title { ranks[key] = .init(tier: .transcript, score: hit.score) }
+                            excerptCorpora[key] = .transcript
                         }
-                        for session in scoped where found.contains(session.id) { hits[SessionKey(session)] = session }
+                        if ordinary.count < limit, self.toolIOIndexEnabled() {
+                            let tool = (try? await db.searchFTSHits(
+                                corpus: .toolIO, sources: [source.rawValue], query: fts, includeSystemProbes: includeProbes,
+                                limit: max(0, limit - ordinary.count),
+                                eligibleSessionIDs: await Self.indexedCandidates(originals, db: db, toolIO: true),
+                                excludingSessionIDs: Set(ordinary.map(\.sessionID)))) ?? []
+                            for hit in tool {
+                                let key = SessionKey(source: source, id: hit.sessionID)
+                                if ranks[key] == nil { ranks[key] = .init(tier: .toolIO, score: hit.score) }
+                                excerptCorpora[key] = .toolIO
+                            }
+                        }
                     }
                 }
                 try Task.checkCancellation()
-                let instantRows = eligible.filter { hits[SessionKey($0)] != nil }
-                await MainActor.run {
-                    guard self.runID == currentRun else { return }
+                let instantRows = eligible.enumerated().compactMap { index, session -> (Int, Relevance, Session)? in
+                    ranks[SessionKey(session)].map { (index, $0, session) }
+                }.sorted { lhs, rhs in
+                    lhs.1 == rhs.1 ? lhs.0 < rhs.0 : lhs.1 < rhs.1
+                }.map { $0.2 }
+                let published = await MainActor.run { () -> Bool in
+                    guard self.runID == currentRun else { return false }
                     metrics.record(.searchInstantFirstPublication, operationID: operation, status: .published, counters: [.resultCount: Int64(instantRows.count)])
+                    self.snippets = [:]
+                    self.usesRelevanceOrder = compiled.hasPositiveAtom
                     self.results = instantRows
                     self.eligibleCount = eligible.count
                     self.unresolvedCount = eligible.count
                     self.progress = .init(phase: enableDeepScan ? .legacySmall : .indexed,
                                           scannedSmall: 0, totalSmall: eligible.count)
                     self.isRunning = enableDeepScan
+                    return true
+                }
+                guard published else { return }
+                if let db = self.db, let fts = compiled.ftsCandidate, !excerptCorpora.isEmpty {
+                    let candidates = instantRows.compactMap { session -> (id: String, scope: ExcerptScope)? in
+                        guard let corpus = excerptCorpora[SessionKey(session)] else { return nil }
+                        return (session.id, ExcerptScope(source: session.source, corpus: corpus))
+                    }
+                    // Return will capture source excerpts itself. Seed the first screen from
+                    // the index while the verifier starts, then let it own the remaining rows.
+                    let previewKeys = enableDeepScan ? candidates.prefix(48) : candidates[...]
+                    let batchSize = enableDeepScan ? 48 : 96
+                    for start in stride(from: 0, to: previewKeys.count, by: batchSize) {
+                        try Task.checkCancellation()
+                        let batch = previewKeys[start..<min(start + batchSize, previewKeys.count)]
+                        for (scope, items) in Dictionary(grouping: batch, by: { $0.scope }) {
+                            let passages = (try? await db.searchFTSExcerpts(corpus: scope.corpus, source: scope.source,
+                                                                           query: fts, sessionIDs: items.map { $0.id })) ?? [:]
+                            for (id, passage) in passages {
+                                snippets[SessionKey(source: scope.source, id: id)] = passage
+                            }
+                        }
+                        let snapshot = snippets
+                        await MainActor.run {
+                            guard self.runID == currentRun else { return }
+                            self.snippets = snapshot
+                        }
+                    }
                 }
                 guard enableDeepScan else { return }
                 var complete = 0, incomplete = 0, unresolved = 0
                 var verified: Set<SessionKey> = []
-                var snippets: [SessionKey: String] = [:]
+                var retained = Set(instantRows.map(SessionKey.init))
+                var scanOnlyRows: [Session] = []
+                var resultsChanged = false
+                var snippetsChanged = false
                 var lastPublication = ContinuousClock.now
                 var visited = 0
                 for (index, session) in eligible.enumerated() {
@@ -390,37 +457,50 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     switch result.truth {
                     case .yes:
                         verified.insert(result.key)
-                        hits[result.key] = session
-                        snippets[result.key] = result.snippet
-                    case .no: hits[result.key] = nil
+                        if !retained.contains(result.key) {
+                            scanOnlyRows.append(session)
+                            resultsChanged = true
+                        }
+                        if snippets[result.key] != result.snippet {
+                            snippets[result.key] = result.snippet
+                            snippetsChanged = true
+                        }
+                    case .no:
+                        if retained.remove(result.key) != nil { resultsChanged = true }
+                        if snippets.removeValue(forKey: result.key) != nil { snippetsChanged = true }
                     case .unknown: unresolved += 1
                     }
                     if ContinuousClock.now - lastPublication >= .milliseconds(100) || index == eligible.count - 1 {
-                        let rows = eligible.filter { hits[SessionKey($0)] != nil }
+                        let rows = resultsChanged ? instantRows.filter { retained.contains(SessionKey($0)) } + scanOnlyRows : nil
                         let counts = (complete, incomplete, unresolved + eligible.count - index - 1)
-                        let verifiedSnapshot = verified, snippetSnapshot = snippets
-                        await MainActor.run {
-                            guard self.runID == currentRun else { return }
-                            self.results = rows
+                        let verifiedSnapshot = verified, snippetSnapshot = snippetsChanged ? snippets : nil
+                        let published = await MainActor.run { () -> Bool in
+                            guard self.runID == currentRun else { return false }
+                            if let snippetSnapshot { self.snippets = snippetSnapshot }
+                            if let rows { self.results = rows }
                             metrics.record(.searchCoverageCounters, operationID: operation, status: .published, counters: [.completeSessions: Int64(counts.0), .incompleteSessions: Int64(counts.1), .verifiedResults: Int64(verifiedSnapshot.count)])
                             self.verifiedKeys = verifiedSnapshot
-                            self.snippets = snippetSnapshot
                             self.completeCount = counts.0
                             self.incompleteCount = counts.1
                             self.unresolvedCount = counts.2
                             self.progress.scannedSmall = index + 1
+                            return true
+                        }
+                        if published {
+                            resultsChanged = false
+                            snippetsChanged = false
                         }
                         lastPublication = .now
                     }
                 }
-                let finalRows = eligible.filter { hits[SessionKey($0)] != nil }
-                let finalVerified = verified, finalSnippets = snippets
+                let finalRows = resultsChanged ? instantRows.filter { retained.contains(SessionKey($0)) } + scanOnlyRows : nil
+                let finalVerified = verified, finalSnippets = snippetsChanged ? snippets : nil
                 let finalCounts = (complete, incomplete, unresolved + eligible.count - visited)
                 await MainActor.run {
                     guard self.runID == currentRun || self.cancelledVerificationRunID == currentRun else { return }
-                    self.results = finalRows
+                    if let finalSnippets { self.snippets = finalSnippets }
+                    if let finalRows { self.results = finalRows }
                     self.verifiedKeys = finalVerified
-                    self.snippets = finalSnippets
                     self.completeCount = finalCounts.0
                     self.incompleteCount = finalCounts.1
                     self.unresolvedCount = finalCounts.2
@@ -434,6 +514,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 await MainActor.run {
                     guard self.runID == currentRun else { return }
                     self.queryError = error.localizedDescription
+                    self.snippets = [:]
+                    self.usesRelevanceOrder = false
                     self.results = []
                     self.isRunning = false
                 }

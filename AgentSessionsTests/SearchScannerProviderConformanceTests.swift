@@ -48,8 +48,8 @@ final class SearchScannerProviderConformanceTests: XCTestCase {
             XCTFail("\(session.source.rawValue) hit has no snippet", file: file, line: line)
             return result
         }
-        XCTAssertFalse(snippet.isEmpty, file: file, line: line)
-        XCTAssertLessThanOrEqual(snippet.utf16.count, 512, file: file, line: line)
+        XCTAssertFalse(snippet.match.isEmpty, file: file, line: line)
+        XCTAssertLessThanOrEqual(snippet.text.utf16.count, 512, file: file, line: line)
         return result
     }
 

@@ -930,7 +930,10 @@ final class SessionParserTests: XCTestCase {
                           all: [ordinaryAndTool, toolOnly])
 
         try await waitForSearchResults(coordinator,
-                                       expectedIDs: [ordinaryAndTool.id, toolOnly.id])
+                                       expectedIDs: [ordinaryAndTool.id, toolOnly.id],
+                                       expectedExcerpts: [.init(ordinaryAndTool), .init(toolOnly)])
+        XCTAssertEqual(coordinator.snippets[.init(ordinaryAndTool)]?.match, "dualmatch")
+        XCTAssertEqual(coordinator.snippets[.init(toolOnly)]?.match, "dualmatch")
     }
 
     func testSearchCoordinatorTitleHitDoesNotExcludeItsRankedToolHit() async throws {
@@ -1062,10 +1065,12 @@ final class SessionParserTests: XCTestCase {
 
     private func waitForSearchResults(_ coordinator: SearchCoordinator,
                                       expectedIDs: [String],
+                                      expectedExcerpts: [SearchCoordinator.SessionKey] = [],
                                       file: StaticString = #filePath,
                                       line: UInt = #line) async throws {
         for _ in 0..<50 {
-            if !coordinator.isRunning, coordinator.results.map(\.id) == expectedIDs {
+            if !coordinator.isRunning, coordinator.results.map(\.id) == expectedIDs,
+               expectedExcerpts.allSatisfy({ coordinator.snippets[$0] != nil }) {
                 return
             }
             try await Task.sleep(nanoseconds: 20_000_000)

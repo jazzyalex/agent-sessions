@@ -29,15 +29,16 @@ final class SearchTokenizer {
 
     private final class Sink {
         var failure: Error?
-        let consume: (String) throws -> Void
-        init(_ consume: @escaping (String) throws -> Void) { self.consume = consume }
+        let consume: (String, Range<Int>) throws -> Void
+        init(_ consume: @escaping (String, Range<Int>) throws -> Void) { self.consume = consume }
     }
-    func enumerate(_ text: String, consume: @escaping (String) throws -> Void) throws {
+    func enumerate(_ text: String, consume: @escaping (String, Range<Int>) throws -> Void) throws {
         // Split only on ASCII whitespace, a native unicode61 separator. The caller's
         // phrase window spans chunks. An indivisible >64-KiB run is explicit incomplete
         // coverage rather than an uninterruptible tokenizer traversal.
         let bytes = text.utf8
         var start = bytes.startIndex
+        var offset = 0
         while start < bytes.endIndex {
             try Task.checkCancellation()
             var end = bytes.index(start, offsetBy: 64 * 1024, limitedBy: bytes.endIndex) ?? bytes.endIndex
@@ -51,20 +52,26 @@ final class SearchTokenizer {
                 guard boundary > start else { throw Failure.resourceLimit }
                 end = boundary
             }
-            try enumerateChunk(String(decoding: bytes[start..<end], as: UTF8.self), consume: consume)
+            let chunk = bytes[start..<end]
+            let chunkOffset = offset
+            try enumerateChunk(String(decoding: chunk, as: UTF8.self)) { token, range in
+                try consume(token, (chunkOffset + range.lowerBound)..<(chunkOffset + range.upperBound))
+            }
+            offset += chunk.count
             start = end
         }
     }
-    private func enumerateChunk(_ text: String, consume: @escaping (String) throws -> Void) throws {
+    private func enumerateChunk(_ text: String, consume: @escaping (String, Range<Int>) throws -> Void) throws {
         let sink = Sink(consume)
         let result = text.utf8CString.withUnsafeBufferPointer { bytes in
             tokenizer.xTokenize(instance, Unmanaged.passUnretained(sink).toOpaque(), 0x0004,
-                                bytes.baseAddress, Int32(bytes.count - 1)) { context, _, token, count, _, _ in
+                                bytes.baseAddress, Int32(bytes.count - 1)) { context, _, token, count, start, end in
                 guard let context, let token else { return SQLITE_ERROR }
                 let sink = Unmanaged<Sink>.fromOpaque(context).takeUnretainedValue()
                 do {
                     try Task.checkCancellation()
-                    try sink.consume(String(decoding: UnsafeRawBufferPointer(start: token, count: Int(count)), as: UTF8.self))
+                    let value = String(decoding: UnsafeRawBufferPointer(start: token, count: Int(count)), as: UTF8.self)
+                    try sink.consume(value, Int(start)..<Int(end))
                     return SQLITE_OK
                 } catch { sink.failure = error; return SQLITE_ABORT }
             }
@@ -74,8 +81,63 @@ final class SearchTokenizer {
     }
     func tokens(_ text: String) throws -> [String] {
         var tokens: [String] = []
-        try enumerate(text) { tokens.append($0) }
+        try enumerate(text) { token, _ in tokens.append(token) }
         return tokens
+    }
+}
+
+enum SearchTextSafety {
+    static func mayContainCommonSecret(_ text: String) -> Bool {
+        text.contains("botToken") || text.contains("apiKey") || text.contains("\"token\"")
+            || text.contains("accessToken") || text.contains("refreshToken")
+    }
+}
+
+struct SearchExcerpt: Equatable, Sendable {
+    let leading: String
+    let match: String
+    let trailing: String
+
+    var text: String { leading + match + trailing }
+
+    /// FTS marks matches with U+0001 and U+0002. Highlight the first match in its passage.
+    init?(indexedSnippet: String) {
+        guard !SearchTextSafety.mayContainCommonSecret(indexedSnippet),
+              let open = indexedSnippet.firstIndex(of: "\u{1}"),
+              let close = indexedSnippet[indexedSnippet.index(after: open)...].firstIndex(of: "\u{2}") else { return nil }
+        let prefix = indexedSnippet[..<open].utf8
+        let matched = indexedSnippet[indexedSnippet.index(after: open)..<close].utf8
+        let suffix = indexedSnippet[indexedSnippet.index(after: close)...].utf8
+        self.init(before: prefix, matched: matched, after: suffix)
+    }
+
+    init?(field: String, range: Range<Int>) {
+        let bytes = field.utf8
+        guard let start = bytes.index(bytes.startIndex, offsetBy: range.lowerBound, limitedBy: bytes.endIndex),
+              let end = bytes.index(start, offsetBy: range.count, limitedBy: bytes.endIndex) else { return nil }
+        self.init(before: bytes[..<start], matched: bytes[start..<end], after: bytes[end...])
+    }
+
+    private init?<Bytes: Collection>(before: Bytes, matched: Bytes, after: Bytes) where Bytes.Element == UInt8 {
+        let left = before.suffix(28)
+        let center = matched.prefix(72)
+        let right = after.prefix(100)
+        leading = (left.count < before.count ? "…" : "") + Self.oneLine(left, suffix: true)
+        match = Self.oneLine(center) + (center.count < matched.count ? "…" : "")
+        trailing = Self.oneLine(right) + (right.count < after.count ? "…" : "")
+        guard !match.isEmpty else { return nil }
+    }
+
+    private static func oneLine(_ bytes: some Collection<UInt8>, suffix: Bool = false) -> String {
+        // The byte caps can fall between UTF-8 code units. Remove only the partial scalar.
+        var string = String(decoding: bytes, as: UTF8.self)
+        if suffix, string.first == "�" { string.removeFirst() }
+        if !suffix, string.last == "�" { string.removeLast() }
+        let content = string.filter { $0 != "\u{1}" && $0 != "\u{2}" }
+        let words = content.split(whereSeparator: \.isWhitespace)
+        guard !words.isEmpty else { return content.isEmpty ? "" : " " }
+        return (content.first?.isWhitespace == true ? " " : "") + words.joined(separator: " ")
+            + (content.last?.isWhitespace == true ? " " : "")
     }
 }
 
@@ -219,20 +281,47 @@ struct SearchQuery: Sendable, Equatable {
         }
         return predicate.flatMap(compile)
     }
-    func truth(witnesses: Set<Int>, complete: Bool) -> Truth {
-        func evaluate(_ p: Predicate) -> Truth {
-            switch p {
-            case .atom(let i): return witnesses.contains(i) ? .yes : (complete ? .no : .unknown)
-            case .not(let p): switch evaluate(p) { case .yes: return .no; case .no: return .yes; case .unknown: return .unknown }
-            case .and(let a, let b):
-                let a = evaluate(a), b = evaluate(b)
-                if a == .no || b == .no { return .no }; return a == .yes && b == .yes ? .yes : .unknown
-            case .or(let a, let b):
-                let a = evaluate(a), b = evaluate(b)
-                if a == .yes || b == .yes { return .yes }; return a == .no && b == .no ? .no : .unknown
+
+    var hasPositiveAtom: Bool {
+        func containsPositive(_ predicate: Predicate, negated: Bool) -> Bool {
+            switch predicate {
+            case .atom: return !negated
+            case .not(let inner): return containsPositive(inner, negated: !negated)
+            case .and(let left, let right), .or(let left, let right):
+                return containsPositive(left, negated: negated) || containsPositive(right, negated: negated)
             }
         }
-        return predicate.map(evaluate) ?? .yes
+        return predicate.map { containsPositive($0, negated: false) } ?? false
+    }
+    func truth(witnesses: Set<Int>, complete: Bool) -> Truth {
+        evidence(witnesses: witnesses, complete: complete).truth
+    }
+
+    func evidence(witnesses: Set<Int>, complete: Bool) -> (truth: Truth, atom: Int?) {
+        func evaluate(_ p: Predicate) -> (truth: Truth, atom: Int?) {
+            switch p {
+            case .atom(let i): return witnesses.contains(i) ? (.yes, i) : (complete ? .no : .unknown, nil)
+            case .not(.not(let inner)): return evaluate(inner)
+            case .not(let inner):
+                switch evaluate(inner).truth {
+                case .yes: return (.no, nil)
+                case .no: return (.yes, nil)
+                case .unknown: return (.unknown, nil)
+                }
+            case .and(let a, let b):
+                let a = evaluate(a), b = evaluate(b)
+                if a.truth == .no || b.truth == .no { return (.no, nil) }
+                if a.truth == .yes && b.truth == .yes { return (.yes, a.atom ?? b.atom) }
+                return (.unknown, nil)
+            case .or(let a, let b):
+                let a = evaluate(a), b = evaluate(b)
+                if a.truth == .yes, a.atom != nil { return a }
+                if b.truth == .yes { return b }
+                if a.truth == .yes { return a }
+                return (a.truth == .no && b.truth == .no ? .no : .unknown, nil)
+            }
+        }
+        return predicate.map(evaluate) ?? (.yes, nil)
     }
 }
 
@@ -241,22 +330,39 @@ final class SearchPredicateAccumulator {
     let query: SearchQuery
     private(set) var witnesses: Set<Int> = []
     private let tokenizer: SearchTokenizer
-    init(query: SearchQuery, tokenizer: SearchTokenizer) { self.query = query; self.tokenizer = tokenizer }
-    func consume(field: String) throws {
-        var window: [String] = []
-        let capacity = query.atoms.map { $0.tokens.count }.max() ?? 0
+    private let capacity: Int
+    private var passages: [Int: SearchExcerpt] = [:]
+
+    init(query: SearchQuery, tokenizer: SearchTokenizer) {
+        self.query = query
+        self.tokenizer = tokenizer
+        capacity = query.atoms.map { $0.tokens.count }.max() ?? 0
+    }
+
+    func consume(field: String, capturePassage: Bool = false) throws {
         guard capacity > 0 else { return }
-        try tokenizer.enumerate(field) { [self] token in
-            window.append(token)
+        var window: [(text: String, range: Range<Int>)] = []
+        var canPreview: Bool?
+        try tokenizer.enumerate(field) { [self] token, range in
+            window.append((token, range))
             if window.count > capacity { window.removeFirst() }
             for (index, atom) in query.atoms.enumerated() where !witnesses.contains(index) && atom.tokens.count <= window.count {
                 let candidate = window.suffix(atom.tokens.count)
                 let matches = zip(candidate, atom.tokens).enumerated().allSatisfy { i, pair in
-                    atom.prefix && i == atom.tokens.count - 1 ? pair.0.hasPrefix(pair.1) : pair.0 == pair.1
+                    atom.prefix && i == atom.tokens.count - 1 ? pair.0.text.hasPrefix(pair.1) : pair.0.text == pair.1
                 }
-                if matches { witnesses.insert(index) }
+                guard matches else { continue }
+                witnesses.insert(index)
+                if capturePassage, let first = candidate.first {
+                    if canPreview == nil { canPreview = !SearchTextSafety.mayContainCommonSecret(field) }
+                    if canPreview == true {
+                        passages[index] = SearchExcerpt(field: field, range: first.range.lowerBound..<range.upperBound)
+                    }
+                }
             }
         }
     }
+
+    func excerpt(for atom: Int?) -> SearchExcerpt? { atom.flatMap { passages[$0] } }
     func truth(complete: Bool) -> SearchQuery.Truth { query.truth(witnesses: witnesses, complete: complete) }
 }

@@ -42,12 +42,7 @@ enum SessionSearchTextBuilder {
     }
 
     private static func redactCommonSecrets(in text: String) -> String {
-        // Only bother if we see suspicious keys or token markers.
-        if !(text.contains("botToken")
-             || text.contains("apiKey")
-             || text.contains("\"token\"")
-             || text.contains("accessToken")
-             || text.contains("refreshToken")) { return text }
+        guard SearchTextSafety.mayContainCommonSecret(text) else { return text }
 
         var out = text
         for rx in secretRegexes {

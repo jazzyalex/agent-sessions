@@ -3125,6 +3125,20 @@ actor IndexDB {
         }
     }
 
+    enum SearchFTSCorpus: Hashable, Sendable {
+        case transcript, toolIO
+
+        var table: String { self == .transcript ? "session_search" : "session_tool_io" }
+        var formatVersion: Int {
+            self == .transcript ? FeatureFlags.sessionSearchFormatVersion : FeatureFlags.sessionToolIOFormatVersion
+        }
+    }
+
+    struct SearchFTSHit: Sendable {
+        let sessionID: String
+        let score: Double
+    }
+
     func searchSessionIDsFTS(
         sources: [String],
         model: String?,
@@ -3140,6 +3154,51 @@ actor IndexDB {
         ineligibleSessionIDs: Set<String> = [],
         excludingSessionIDs: Set<String> = []
     ) throws -> [String] {
+        try searchFTSHits(corpus: .transcript,
+            sources: sources, model: model, repoSubstr: repoSubstr, pathSubstr: pathSubstr,
+            dateFrom: dateFrom, dateTo: dateTo, query: query, includeSystemProbes: includeSystemProbes,
+            limit: limit, offset: offset, eligibleSessionIDs: eligibleSessionIDs,
+            ineligibleSessionIDs: ineligibleSessionIDs, excludingSessionIDs: excludingSessionIDs).map(\.sessionID)
+    }
+
+    func searchSessionIDsToolIOFTS(
+        sources: [String],
+        model: String?,
+        repoSubstr: String?,
+        pathSubstr: String?,
+        dateFrom: Date?,
+        dateTo: Date?,
+        query: String,
+        includeSystemProbes: Bool,
+        limit: Int,
+        offset: Int = 0,
+        eligibleSessionIDs: Set<String>? = nil,
+        ineligibleSessionIDs: Set<String> = [],
+        excludingSessionIDs: Set<String> = []
+    ) throws -> [String] {
+        try searchFTSHits(corpus: .toolIO,
+            sources: sources, model: model, repoSubstr: repoSubstr, pathSubstr: pathSubstr,
+            dateFrom: dateFrom, dateTo: dateTo, query: query, includeSystemProbes: includeSystemProbes,
+            limit: limit, offset: offset, eligibleSessionIDs: eligibleSessionIDs,
+            ineligibleSessionIDs: ineligibleSessionIDs, excludingSessionIDs: excludingSessionIDs).map(\.sessionID)
+    }
+
+    func searchFTSHits(
+        corpus: SearchFTSCorpus,
+        sources: [String],
+        model: String? = nil,
+        repoSubstr: String? = nil,
+        pathSubstr: String? = nil,
+        dateFrom: Date? = nil,
+        dateTo: Date? = nil,
+        query: String,
+        includeSystemProbes: Bool,
+        limit: Int,
+        offset: Int = 0,
+        eligibleSessionIDs: Set<String>? = nil,
+        ineligibleSessionIDs: Set<String> = [],
+        excludingSessionIDs: Set<String> = []
+    ) throws -> [SearchFTSHit] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         guard limit > 0 else { return [] }
         var clauses: [String] = []
@@ -3150,8 +3209,10 @@ actor IndexDB {
             clauses.append("sm.session_id IN (SELECT id FROM temp.search_eligible_ids)")
         }
 
-        clauses.append("s.format_version = \(FeatureFlags.sessionSearchFormatVersion)")
-        clauses.append("session_search_fts MATCH ?")
+        let table = corpus.table
+        let ftsTable = table + "_fts"
+        clauses.append("s.format_version = \(corpus.formatVersion)")
+        clauses.append("\(ftsTable) MATCH ?")
         binds.append(query)
 
         if !sources.isEmpty {
@@ -3185,12 +3246,12 @@ actor IndexDB {
 
         let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
         let sql = """
-        SELECT sm.session_id
-        FROM session_search_fts f
-        JOIN session_search s ON s.rowid = f.rowid
+        SELECT sm.session_id, bm25(\(ftsTable)) AS score
+        FROM \(ftsTable) f
+        JOIN \(table) s ON s.rowid = f.rowid
         JOIN session_meta sm ON sm.session_id = s.session_id AND sm.source = s.source
         \(whereSQL)
-        ORDER BY bm25(session_search_fts), sm.session_id
+        ORDER BY score, sm.session_id
         LIMIT ? OFFSET ?;
         """
 
@@ -3219,132 +3280,56 @@ actor IndexDB {
         // fallback would page over rows it is about to discard.
         sqlite3_bind_int(stmt, idx, Int32(filtersInSwift ? 0 : offset))
 
-        var ids: [String] = []
+        var hits: [SearchFTSHit] = []
         var step = sqlite3_step(stmt)
         while step == SQLITE_ROW {
             if let c = sqlite3_column_text(stmt, 0) {
                 let id = String(cString: c)
                 let isEligible = eligibleSessionIDs?.contains(id) ?? true
                 if isEligible, !excludingSessionIDs.contains(id) {
-                    ids.append(id)
-                    if eligibleSessionIDs != nil, ids.count == limit { return ids }
+                    hits.append(.init(sessionID: id, score: sqlite3_column_double(stmt, 1)))
+                    if eligibleSessionIDs != nil, hits.count == limit { return hits }
                 }
             }
             step = sqlite3_step(stmt)
         }
         guard step == SQLITE_DONE else {
-            throw DBError.execFailed("search session FTS")
+            throw DBError.execFailed("search \(table) FTS")
         }
-        return ids
+        return hits
     }
 
-    func searchSessionIDsToolIOFTS(
-        sources: [String],
-        model: String?,
-        repoSubstr: String?,
-        pathSubstr: String?,
-        dateFrom: Date?,
-        dateTo: Date?,
-        query: String,
-        includeSystemProbes: Bool,
-        limit: Int,
-        offset: Int = 0,
-        eligibleSessionIDs: Set<String>? = nil,
-        ineligibleSessionIDs: Set<String> = [],
-        excludingSessionIDs: Set<String> = []
-    ) throws -> [String] {
-        guard let db = handle else { throw DBError.openFailed("db closed") }
-        guard limit > 0 else { return [] }
-        var clauses: [String] = []
-        var binds: [Any] = []
-        if let eligibleSessionIDs {
-            if eligibleSessionIDs.isEmpty { return [] }
-            try installSearchEligibleIDs(eligibleSessionIDs)
-            clauses.append("sm.session_id IN (SELECT id FROM temp.search_eligible_ids)")
+    /// Re-read the sampled passages for a bounded batch of already published candidates.
+    /// FTS rechecks the query in case the sample changed between ranking and this read.
+    func searchFTSExcerpts(corpus: SearchFTSCorpus, source: SessionSource,
+                           query: String, sessionIDs: [String]) throws -> [String: SearchExcerpt] {
+        guard !sessionIDs.isEmpty else { return [:] }
+        try Task.checkCancellation()
+        let table = corpus.table
+        let fts = table + "_fts"
+        let placeholders = Array(repeating: "?", count: sessionIDs.count).joined(separator: ",")
+        let statement = try prepare("""
+            SELECT s.session_id, snippet(\(fts), 0, char(1), char(2), '…', 12)
+            FROM \(fts) JOIN \(table) s ON s.rowid = \(fts).rowid
+            WHERE \(fts) MATCH ? AND s.source = ? AND s.format_version = \(corpus.formatVersion)
+              AND s.session_id IN (\(placeholders));
+            """)
+        defer { sqlite3_finalize(statement) }
+        for (offset, value) in ([query, source.rawValue] + sessionIDs).enumerated() {
+            sqlite3_bind_text(statement, Int32(offset + 1), value, -1, SQLITE_TRANSIENT)
         }
-
-        clauses.append("t.format_version = \(FeatureFlags.sessionToolIOFormatVersion)")
-        clauses.append("session_tool_io_fts MATCH ?")
-        binds.append(query)
-
-        if !sources.isEmpty {
-            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
-            clauses.append("sm.source IN (\(qs))")
-            binds.append(contentsOf: sources)
-        }
-        if let m = model, !m.isEmpty { clauses.append("sm.model = ?"); binds.append(m) }
-        if let r = repoSubstr, !r.isEmpty { clauses.append("sm.repo LIKE ?"); binds.append("%\(r)%") }
-        if let p = pathSubstr, !p.isEmpty { clauses.append("sm.cwd LIKE ?"); binds.append("%\(p)%") }
-        if let df = dateFrom { clauses.append("COALESCE(sm.end_ts, sm.mtime) >= ?"); binds.append(Int64(df.timeIntervalSince1970)) }
-        if let dt = dateTo { clauses.append("COALESCE(sm.end_ts, sm.mtime) <= ?"); binds.append(Int64(dt.timeIntervalSince1970)) }
-        if !includeSystemProbes {
-            clauses.append("NOT (sm.source = 'claude' AND sm.path LIKE ?)")
-            binds.append("%AgentSessions-ClaudeProbeProject%")
-        }
-
-        // Exact mode: push the known-ineligible and excluded ids into SQL. The LIMIT then
-        // bounds the *filtered* ranking, so the top-N result is exact and no row can be
-        // truncated away by rows the caller was going to discard anyway. Falls back to
-        // Swift-side skipping (with a widened but still bounded LIMIT) only when the id set
-        // is too large to bind.
-        let pushedDownFilter = Self.excludedIDsClause(ineligibleSessionIDs.union(excludingSessionIDs),
-                                                      column: "sm.session_id")
-        if let pushedDownFilter, !pushedDownFilter.clause.isEmpty {
-            clauses.append(pushedDownFilter.clause)
-            binds.append(contentsOf: pushedDownFilter.binds)
-        }
-        let usesExactBound = pushedDownFilter != nil
-
-        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
-        let sql = """
-        SELECT sm.session_id
-        FROM session_tool_io_fts f
-        JOIN session_tool_io t ON t.rowid = f.rowid
-        JOIN session_meta sm ON sm.session_id = t.session_id AND sm.source = t.source
-        \(whereSQL)
-        ORDER BY bm25(session_tool_io_fts), sm.session_id
-        LIMIT ? OFFSET ?;
-        """
-
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
-            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        var idx: Int32 = 1
-        for b in binds {
-            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
-            else if let i = b as? Int64 { sqlite3_bind_int64(stmt, idx, i) }
-            idx += 1
-        }
-        // The SQL LIMIT stays bound in every mode: an unbounded query forfeits SQLite's
-        // top-N sorter for ORDER BY bm25(...), which must then materialize and fully sort
-        // every matching row before the first step returns.
-        let filtersInSwift = !usesExactBound && (eligibleSessionIDs != nil || !excludingSessionIDs.isEmpty)
-        let sqlLimit = filtersInSwift ? limit + Self.filteredSearchScanSlack : limit
-        sqlite3_bind_int(stmt, idx, Int32(clamping: sqlLimit)); idx += 1
-        // OFFSET is only meaningful when the SQL result set is the final one; the Swift
-        // fallback would page over rows it is about to discard.
-        sqlite3_bind_int(stmt, idx, Int32(filtersInSwift ? 0 : offset))
-
-        var ids: [String] = []
-        var step = sqlite3_step(stmt)
+        var excerpts: [String: SearchExcerpt] = [:]
+        var step = sqlite3_step(statement)
         while step == SQLITE_ROW {
-            if let c = sqlite3_column_text(stmt, 0) {
-                let id = String(cString: c)
-                let isEligible = eligibleSessionIDs?.contains(id) ?? true
-                if isEligible, !excludingSessionIDs.contains(id) {
-                    ids.append(id)
-                    if eligibleSessionIDs != nil, ids.count == limit { return ids }
-                }
+            try Task.checkCancellation()
+            if let id = sqlite3_column_text(statement, 0), let text = sqlite3_column_text(statement, 1),
+               let excerpt = SearchExcerpt(indexedSnippet: String(cString: text)) {
+                excerpts[String(cString: id)] = excerpt
             }
-            step = sqlite3_step(stmt)
+            step = sqlite3_step(statement)
         }
-        guard step == SQLITE_DONE else {
-            throw DBError.execFailed("search tool I/O FTS")
-        }
-        return ids
+        guard step == SQLITE_DONE else { throw DBError.execFailed("read FTS excerpts") }
+        return excerpts
     }
 
     func pruneOldToolIO(cutoffTS: Int64, oldBytesCap: Int64, batchSize: Int = 64) throws {

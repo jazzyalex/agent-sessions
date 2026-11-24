@@ -429,6 +429,7 @@ struct UnifiedSessionsView: View {
     @State private var selectionSource: SessionSource? = nil
     @State private var lastSelectedSource: SessionSource = .codex
 		@State private var sortOrder: [KeyPathComparator<Session>] = []
+    @State private var searchColumnSort: [KeyPathComparator<Session>] = []
 		@State private var cachedRows: [Session] = []
         @State private var cachedRowIDs: [String] = []
         @State private var cachedVisibleRowIDs: Set<String> = []
@@ -530,14 +531,29 @@ struct UnifiedSessionsView: View {
     @State private var selectionPropagationTask: Task<Void, Never>? = nil
     @State private var restoreCandidate: Session? = nil
     @State private var showRestoredRelaunch = false
+
+    private var usesRelevanceOrder: Bool {
+        searchCoordinator.usesRelevanceOrder && !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var tableSortOrder: Binding<[KeyPathComparator<Session>]> {
+        usesRelevanceOrder ? $searchColumnSort : $sortOrder
+    }
+
     private var rows: [Session] {
         let baseRows: [Session]
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty || searchCoordinator.isRunning {
             // SearchCoordinator already applied filters to authoritative sessions.
             // Its display rows omit events, so filtering them again can hide valid
-            // command and operator-scoped matches. Only preserve display ordering.
-            baseRows = unified.sortSearchResultsForDisplay(searchCoordinator.results)
+            // command and operator-scoped matches. Honor a column choice for this
+            // query while keeping the normal browse sort for non-relevance results.
+            if usesRelevanceOrder {
+                baseRows = searchColumnSort.isEmpty
+                    ? searchCoordinator.results : searchCoordinator.results.sorted(using: searchColumnSort)
+            } else {
+                baseRows = unified.sortSearchResultsForDisplay(searchCoordinator.results)
+            }
         } else {
             baseRows = unified.sessions
         }
@@ -1066,13 +1082,45 @@ struct UnifiedSessionsView: View {
 	        )
 	    }
 
-	    private var listPane: some View {
+
+    private func sessionTitleCell(for session: Session) -> some View {
+        let key = SearchCoordinator.SessionKey(session)
+        let excerpt = usesRelevanceOrder ? searchCoordinator.snippets[key] : nil
+        return SessionTitleCell(
+            session: session,
+            displayTitleOverride: unified.claudeDesktopTitle(for: session),
+            searchExcerpt: excerpt,
+            antigravityIndexer: antigravityIndexer,
+            rowMeta: hierarchyRowMeta[session.id],
+            sideChatParentContext: sideChatParentContextByID[session.id],
+            isExpanded: !groupFolding.isCollapsed(session.id, standard: collapsedParents),
+            onToggleExpand: { id in
+                collapsedParents = groupFolding.standardCollapsedParents(
+                    afterToggling: id,
+                    expandableParentIDs: currentExpandableParentIDs,
+                    standard: collapsedParents
+                )
+                groupFolding = .standard
+            }
+        )
+        .equatable()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Explicitly select the tapped row instead of relying on Table's mouse handling.
+            setActiveSelection(session.id, source: session.source, userInitiated: true)
+            autoSelectEnabled = false
+            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+        }
+    }
+
+	    private var sessionTable: some View {
 	        let showTitle = columnVisibility.showTitleColumn
 	        let showModified = columnVisibility.showModifiedColumn
         let showProject = columnVisibility.showProjectColumn
         let showMsgs = columnVisibility.showMsgsColumn
-	        return ZStack(alignment: .bottom) {
-		        Table(cachedRows, selection: tableSingleSelection, sortOrder: $sortOrder) {
+        let columnSort = tableSortOrder
+        let rowHeight: CGFloat = usesRelevanceOrder ? 36 : 28
+        return Table(cachedRows, selection: tableSingleSelection, sortOrder: columnSort) {
             TableColumn("★") { cellFavorite(for: $0) }
                 .width(min: showStarColumn ? 36 : 0,
                        ideal: showStarColumn ? 40 : 0,
@@ -1091,32 +1139,7 @@ struct UnifiedSessionsView: View {
                        ideal: showSourceColumn ? 100 : 0,
                        max: showSourceColumn ? 120 : 0)
 
-            TableColumn("Session", value: \Session.listTitle) { s in
-                SessionTitleCell(
-                    session: s,
-                    displayTitleOverride: unified.claudeDesktopTitle(for: s),
-                    antigravityIndexer: antigravityIndexer,
-                    rowMeta: hierarchyRowMeta[s.id],
-                    sideChatParentContext: sideChatParentContextByID[s.id],
-                    isExpanded: !groupFolding.isCollapsed(s.id, standard: collapsedParents),
-                    onToggleExpand: { id in
-                        collapsedParents = groupFolding.standardCollapsedParents(
-                            afterToggling: id,
-                            expandableParentIDs: currentExpandableParentIDs,
-                            standard: collapsedParents
-                        )
-                        groupFolding = .standard
-                    }
-                    )
-                    .equatable()
-	                    .contentShape(Rectangle())
-	                    .onTapGesture {
-	                        // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
-	                        setActiveSelection(s.id, source: s.source, userInitiated: true)
-	                        autoSelectEnabled = false
-	                        NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
-	                    }
-            }
+            TableColumn("Session", value: \Session.listTitle) { sessionTitleCell(for: $0) }
             .width(min: showTitle ? 160 : 0,
                    ideal: showTitle ? 320 : 0,
                    max: showTitle ? 2000 : 0)
@@ -1195,10 +1218,15 @@ struct UnifiedSessionsView: View {
             // system white zebra is dropped (see listPaneBackground).
             .scrollContentBackground(.hidden)
             .tint(UnifiedSessionsStyle.selectionAccent)
-	        .environment(\.defaultMinListRowHeight, 28)
+	        .environment(\.defaultMinListRowHeight, rowHeight)
 		        .simultaneousGesture(TapGesture().onEnded {
 		            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
 		        })
+    }
+
+    private var listPane: some View {
+        let pane = ZStack(alignment: .bottom) {
+            sessionTable
 		        if let emptyState = sessionListEmptyState {
 		            sessionListEmptyStateView(emptyState)
 		                .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1310,6 +1338,7 @@ struct UnifiedSessionsView: View {
         } message: {
             Text("Relaunch Claude Desktop to see it.")
         }
+        let monitoredPane = pane
         .onChange(of: sortOrder) { _, newValue in
             if let first = newValue.first {
                 let key: UnifiedSessionIndexer.SessionSortDescriptor.Key
@@ -1428,11 +1457,13 @@ struct UnifiedSessionsView: View {
 							selectionTrace("sessions changed end selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
 						}
 					}
-				}
-        .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
+					}
+        let columnsPane = monitoredPane
+            .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
         .onChange(of: showSourceColumn) { _, _ in refreshColumnLayout() }
         .onChange(of: showSizeColumn) { _, _ in refreshColumnLayout() }
         .onChange(of: showStarColumn) { _, _ in refreshColumnLayout() }
+        return columnsPane
         .onChange(of: searchCoordinator.isRunning) { _, _ in
             updateCachedRows()
             let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1441,6 +1472,11 @@ struct UnifiedSessionsView: View {
                 refreshSelectionSourceFromCachedRows()
             }
         }
+        .onChange(of: unified.queryDraft) { _, _ in searchColumnSort = [] }
+        .onChange(of: searchColumnSort) { _, _ in
+            if usesRelevanceOrder { updateCachedRows() }
+        }
+        .onChange(of: searchCoordinator.usesRelevanceOrder) { _, _ in updateCachedRows() }
         .onChange(of: searchCoordinator.results) { _, _ in
             updateCachedRows()
             // If we have search results but no valid selection (none selected or selected not in results),
@@ -2983,7 +3019,7 @@ struct UnifiedSessionsView: View {
             let presencesForFallback = activeCodexSessions.presences
             let directJoinFallbackKeys = directJoinFallbackKeys(for: allSessionsForFallback)
             let nextRows: [Session]
-            if FeatureFlags.coalesceListResort {
+            if usesRelevanceOrder || FeatureFlags.coalesceListResort {
                 // unified.sessions is already sorted by the view model's descriptor
                 nextRows = rows
             } else {
@@ -4557,6 +4593,7 @@ struct TranscriptHostView: View {
 private struct SessionTitleCell: View, Equatable {
     let session: Session
     let displayTitleOverride: String?
+    let searchExcerpt: SearchExcerpt?
     let antigravityIndexer: AntigravitySessionIndexer
     let rowMeta: SubagentRowMeta?
     let sideChatParentContext: String?
@@ -4575,6 +4612,7 @@ private struct SessionTitleCell: View, Equatable {
             && lhs.session.model == rhs.session.model
             && lhs.session.reasoningEffort == rhs.session.reasoningEffort
             && lhs.displayTitleOverride == rhs.displayTitleOverride
+            && lhs.searchExcerpt == rhs.searchExcerpt
             && lhs.rowMeta == rhs.rowMeta
             && lhs.sideChatParentContext == rhs.sideChatParentContext
             && lhs.isExpanded == rhs.isExpanded
@@ -4673,17 +4711,26 @@ private struct SessionTitleCell: View, Equatable {
                     .accessibilityLabel("Deleted session")
             }
 
-            HStack(spacing: 6) {
-                Text(displayTitle)
-                    .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if session.isSideChat, let sideChatParentContext {
-                    Text("of \(sideChatParentContext)")
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(displayTitle)
+                        .font(.system(size: 13, weight: .regular, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if session.isSideChat, let sideChatParentContext {
+                        Text("of \(sideChatParentContext)")
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                if let searchExcerpt, searchExcerpt.text != displayTitle {
+                    Text(Self.attributedExcerpt(searchExcerpt))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(searchExcerpt.text)
                 }
             }
             .background(Color.clear)
@@ -4698,6 +4745,12 @@ private struct SessionTitleCell: View, Equatable {
             }
         }
         .onHover { hover = $0 }
+    }
+
+    private static func attributedExcerpt(_ excerpt: SearchExcerpt) -> AttributedString {
+        var match = AttributedString(excerpt.match)
+        match.font = .system(size: 10, weight: .semibold, design: .monospaced)
+        return AttributedString(excerpt.leading) + match + AttributedString(excerpt.trailing)
     }
 
     private var displayTitle: String {

@@ -134,9 +134,32 @@ final class SearchSourceScannerTests: XCTestCase {
         ]]]])
         let result = try await scan(session, "\"needle final\"")
         XCTAssertEqual(result.truth, .yes); XCTAssertTrue(result.summary.complete)
-        XCTAssertLessThanOrEqual(result.snippet?.utf16.count ?? 0, 512)
+        XCTAssertEqual(result.snippet?.match, "needle-final")
+        XCTAssertLessThanOrEqual(result.snippet?.text.utf16.count ?? 0, 212)
         let marker = try await scan(session, "\"OMITTED legitimate\"")
         XCTAssertEqual(marker.truth, .yes)
+    }
+
+    func testVerifiedExcerptUsesSatisfyingBranchAndOriginalUnicodeBeyondTokenizerChunk() async throws {
+        let accent = "Que\u{301}bec Observability"
+        let text = String(repeating: "ordinary validation details ", count: 3_000) + accent + " helps diagnose timing"
+        let session = try fixture([message("alpha"), message(text)])
+        let result = try await scan(session, "alpha AND absent OR \"quebec observ\"*")
+        XCTAssertEqual(result.truth, .yes)
+        XCTAssertEqual(result.snippet?.match, accent)
+        XCTAssertTrue(result.snippet?.text.hasPrefix("…") == true)
+        XCTAssertTrue(result.snippet?.text.contains("helps diagnose") == true)
+
+        let exclusion = try await scan(session, "NOT absent")
+        XCTAssertEqual(exclusion.truth, .yes)
+        XCTAssertNil(exclusion.snippet)
+    }
+
+    func testSearchPreviewOmitsEvidenceFromFieldsWithRecognizedCredentialKeys() async throws {
+        let session = try fixture([message(#"diagnostic {"apiKey":"sample-secret"} needle"#)])
+        let result = try await scan(session, "needle")
+        XCTAssertEqual(result.truth, .yes)
+        XCTAssertNil(result.snippet)
     }
 
     func testStreamSampleIndexesToolResultTextAndToolOutputWithoutDuplication() {
@@ -197,7 +220,7 @@ final class SearchSourceScannerTests: XCTestCase {
 
     func testLongIndivisibleTokenIsExplicitResourceLimit() throws {
         let tokenizer = try SearchTokenizer()
-        XCTAssertThrowsError(try tokenizer.enumerate(String(repeating: "a", count: 65_537)) { _ in })
+        XCTAssertThrowsError(try tokenizer.enumerate(String(repeating: "a", count: 65_537)) { _, _ in })
     }
 
     func testOversizedFieldKeepsStablePositiveWitnessesButCannotProveAbsence() async throws {
