@@ -121,6 +121,151 @@ final class OpenCodeV2StoreTests: XCTestCase {
         XCTAssertEqual(full.lightweightCommands, 3)
     }
 
+    func testExternalAssistantPartsRestoreTranscriptAndSearchInMixedStore() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try createExternalParts()
+        try exec("""
+        UPDATE session_v2 SET version = '2.4.1' WHERE id = 'ses_native';
+        INSERT INTO session_message VALUES ('msg_external', 'ses_native', 'assistant', 6, 9070, 9080,
+            '{"content":[{"type":"text","text":"shadowinline"}],"tokens":{"input":5,"output":1}}');
+        INSERT INTO session_part VALUES
+            ('msg_external', 'ses_native', 3, 'text', NULL, 9074, 9074, '{"type":"text","text":"externalclosing"}'),
+            ('msg_external', 'ses_native', 0, 'text', NULL, 9071, 9071, '{"type":"text","text":"externalopening"}'),
+            ('msg_external', 'ses_native', 1, 'tool', 'call_external', 9072, 9072,
+             '{"type":"tool","id":"call_external","name":"execute","state":{"status":"completed","content":[{"type":"text","text":"externaltoolresult"}]}}'),
+            ('msg_external', 'ses_native', 2, 'reasoning', NULL, 9073, 9073,
+             '{"type":"reasoning","text":"privatereasoningdetails","native":true}'),
+            ('msg_external', 'ses_other', 4, 'text', NULL, 9075, 9075, '{"type":"text","text":"foreigndata"}');
+        """)
+
+        let full = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_native"))
+        XCTAssertEqual(full.events.filter { $0.kind == .assistant }.compactMap(\.text),
+                       ["Big Pickle is still listed.", "externalopening", "externalclosing"])
+        let opening = try XCTUnwrap(full.events.firstIndex { $0.text == "externalopening" })
+        let tool = try XCTUnwrap(full.events.firstIndex { $0.toolOutput == "externaltoolresult" })
+        let closing = try XCTUnwrap(full.events.firstIndex { $0.text == "externalclosing" })
+        XCTAssertLessThan(opening, tool)
+        XCTAssertLessThan(tool, closing)
+        XCTAssertTrue(full.events[tool..<closing].contains { $0.text == "[OpenCode reasoning part]" })
+
+        let session = selected("ses_native")
+        let tokenizer = try SearchTokenizer()
+        let cases: [(String, SearchQuery.Truth)] = [
+            ("externalopening", .yes), ("externaltoolresult", .yes),
+            ("shadowinline", .no), ("foreigndata", .no), ("privatereasoningdetails", .no),
+        ]
+        for (text, expected) in cases {
+            let result = await SearchSourceScanner.scan(session: session, query: try SearchQuery(text, tokenizer: tokenizer))
+            XCTAssertEqual(result.truth, expected, text)
+            XCTAssertTrue(result.summary.complete, text)
+        }
+        if let path = ProcessInfo.processInfo.environment["AS_OPENCODE_241_REPLAY_DB"] {
+            try await verifyNativeExternalReply(at: path, tokenizer: tokenizer)
+        }
+    }
+
+    /// Opt-in check against a native store. Never prints the session ID or reply.
+    private func verifyNativeExternalReply(at path: String, tokenizer: SearchTokenizer) async throws {
+        var db: OpaquePointer?
+        let status = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil)
+        defer { sqlite3_close(db) }
+        guard status == SQLITE_OK else { return XCTFail("Could not open the native OpenCode store read-only") }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let sql = """
+            SELECT p.session_id, json_extract(p.data, '$.text')
+            FROM session_part p JOIN session_v2 s ON s.id = p.session_id
+            JOIN session_message m ON m.id = p.message_id AND m.session_id = p.session_id
+            WHERE s.version = '2.4.1' AND s.time_archived IS NULL AND p.type = 'text'
+              AND m.type = 'assistant' AND json_array_length(m.data, '$.content') = 0
+              AND length(trim(json_extract(p.data, '$.text'))) > 10
+            ORDER BY s.time_updated DESC, m.seq, p.ordinal LIMIT 1;
+            """
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_ROW,
+              let sessionID = sqlite3_column_text(statement, 0), let reply = sqlite3_column_text(statement, 1) else {
+            return XCTFail("No native OpenCode 2.4.1 external assistant reply found")
+        }
+        let id = String(cString: sessionID)
+        let expected = String(cString: reply).trimmingCharacters(in: .whitespacesAndNewlines)
+        let full = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: path, sessionID: id))
+        XCTAssertTrue(full.events.contains {
+            $0.kind == .assistant && $0.text?.trimmingCharacters(in: .whitespacesAndNewlines) == expected
+        }, "Native assistant reply was missing from the transcript")
+        let token = try XCTUnwrap(try tokenizer.tokens(expected).first { $0.count >= 4 })
+        let query = try SearchQuery("\"\(token)\"", tokenizer: tokenizer)
+        let result = await SearchSourceScanner.scan(session: full, query: query)
+        XCTAssertEqual(result.truth, .yes, "Native assistant reply was missing from verified search")
+        var foundExternalText = false
+        let source = SearchSourceScanner.scanSegments(session: full) { segment in
+            if segment.kind == .message && segment.text.trimmingCharacters(in: .whitespacesAndNewlines) == expected {
+                foundExternalText = true
+            }
+        }
+        XCTAssertTrue(foundExternalText, "Native assistant reply was missing from search source segments")
+        XCTAssertTrue(source.complete, "Native search source scan was incomplete")
+        print("OpenCode 2.4.1 native transcript and search replay verified")
+    }
+
+    func testMalformedExternalPartDoesNotCertifyAnEmptySearch() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try createExternalParts()
+        try exec("""
+        INSERT INTO session_part VALUES ('msg_native_a2', 'ses_native', 0, 'text', NULL, 9030, 9040, 'not-json');
+        """)
+        let query = try SearchQuery("neverpresent", tokenizer: SearchTokenizer())
+        let result = await SearchSourceScanner.scan(session: selected("ses_native"), query: query)
+        XCTAssertEqual(result.truth, .unknown)
+        XCTAssertFalse(result.summary.complete)
+    }
+
+    func testUpgradeReindexesExternalPartsWithoutMessageRevisionChange() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try createExternalParts()
+        try exec("""
+        UPDATE session_message SET data = '{"content":[]}' WHERE id = 'msg_native_a2';
+        """)
+        let index = try makeTestIndexDBWithDirectory()
+        defer { index.cleanup() }
+        let session = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        let ref = SearchIngestService.FileRef(path: dbURL.path, mtime: 1, size: 10,
+            sessionID: session.id, contentRevision: SearchIngestService.contentRevision(for: session))
+        let snapshot = SearchIngestService.IdentitySnapshot(storagePaths: [dbURL.path], sessionIDs: [session.id])
+        let before = try await SearchIngestService(db: index.db).ingest(
+            source: .opencode, files: [ref], toolIOEnabled: false,
+            identitySnapshot: snapshot, yieldNanoseconds: 0)
+        XCTAssertEqual(before.processed, 1)
+        try exec("""
+        INSERT INTO session_part VALUES ('msg_native_a2', 'ses_native', 0, 'text', NULL, 9030, 9040,
+            '{"type":"text","text":"recoveredexternalreply"}');
+        """)
+        try await index.db.exec("DELETE FROM schema_migrations WHERE key = 'opencode_external_parts_reindex_v1';")
+
+        let originalProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        let upgraded: IndexDB
+        do {
+            IndexDBTestHooks.applicationSupportDirectoryProvider = { index.directory }
+            defer { IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider }
+            upgraded = try IndexDB()
+        }
+        let ingest = SearchIngestService(db: upgraded)
+        let repair = try await ingest.ingest(source: .opencode, files: [ref], toolIOEnabled: false,
+            identitySnapshot: snapshot, yieldNanoseconds: 0, quietSeconds: 3600,
+            reingestCooldownOverride: 3600)
+        XCTAssertEqual(repair.processed, 1)
+        let hits = try await upgraded.searchSessionIDsFTS(
+            sources: ["opencode"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "recoveredexternalreply", includeSystemProbes: true, limit: 10)
+        XCTAssertEqual(hits, [session.id])
+        let current = try await ingest.ingest(source: .opencode, files: [ref], toolIOEnabled: false,
+            identitySnapshot: snapshot, yieldNanoseconds: 0)
+        XCTAssertEqual(current.processed, 0)
+        XCTAssertEqual(current.skipped, 1)
+    }
+
     func testMigratedSessionLoadsFromV2CopyNotV1Rows() throws {
         try createV1Tables()
         try createV2Tables()
@@ -597,6 +742,18 @@ final class OpenCodeV2StoreTests: XCTestCase {
             time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
         );
         CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message (session_id, seq);
+        """)
+    }
+
+    private func createExternalParts() throws {
+        try exec("""
+        CREATE TABLE session_part (
+            message_id TEXT NOT NULL, session_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+            type TEXT NOT NULL, call_id TEXT, time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL, data TEXT NOT NULL,
+            PRIMARY KEY (message_id, ordinal)
+        );
+        CREATE INDEX session_part_session_message_ordinal_idx ON session_part (session_id, message_id, ordinal);
         """)
     }
 

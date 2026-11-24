@@ -1556,14 +1556,19 @@ struct OpenCodeSqliteReader {
         return try? JSONDecoder().decode(OpenCodeSessionParser.MessageJSON.self, from: data)
     }
 
-    private static func adaptedV2Row(_ row: V2Row) -> OpenCodeV2MessageAdapter.Adapted? {
+    private static func adaptedV2Row(_ row: V2Row, hasExternalParts: Bool = false) -> OpenCodeV2MessageAdapter.Adapted? {
         guard let object = decodeObject(row.data) else { return nil }
         return OpenCodeV2MessageAdapter.adapt(rowID: row.id,
                                              type: row.type,
                                              timeCreatedMillis: row.timeCreated,
                                              timeUpdatedMillis: row.timeUpdated,
-                                             data: object)
+                                             data: object,
+                                             hasExternalParts: hasExternalParts)
     }
+
+    static let v2PartsSQL = """
+        SELECT ordinal, data FROM session_part WHERE session_id = ? AND message_id = ? ORDER BY ordinal;
+        """
 
     private struct V2SessionRow {
         let id: String
@@ -1681,17 +1686,31 @@ struct OpenCodeSqliteReader {
         guard let scan = v2Rows(db: db, sessionID: sessionID, afterRow: afterV2Row),
               !scan.cancelled else { return nil }
 
+        var partStatement: OpaquePointer?
+        defer { sqlite3_finalize(partStatement) }
+        if tableExists(db, table: "session_part") {
+            guard sqlite3_prepare_v2(db, v2PartsSQL, -1, &partStatement, nil) == SQLITE_OK else { return nil }
+            sqlite3_bind_text(partStatement, 1, (sessionID as NSString).utf8String, -1,
+                              unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        }
         var events: [SessionEvent] = []
         var commandCount = 0
         for row in scan.rows {
-            guard let adapted = adaptedV2Row(row),
+            guard !Task.isCancelled else { return nil }
+            var partStep = SQLITE_DONE
+            if let partStatement, row.type == "assistant" {
+                sqlite3_reset(partStatement)
+                sqlite3_bind_text(partStatement, 2, (row.id as NSString).utf8String, -1,
+                                  unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                partStep = sqlite3_step(partStatement)
+                guard partStep == SQLITE_ROW || partStep == SQLITE_DONE else { return nil }
+            }
+            guard let adapted = adaptedV2Row(row, hasExternalParts: partStep == SQLITE_ROW),
                   let message = decodeMessageJSON(adapted.message) else { continue }
             let timestamp = dateFromMillis(row.timeCreated)
             events.append(messageMetaEvent(msgID: row.id, timestamp: timestamp, role: message.role, rawJSON: row.data))
-            // Expand one part at a time so text, reasoning and tool items keep
-            // the order of the row's `content` array. (The shared builder groups
-            // a message's events by kind, which in v1 spans a whole turn.)
-            for part in adapted.parts {
+            // Expand parts individually to preserve their interleaved order.
+            func appendPart(_ part: (id: String, dict: [String: Any])) {
                 let partEvents = OpenCodeSessionParser.buildPartEvents(
                     for: message,
                     effectiveMsgID: row.id,
@@ -1704,7 +1723,18 @@ struct OpenCodeSqliteReader {
                 events.append(contentsOf: partEvents.tool)
                 events.append(contentsOf: partEvents.meta)
             }
+            while partStep == SQLITE_ROW {
+                guard !Task.isCancelled else { return nil }
+                if let item = decodeObject(text(partStatement, 1)) {
+                    appendPart(OpenCodeV2MessageAdapter.contentPart(item, messageID: row.id,
+                        ordinal: sqlite3_column_int64(partStatement, 0)))
+                }
+                partStep = sqlite3_step(partStatement)
+            }
+            guard partStep == SQLITE_DONE else { return nil }
+            for part in adapted.parts { appendPart(part) }
         }
+        guard !Task.isCancelled else { return nil }
         return buildFullSession(id: session.id,
                                 title: session.title,
                                 directory: session.directory,

@@ -18,21 +18,44 @@ extension SearchSourceScanner {
             let v2 = OpenCodeSqliteReader.searchUsesV2(reader.db, sessionID: session.id)
             guard try reader.hasRow("SELECT id, time_updated FROM \(v2 ? "session_v2" : "session") WHERE id = ?;", strings: [session.id]) else { throw Failure.unsupported }
             if v2 {
+                let hasPartTable = try reader.hasRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_part';")
                 try reader.rows("SELECT id, type, time_created, time_updated, data FROM session_message WHERE session_id = ? ORDER BY seq;", strings: [session.id]) { statement in
                     guard let id = reader.text(statement, 0), let type = reader.text(statement, 1),
                           let raw = reader.text(statement, 4) else { throw Failure.malformed }
                     let object = try reader.json(raw)
                     let created = sqlite3_column_int64(statement, 2)
-                    let adapted = OpenCodeV2MessageAdapter.adapt(rowID: id, type: type,
-                        timeCreatedMillis: created, timeUpdatedMillis: sqlite3_column_int64(statement, 3), data: object)
-                    guard let message = OpenCodeSqliteReader.searchMessage(adapted.message) else { throw Failure.malformed }
-                    for part in adapted.parts {
+                    let updated = sqlite3_column_int64(statement, 3)
+                    let time = created > 0 ? Date(timeIntervalSince1970: Double(created) / 1000) : nil
+                    func emitPart(_ part: (id: String, dict: [String: Any]),
+                                  message: OpenCodeSessionParser.MessageJSON) throws {
                         try Task.checkCancellation()
                         let events = OpenCodeSessionParser.buildPartEvents(for: message, effectiveMsgID: id,
-                            parts: [(id: part.id, dict: part.dict, rawJSON: "")],
-                            fallbackTimestamp: created > 0 ? Date(timeIntervalSince1970: Double(created) / 1000) : nil)
+                            parts: [(id: part.id, dict: part.dict, rawJSON: "")], fallbackTimestamp: time)
                         try emit(events.text); try emit(events.tool); try emit(events.meta)
                     }
+                    func adapt(hasExternalParts: Bool) throws
+                        -> (OpenCodeSessionParser.MessageJSON, OpenCodeV2MessageAdapter.Adapted) {
+                        let adapted = OpenCodeV2MessageAdapter.adapt(rowID: id, type: type,
+                            timeCreatedMillis: created, timeUpdatedMillis: updated, data: object,
+                            hasExternalParts: hasExternalParts)
+                        guard let message = OpenCodeSqliteReader.searchMessage(adapted.message) else { throw Failure.malformed }
+                        return (message, adapted)
+                    }
+                    var external: (OpenCodeSessionParser.MessageJSON, OpenCodeV2MessageAdapter.Adapted)?
+                    if hasPartTable, type == "assistant" {
+                        try reader.rows(OpenCodeSqliteReader.v2PartsSQL, strings: [session.id, id]) { partStatement in
+                            guard let rawPart = reader.text(partStatement, 1) else { throw Failure.malformed }
+                            let item = try reader.json(rawPart)
+                            guard item["type"] is String else { throw Failure.malformed }
+                            if external == nil { external = try adapt(hasExternalParts: true) }
+                            guard let (message, _) = external else { throw Failure.malformed }
+                            let part = OpenCodeV2MessageAdapter.contentPart(item, messageID: id,
+                                ordinal: sqlite3_column_int64(partStatement, 0))
+                            try emitPart(part, message: message)
+                        }
+                    }
+                    let (message, adapted) = try external ?? adapt(hasExternalParts: false)
+                    for part in adapted.parts { try emitPart(part, message: message) }
                 }
             } else {
                 try reader.rows("SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created, id;", strings: [session.id]) { statement in

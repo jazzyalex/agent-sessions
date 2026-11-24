@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- OpenCode 2.4.1 assistant replies and tool output appear in transcripts and search again. Existing OpenCode SQLite search entries rebuild automatically.
+
 ### Improvements
 
 - Economics model details now show selected-period totals, hourly rate inputs, and exact evidence counts. Weekly rates appear when at least two weeks have enough covered activity. The 7.0 What's New highlight includes an Economics dashboard screenshot in builds from this update.

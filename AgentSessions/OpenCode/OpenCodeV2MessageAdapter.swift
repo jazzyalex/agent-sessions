@@ -46,7 +46,8 @@ enum OpenCodeV2MessageAdapter {
     static let refusedWithoutUsageKey = "refusedWithoutUsage"
 
     static func adapt(rowID: String, type: String, timeCreatedMillis: Int64,
-                      timeUpdatedMillis: Int64 = 0, data: [String: Any]) -> Adapted {
+                      timeUpdatedMillis: Int64 = 0, data: [String: Any],
+                      hasExternalParts: Bool = false) -> Adapted {
         let time = data["time"] as? [String: Any] ?? [:]
         let created: Any? = time["created"] ?? (timeCreatedMillis > 0 ? NSNumber(value: timeCreatedMillis) : nil)
 
@@ -84,14 +85,9 @@ enum OpenCodeV2MessageAdapter {
             }
 
             var parts: [(id: String, dict: [String: Any])] = []
-            for (index, item) in ((data["content"] as? [[String: Any]]) ?? []).enumerated() {
-                let partID = rowID + "-c\(index)"
-                switch item["type"] as? String {
-                case "tool":
-                    parts.append((partID, toolPart(item)))
-                default:
-                    // text and reasoning already use the v1 part shape.
-                    parts.append((partID, item))
+            if !hasExternalParts, let content = data["content"] as? [[String: Any]] {
+                for (index, item) in content.enumerated() {
+                    parts.append(contentPart(item, messageID: rowID, ordinal: Int64(index)))
                 }
             }
             // One assistant row is one model request, which is exactly what a
@@ -156,6 +152,12 @@ enum OpenCodeV2MessageAdapter {
             }
             return Adapted(message: message, parts: parts)
         }
+    }
+
+    static func contentPart(_ item: [String: Any], messageID: String,
+                            ordinal: Int64) -> (id: String, dict: [String: Any]) {
+        // Text and reasoning already use the legacy shape.
+        (messageID + "-c\(ordinal)", item["type"] as? String == "tool" ? toolPart(item) : item)
     }
 
     /// The text a v2 user row shows in the transcript and session titles: its

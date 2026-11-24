@@ -718,6 +718,23 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexGuardianReindex)
         }
 
+        // The new reader can recover assistant content from OpenCode's external
+        // parts table. Rebuild only derived rows from SQLite-backed OpenCode
+        // sessions, even when the source timestamps have not changed.
+        let openCodePartsReindex = "opencode_external_parts_reindex_v1"
+        if !migrationApplied(db, key: openCodePartsReindex) {
+            for table in ["session_search", "session_tool_io"] {
+                try exec(db, """
+                    UPDATE \(table) SET format_version = 0
+                    WHERE source = 'opencode' AND session_id IN (
+                        SELECT session_id FROM session_meta
+                        WHERE source = 'opencode' AND path LIKE '%/opencode.db'
+                    );
+                    """)
+            }
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", openCodePartsReindex)
+        }
+
             try exec(db, "COMMIT;")
         } catch {
             try? exec(db, "ROLLBACK;")
