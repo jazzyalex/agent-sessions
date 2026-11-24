@@ -1,6 +1,200 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "View contributing sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View contributing sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看相关会话"
+          }
+        }
+      }
+    },
+    "Compare effort": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compare effort"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "比较推理强度"
+          }
+        }
+      }
+    },
+    "Weekly quota estimate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly quota estimate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每周配额用量估算"
+          }
+        }
+      }
+    },
+    "%lld of %lld records covered": {
+      "comment": "Number of usage records with a quota estimate, followed by the total usage record count.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld records covered"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "覆盖 %lld / %lld 条记录"
+          }
+        }
+      }
+    },
+    "Quota per timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota per timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每计时小时的配额用量"
+          }
+        }
+      }
+    },
+    "Quota-covered time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota-covered time"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配额覆盖时长"
+          }
+        }
+      }
+    },
+    "API cost per timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API cost per timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每计时小时的 API 成本"
+          }
+        }
+      }
+    },
+    "Price-covered time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Price-covered time"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定价覆盖时长"
+          }
+        }
+      }
+    },
+    "Effort": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effort"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推理强度"
+          }
+        }
+      }
+    },
+    "Contributing sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contributing sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相关会话"
+          }
+        }
+      }
+    },
+    "%@ · %@": {
+      "comment": "Model name and reasoning effort in the Economics contributing sessions sheet.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@・%@"
+          }
+        }
+      }
+    },
+    "These sessions are no longer in the index.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These sessions are no longer in the index."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这些会话已不在索引中。"
+          }
+        }
+      }
+    },
     "Weekly rate history needs at least two weeks with enough covered activity for the selected metric.": {
       "localizations": {
         "en": {
@@ -45,22 +239,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "公开的模型定价"
-          }
-        }
-      }
-    },
-    "Estimated share of the weekly allowance": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Estimated share of the weekly allowance"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "估算占每周额度的比例"
           }
         }
       }

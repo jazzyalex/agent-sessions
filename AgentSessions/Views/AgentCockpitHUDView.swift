@@ -1803,46 +1803,7 @@ struct AgentCockpitHUDView: View {
             workingDirectory: row.workingDirectory,
             createdAt: Date()
         )
-        CockpitNavigationBridge.store(pendingRequest)
-
-        AppWindowRouter.showAgentSessionsWindow()
-
-        var payload: [AnyHashable: Any] = ["source": row.source.rawValue]
-        if let runtimeSessionID = row.runtimeSessionID, !runtimeSessionID.isEmpty {
-            payload["runtimeSessionID"] = runtimeSessionID
-        }
-        if let logPath = row.logPath, !logPath.isEmpty {
-            payload["logPath"] = logPath
-        }
-        if let workingDirectory = row.workingDirectory, !workingDirectory.isEmpty {
-            payload["workingDirectory"] = workingDirectory
-        }
-        postGoToSessionNotification(
-            unifiedSessionID: resolvedSessionID,
-            payload: payload,
-            attempt: 0
-        )
-    }
-
-    private func postGoToSessionNotification(unifiedSessionID: String,
-                                             payload: [AnyHashable: Any],
-                                             attempt: Int) {
-        NotificationCenter.default.post(
-            name: .navigateToSessionFromCockpit,
-            object: unifiedSessionID,
-            userInfo: payload
-        )
-
-        guard attempt < 8 else { return }
-        guard CockpitNavigationBridge.hasPending(unifiedSessionID: unifiedSessionID) else { return }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            postGoToSessionNotification(
-                unifiedSessionID: unifiedSessionID,
-                payload: payload,
-                attempt: attempt + 1
-            )
-        }
+        CockpitNavigationBridge.navigate(pendingRequest)
     }
 
     private func revealLog(_ row: HUDRow) {

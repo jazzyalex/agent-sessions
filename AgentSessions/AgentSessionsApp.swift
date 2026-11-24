@@ -121,6 +121,33 @@ enum CockpitNavigationBridge {
     private static let workingDirectoryKey = "workingDirectory"
     private static let createdAtKey = "createdAtEpoch"
 
+    @MainActor
+    static func navigate(_ request: PendingCockpitNavigationRequest) {
+        store(request)
+        AppWindowRouter.showAgentSessionsWindow()
+        postNavigation(request, attempt: 0)
+    }
+
+    @MainActor
+    private static func postNavigation(_ request: PendingCockpitNavigationRequest, attempt: Int) {
+        guard isPending(request) else { return }
+        let payload: [AnyHashable: Any] = [
+            "source": request.sourceRawValue,
+            "runtimeSessionID": request.runtimeSessionID,
+            "logPath": request.logPath,
+            "workingDirectory": request.workingDirectory
+        ].compactMapValues { $0 }
+        NotificationCenter.default.post(
+            name: .navigateToSessionFromCockpit,
+            object: request.unifiedSessionID,
+            userInfo: payload
+        )
+        guard attempt < 8, isPending(request) else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            postNavigation(request, attempt: attempt + 1)
+        }
+    }
+
     static func store(_ request: PendingCockpitNavigationRequest) {
         let payload: [String: Any] = [
             unifiedSessionIDKey: request.unifiedSessionID,
@@ -167,8 +194,11 @@ enum CockpitNavigationBridge {
         clear()
     }
 
-    static func hasPending(unifiedSessionID: String) -> Bool {
-        load()?.unifiedSessionID == unifiedSessionID
+    private static func isPending(_ request: PendingCockpitNavigationRequest) -> Bool {
+        guard let pending = load() else { return false }
+        return pending.unifiedSessionID == request.unifiedSessionID
+            && pending.sourceRawValue == request.sourceRawValue
+            && pending.createdAt.timeIntervalSince1970 == request.createdAt.timeIntervalSince1970
     }
 }
 

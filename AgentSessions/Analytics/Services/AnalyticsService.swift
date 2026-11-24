@@ -74,6 +74,16 @@ final class AnalyticsService: ObservableObject {
         NotificationCenter.default.post(name: .cancelAnalyticsBuild, object: nil)
     }
 
+    func contributingSessions(for row: EconomicsConfigurationRow) -> [Session] {
+        catalog[row.configuration.source].handle.currentSessions()
+            .filter { row.sessionIDs.contains($0.id) }
+            .sorted { lhs, rhs in
+                let lhsDate = economicsReferenceDate(for: lhs)
+                let rhsDate = economicsReferenceDate(for: rhs)
+                return lhsDate == rhsDate ? lhs.id < rhs.id : lhsDate > rhsDate
+            }
+    }
+
     func cancelEconomicsAnalysis() {
         economicsGeneration = UUID()
         if economicsPhase == .analyzing {

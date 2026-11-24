@@ -54,11 +54,49 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(row.configuration.modelDisplayName, "gpt-6.2-sol")
         XCTAssertEqual(row.configuration.effortDisplayName, "High")
         XCTAssertEqual(row.sessions, 2)
+        XCTAssertEqual(row.sessionIDs, ["a", "b"])
         XCTAssertEqual(row.apiEquivalentUSD, 2, accuracy: 0.0001)
         XCTAssertEqual(try XCTUnwrap(row.apiCostPerHour), 2, accuracy: 0.0001)
         XCTAssertEqual(try XCTUnwrap(row.weeklyQuotaPercentPointsPerHour), 2.6, accuracy: 0.0001)
         XCTAssertEqual(try XCTUnwrap(row.previousAPICostPerHour), 0.5, accuracy: 0.0001)
         XCTAssertNil(row.previousWeeklyQuotaPercentPointsPerHour)
+    }
+
+    func testEffortComparisonAndContributingSessionsUseTheSelectedPeriod() throws {
+        let start = try date("2026-11-13T12:00:00Z")
+        let now = try date("2026-11-20T12:00:00Z")
+        let inside = try date("2026-11-18T12:00:00Z")
+        let outside = try date("2026-11-12T12:00:00Z")
+        let medium = EconomicsConfigurationKey(source: .claude, model: "opus", effort: "medium")
+        let high = EconomicsConfigurationKey(source: .claude, model: "opus", effort: "high")
+        let low = EconomicsConfigurationKey(source: .claude, model: "opus", effort: "low")
+        let otherModel = EconomicsConfigurationKey(source: .claude, model: "sonnet", effort: "high")
+        let otherSource = EconomicsConfigurationKey(source: .codex, model: "opus", effort: "high")
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: [
+                observation("shared", medium, inside, api: 1, quota: 1, active: 900),
+                observation("shared", medium, inside, api: 1, quota: 1, active: 900),
+                observation("shared", high, inside, api: 1, quota: 1, active: 1800),
+                observation("high-only", high, inside, api: 1, quota: nil, active: 1800),
+                observation("older", medium, outside, api: 1, quota: 1, active: 1800),
+                observation("older", low, outside, api: 1, quota: 1, active: 1800),
+                observation("other-model", otherModel, inside, api: 1, quota: 1, active: 1800),
+                observation("other-source", otherSource, inside, api: 1, quota: 1, active: 1800)
+            ],
+            current: EconomicsPeriod(start: start, end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 4,
+            analyzedSessions: 4
+        )
+        let row = try XCTUnwrap(snapshot.rows.first { $0.configuration == medium })
+        let comparisons = EconomicsRowOrdering.otherEfforts(for: row, in: snapshot.rows)
+        XCTAssertEqual(comparisons.map(\.configuration), [high])
+        XCTAssertEqual(row.sessionIDs, ["shared"])
+        XCTAssertEqual(comparisons.first?.sessionIDs, ["shared", "high-only"])
+        XCTAssertEqual(comparisons.first?.quotaTimedSeconds, 1800)
+        XCTAssertEqual(comparisons.first?.apiTimedSeconds, 3600)
     }
 
     func testQuotaDoesNotBackfillWhenOnlyAPICostIsKnown() throws {

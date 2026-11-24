@@ -168,7 +168,7 @@ struct EconomicsEventSelection: Sendable {
 
 struct EconomicsConfigurationRow: Identifiable, Equatable, Sendable {
     let configuration: EconomicsConfigurationKey
-    let sessions: Int
+    let sessionIDs: Set<String>
     let apiTimedSeconds: TimeInterval
     let quotaTimedSeconds: TimeInterval
     let apiEquivalentUSD: Double
@@ -184,6 +184,7 @@ struct EconomicsConfigurationRow: Identifiable, Equatable, Sendable {
     let previousWeeklyQuotaPercentPointsPerHour: Double?
 
     var id: String { configuration.id }
+    var sessions: Int { sessionIDs.count }
 
     var priceCoverage: Double {
         guard observationCount > 0 else { return 0 }
@@ -242,6 +243,18 @@ struct EconomicsTrendPoint: Identifiable, Equatable, Sendable {
 }
 
 enum EconomicsRowOrdering {
+    static func otherEfforts(
+        for row: EconomicsConfigurationRow,
+        in rows: [EconomicsConfigurationRow]
+    ) -> [EconomicsConfigurationRow] {
+        rows.filter {
+            $0.configuration.source == row.configuration.source
+                && $0.configuration.model == row.configuration.model
+                && $0.configuration.effort != row.configuration.effort
+        }
+        .sorted { $0.configuration.effort < $1.configuration.effort }
+    }
+
     static func sorted(
         _ rows: [EconomicsConfigurationRow],
         by metric: EconomicsMetric
@@ -480,7 +493,7 @@ enum EconomicsSnapshotBuilder {
             let previousAggregate = previousByKey[key]
             return EconomicsConfigurationRow(
                 configuration: key,
-                sessions: aggregate.sessions.count,
+                sessionIDs: aggregate.sessions,
                 apiTimedSeconds: aggregate.apiTimedSeconds,
                 quotaTimedSeconds: aggregate.quotaTimedSeconds,
                 apiEquivalentUSD: aggregate.apiEquivalentUSD,
