@@ -2056,6 +2056,9 @@ final class TranscriptToolCellsTests: XCTestCase {
         let counts = h.controller.applyFind(source: .unified, query: "chunk", matches: [], token: 1, direction: 1,
                                             reset: true, shouldJump: true)
         XCTAssertEqual(counts.total, 0)
+        h.controller.refreshFindAfterRowsChanged(matches: [
+            .init(globalBlockIndex: 1, rangeInBlockText: NSRange(location: 0, length: 5), ordinal: 0, space: .decoded)
+        ])
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(requests, 0, "a type-ahead raw hit leaves Tools off")
 
@@ -2071,6 +2074,45 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertTrue(h.controller.openGroups.contains(1))
         XCTAssertTrue(h.controller.openInvocations.contains(1), "and opens at L2")
         XCTAssertTrue(h.controller.isFlashing(rowID: 1))
+    }
+
+    func testExplicitSearchResultJumpsToMatchThatArrivesLater() {
+        let h = Harness([user(), bash("t1", "ls"), output("t1", "clean"), assistant()])
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        let initial = h.controller.applyFind(source: .unified, query: "needle", matches: [], token: 1,
+                                             direction: 1, reset: true, shouldJump: true, revealsHidden: true)
+        XCTAssertEqual(initial.total, 0)
+        let matches: [TranscriptDerivedState.BlockMatch] = [
+            .init(globalBlockIndex: 1, rangeInBlockText: NSRange(location: 0, length: 6), ordinal: 0, space: .decoded)
+        ]
+        let refreshed = h.controller.refreshFindAfterRowsChanged(matches: matches)
+        XCTAssertEqual(refreshed.current, 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1)
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertTrue(h.controller.openInvocations.contains(1))
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1))
+    }
+
+    func testRawSearchResultWaitsForDecodedMatchInTheSameTool() {
+        let h = Harness([user(), assistant("needle"), bash("t1", "ls"), output("t1", "needle")])
+        h.controller.applyFind(source: .unified, query: "needle", matches: [], token: 1,
+                               direction: 1, reset: true, shouldJump: true, revealsHidden: true)
+        XCTAssertTrue(h.controller.openInvocations.contains(2))
+
+        let other = needleMatch(block: 1)
+        var raw = needleMatch(block: 3)
+        raw.ordinal = 1
+        XCTAssertEqual(h.controller.refreshFindAfterRowsChanged(matches: [other, raw]).current, 1)
+
+        let decoded = TranscriptDerivedState.BlockMatch(globalBlockIndex: 2,
+            rangeInBlockText: NSRange(location: 0, length: 6), ordinal: 1, space: .decoded)
+        XCTAssertEqual(h.controller.refreshFindAfterRowsChanged(matches: [other, decoded]).current, 2)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 2))
     }
 
     func testTypingLandsOnFirstVisibleMatchAndLeavesToolsOff() {

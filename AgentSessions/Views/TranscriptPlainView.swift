@@ -1041,6 +1041,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 isNearTranscriptTop = true
                 applyRoleFilterEvent(.sessionChanged)
                 refreshRichInlineImages(session: session)
+                latchSearchAutoJump(for: session)
             }
             .onChange(of: session.contentRevision) { _, _ in
                 refreshRichInlineImages(session: session)
@@ -1106,15 +1107,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 unifiedSearchJumpWorkItem = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
             }
-            .onChange(of: searchState.autoJumpToken) { _, newValue in
-                guard TranscriptAutoJumpPolicy.shouldLatch(
-                    requestedSessionID: searchState.autoJumpSessionID,
-                    isSearchActive: isUnifiedSearchActive,
-                    displayedSessionID: session.id
-                ) else { return }
-                pendingAutoJumpToken = newValue
-                pendingAutoJumpSessionID = session.id
-                applyAutoJumpIfReady(session: session)
+            .onChange(of: searchState.autoJumpToken, initial: true) { _, _ in
+                latchSearchAutoJump(for: session)
             }
             .onChange(of: focusCoordinator.activeFocus) { oldFocus, newFocus in
                 if newFocus == .transcriptFind {
@@ -3010,6 +3004,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	        performUnifiedFind(resetIndex: false, direction: direction, shouldJump: true)
 	    }
 
+    private func latchSearchAutoJump(for session: Session) {
+        guard searchState.autoJumpToken > lastHandledAutoJumpToken,
+              TranscriptAutoJumpPolicy.shouldLatch(
+                  requestedSessionID: searchState.autoJumpSessionID,
+                  isSearchActive: isUnifiedSearchActive,
+                  displayedSessionID: session.id
+              ) else { return }
+        pendingAutoJumpToken = searchState.autoJumpToken
+        pendingAutoJumpSessionID = session.id
+        applyAutoJumpIfReady(session: session)
+    }
+
     private func applyAutoJumpIfReady(session: Session) {
         guard sessionID == session.id else { return }
         guard TranscriptAutoJumpPolicy.shouldApply(
@@ -3021,6 +3027,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             isTranscriptReady: isTranscriptReady(for: session)
         ) else { return }
         // The reader opened this session for the hit: landing on it may turn Tools on.
+        unifiedSearchJumpWorkItem?.cancel()
         performUnifiedFind(resetIndex: true, shouldJump: true, revealsHidden: true)
         lastHandledAutoJumpToken = pendingAutoJumpToken!
         pendingAutoJumpToken = nil
@@ -3028,12 +3035,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func isTranscriptReady(for session: Session) -> Bool {
+        // Opening a large Codex session paints its tail before the full transcript.
+        // A search hit before that tail must retain the pending jump.
+        guard !session.isPartiallyHydrated else { return false }
         // Rich (.blocks) mode never runs `rebuild` (no `lastBuildKey`); its
         // readiness is the derived-state snapshot landing for this session. When
         // ready, the block controller can resolve a unified match to a block and
         // auto-jump, mirroring Terminal's post-9456faa3 auto-jump-on-open.
         if viewMode == .blocks {
-            return derivedState.snapshot.key == TranscriptDerivedState.Key(session: session, settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(), reviewCardsEnabled: transcriptReviewCardsEnabled, includeMessageContext: true)) && !derivedState.isComputing
+            return !session.events.isEmpty
+                && derivedState.snapshot.key == TranscriptDerivedState.Key(session: session, settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(), reviewCardsEnabled: transcriptReviewCardsEnabled, includeMessageContext: true))
+                && !derivedState.isComputing
         }
         guard let key = lastBuildKey else { return false }
         return key.hasPrefix("\(session.id)|")

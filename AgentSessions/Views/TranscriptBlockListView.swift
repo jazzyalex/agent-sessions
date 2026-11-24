@@ -680,6 +680,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// A reset found only matches Tools hides and did not jump; the next forward step lands on the
     /// current match instead of skipping it.
     private var findCurrentNotJumped = false
+    private enum PendingSearchResultJump {
+        case firstMatch
+        case decodedTool(eventID: String)
+    }
+    private var pendingSearchResultJump: PendingSearchResultJump?
 
     /// L1 summaries, keyed by invocation id; an entry is valid while its
     /// content stamp and status match (`ToolInvocationBuilder.rowSummary` is
@@ -797,6 +802,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// true (fresh sessions open at tail) and flipped by the bounds observer as
     /// the user scrolls away from / back to the bottom.
     private var isNearBottom: Bool = true
+    private var targetScrollGeneration = 0
     /// Last bottom-scroll intent consumed by this controller. The parent token
     /// is monotonic and survives renderer remounts, so a fresh controller must
     /// be seeded with the current value before it receives updateNSView.
@@ -2802,6 +2808,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         pendingFindReveal = nil
         lastJumpedFindMatch = nil
         pendingToolsShownJump = nil
+        pendingSearchResultJump = nil
         rowSummaryCache.removeAll()
         // Keys are session-qualified; the shared cache also holds the decode pass's work.
         if !usesSharedToolInvocationCache { toolInvocationCache.removeAll() }
@@ -3687,8 +3694,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private func scrollToBottom() {
         guard let table, rows.count > 0 else { return }
-        DispatchQueue.main.async { [weak table] in
-            guard let table, table.numberOfRows > 0 else { return }
+        let generation = targetScrollGeneration
+        DispatchQueue.main.async { [weak self, weak table] in
+            guard let self, generation == self.targetScrollGeneration, let table, table.numberOfRows > 0 else { return }
             table.scrollRowToVisible(table.numberOfRows - 1)
         }
     }
@@ -3776,6 +3784,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Shared tail of every scroll-to-target: top-ish alignment plus a flash.
     private func scrollToRowIndex(_ rowIndex: Int) {
         guard let table, rows.indices.contains(rowIndex) else { return }
+        targetScrollGeneration &+= 1
+        isNearBottom = false
         table.layoutSubtreeIfNeeded()
         // Top-ish alignment: scroll the row to visible, then nudge it near the
         // top of the viewport so a jumped-to card isn't stuck at the very bottom.
@@ -4124,6 +4134,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let mayShowTools = !reset || revealsHidden
         // A new request drops a jump still waiting for Tools on; a jump below sets its own.
         pendingToolsShownJump = nil
+        pendingSearchResultJump = nil
         activeFindSource = source
         findQuery = q
         findMatches = matches
@@ -4138,7 +4149,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // search can find nothing in the decoded text. Then open the tool row whose raw text
             // matched to L2 and flash it.
             if source == .unified, shouldJump, reset || queryChanged {
-                jumpToRawOnlyToolMatch(query: q, mayShowTools: mayShowTools)
+                let rawTool = jumpToRawOnlyToolMatch(query: q, mayShowTools: mayShowTools)
+                if revealsHidden {
+                    pendingSearchResultJump = rawTool.map { .decodedTool(eventID: $0) } ?? .firstMatch
+                }
             }
             repaintAllVisibleFind()
             return (0, 0)
@@ -4212,7 +4226,28 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             return (0, 0)
         }
         findCurrentOrdinal = newOrdinal
-        revealJumpedMatchIfDecoded(previous: previous)
+        if let pendingSearchResultJump {
+            let ordinal: Int?
+            switch pendingSearchResultJump {
+            case .firstMatch:
+                ordinal = TranscriptFindNavigator.firstOrdinalAtOrAfter(
+                    matches: matches, viewportTopBlock: firstVisibleBlockIndex())
+            case .decodedTool(let eventID):
+                ordinal = matches.firstIndex { match in
+                    guard match.space == .decoded, let owner = toolInvocationID(forBlock: match.globalBlockIndex),
+                          allBlocksCache.indices.contains(owner) else { return false }
+                    return allBlocksCache[owner].eventID == eventID
+                }
+            }
+            if let ordinal {
+                self.pendingSearchResultJump = nil
+                findCurrentOrdinal = ordinal
+                findCurrentNotJumped = false
+                scrollToCurrentFindMatch(mayShowTools: true)
+            }
+        } else {
+            revealJumpedMatchIfDecoded(previous: previous)
+        }
         repaintAllVisibleFind()
         return (findCurrentOrdinal + 1, matches.count)
     }
@@ -4536,22 +4571,24 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// (`mayShowTools`) turns Tools on first and the jump ends on the next `apply`; type-ahead
     /// does nothing. Nothing when no raw tool text matches (the search hit was elsewhere, for
     /// example in the title).
-    private func jumpToRawOnlyToolMatch(query: String, mayShowTools: Bool) {
+    private func jumpToRawOnlyToolMatch(query: String, mayShowTools: Bool) -> String? {
         pendingToolsShownJump = nil
-        guard !allBlocksCache.isEmpty else { return }
+        guard !allBlocksCache.isEmpty else { return nil }
         let start = min(max(0, firstVisibleBlockIndex() ?? 0), allBlocksCache.count - 1)
         let order = Array(allBlocksCache.indices[start...]) + Array(allBlocksCache.indices[..<start])
         guard let block = order.first(where: { index in
             toolInvocationID(forBlock: index) != nil
                 && SearchTextMatcher.hasMatch(in: allBlocksCache[index].text, query: query)
-        }) else { return }
+        }), let owner = toolInvocationID(forBlock: block), allBlocksCache.indices.contains(owner) else { return nil }
+        let eventID = allBlocksCache[owner].eventID
         if isHiddenOnlyByTools(block: block) {
             if mayShowTools { requestToolsShown(then: .rawToolBlock(block)) }
-            return
+            return eventID
         }
         widen(toIncludeBlock: block)
         autoExpandCollapsedMatch(block: block)
         scrollToBlock(block)   // scrolls to the invocation row and flashes it
+        return eventID
     }
 
     /// True when the row of `block` is not emitted only because Tools is off: a tool invocation
@@ -4571,7 +4608,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func requestToolsShown(then jump: PendingToolsShownJump) {
         pendingToolsShownJump = jump
         guard let request = onRequestToolsShown else { return }
-        DispatchQueue.main.async { request() }
+        DispatchQueue.main.async { [weak self] in
+            guard self?.pendingToolsShownJump == jump else { return }
+            request()
+        }
     }
 
     /// Finishes a jump that waited for Tools on, once `apply` shows its row. A match jump only
@@ -4641,6 +4681,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         pendingFindReveal = nil
         lastJumpedFindMatch = nil
         pendingToolsShownJump = nil
+        pendingSearchResultJump = nil
         guard !autoOpenedGroupsByFind.isEmpty || !autoOpenedInvocationsByFind.isEmpty
                 || !autoChangedFoldsByFind.isEmpty else { return }
         // Folds Find opened go back to their state before (Task 15).

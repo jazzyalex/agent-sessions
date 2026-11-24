@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - OpenCode 2.4.1 assistant replies and tool output appear in transcripts and search again. Existing OpenCode SQLite search entries rebuild automatically.
 - Older Codex prompts with turn-ID-only metadata appear in transcripts and exports. Recognized harness context stays out of user text. Reported by @nostitos in #97.
+- Opening a search result waits for the full transcript before jumping to a match. Reported by @nostitos in #99.
 
 ### Improvements
 
