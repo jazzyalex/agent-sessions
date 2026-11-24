@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Improvements
 
+- Codex transcript parsing scans oversized image records faster when looking for tool call IDs. Contributed by @nostitos in #100.
 - Economics model details now show selected-period totals, hourly rate inputs, and exact evidence counts. Weekly rates appear when at least two weeks have enough covered activity. The 7.0 What's New highlight includes an Economics dashboard screenshot in builds from this update.
 - Economics can compare two effort settings for the same model under the active filters. The quota estimate shows record coverage alongside it, and each configuration links to its contributing sessions.
 
