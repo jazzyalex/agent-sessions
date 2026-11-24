@@ -5,6 +5,7 @@ struct EconomicsAnalyticsView: View {
     let snapshot: EconomicsSnapshot
     let phase: EconomicsAnalysisPhase
     let progress: EconomicsAnalysisProgress
+    let catalog: SessionProviderCatalog
     let contributingSessions: (EconomicsConfigurationRow) -> [Session]
 
     @Environment(\.colorScheme) private var colorScheme
@@ -12,8 +13,6 @@ struct EconomicsAnalyticsView: View {
     @State private var selectedConfigurationID: String?
     @State private var comparisonID: String?
     @State private var sessionsRow: EconomicsConfigurationRow?
-    @State private var sessionToOpen: Session?
-    @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow = true
     @State private var metric: EconomicsMetric = .quotaPerHour
 
     private var displayRows: [EconomicsConfigurationRow] {
@@ -52,8 +51,12 @@ struct EconomicsAnalyticsView: View {
         .onAppear { selectFirstRowIfNeeded() }
         .onChange(of: snapshot.rows.map(\.id)) { _, _ in selectFirstRowIfNeeded() }
         .onChange(of: selectedRow?.id) { _, _ in comparisonID = nil }
-        .sheet(item: $sessionsRow, onDismiss: openSelectedSession) { row in
-            sessionsSheet(for: row)
+        .sheet(item: $sessionsRow) { row in
+            EconomicsContributingSessionsView(
+                configuration: row.configuration,
+                sessions: contributingSessions(row),
+                catalog: catalog
+            )
         }
     }
 
@@ -428,58 +431,6 @@ struct EconomicsAnalyticsView: View {
         }
     }
 
-    private func sessionsSheet(for row: EconomicsConfigurationRow) -> some View {
-        let sessions = contributingSessions(row)
-        return VStack(alignment: .leading, spacing: AnalyticsDesign.metricsCardSpacing) {
-            Text("Contributing sessions")
-                .font(.headline)
-            Text("\(row.configuration.modelDisplayName) · \(row.configuration.effortDisplayName)")
-                .foregroundStyle(.secondary)
-            if sessions.isEmpty {
-                Text("These sessions are no longer in the index.")
-                    .frame(maxHeight: .infinity)
-            } else {
-                List(sessions) { session in
-                    Button {
-                        sessionToOpen = session
-                        sessionsRow = nil
-                    } label: {
-                        VStack(alignment: .leading) {
-                            Text(session.listTitle).lineLimit(2)
-                            if let date = session.endTime ?? session.startTime {
-                                Text(date, format: .dateTime.month().day().hour().minute())
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            Button("Done", role: .cancel) { sessionsRow = nil }
-                .keyboardShortcut(.cancelAction)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(AnalyticsDesign.windowPadding)
-        .frame(width: 520, height: 440)
-    }
-
-    private func openSelectedSession() {
-        guard let sessionToOpen else { return }
-        self.sessionToOpen = nil
-        showTranscriptWindow = true
-        CockpitNavigationBridge.navigate(PendingCockpitNavigationRequest(
-            unifiedSessionID: sessionToOpen.id,
-            sourceRawValue: sessionToOpen.source.rawValue,
-            runtimeSessionID: nil,
-            logPath: nil,
-            workingDirectory: nil,
-            createdAt: .now
-        ))
-    }
-
     private func hourlyRateSummary(for row: EconomicsConfigurationRow) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Rates from timed activity")
@@ -783,4 +734,78 @@ struct EconomicsAnalyticsView: View {
         }
     }
 
+}
+
+private struct EconomicsContributingSessionsView: View {
+    let configuration: EconomicsConfigurationKey
+    let sessions: [Session]
+    let catalog: SessionProviderCatalog
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedSession: Session?
+    @StateObject private var focusCoordinator = WindowFocusCoordinator()
+    @StateObject private var searchState = UnifiedSearchState()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AnalyticsDesign.metricsCardSpacing) {
+            if let session = selectedSession {
+                Button {
+                    focusCoordinator.perform(.closeAllSearch)
+                    selectedSession = nil
+                } label: {
+                    Label("Contributing sessions", systemImage: "chevron.left")
+                }
+                Text(session.listTitle)
+                    .font(.headline)
+                    .lineLimit(2)
+                TranscriptHostView(kind: session.source, selection: session.id, catalog: catalog)
+                    .environmentObject(focusCoordinator)
+                    .environmentObject(searchState)
+                    .environmentObject(SessionArchiveManager.shared)
+                    .id(session.id)
+            } else {
+                Text("Contributing sessions")
+                    .font(.headline)
+                Text("\(configuration.modelDisplayName) · \(configuration.effortDisplayName)")
+                    .foregroundStyle(.secondary)
+                sessionList
+            }
+
+            Button("Done", role: .cancel) { dismiss() }
+                .keyboardShortcut(.cancelAction)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(AnalyticsDesign.windowPadding)
+        .frame(width: 760, height: 560)
+    }
+
+    @ViewBuilder
+    private var sessionList: some View {
+        if sessions.isEmpty {
+            Text("These sessions are no longer in the index.")
+                .frame(maxHeight: .infinity)
+        } else {
+            List(sessions) { session in
+                Button {
+                    if session.events.isEmpty || session.isPartiallyHydrated {
+                        catalog[session.source].handle.reloadFocusedSession(session.id, false, .selection)
+                    }
+                    focusCoordinator.perform(.selectSession(id: session.id))
+                    selectedSession = session
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text(session.listTitle).lineLimit(2)
+                        if let date = session.endTime ?? session.startTime {
+                            Text(date, format: .dateTime.month().day().hour().minute())
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 }

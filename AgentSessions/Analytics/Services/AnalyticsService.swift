@@ -15,7 +15,7 @@ final class AnalyticsService: ObservableObject {
     @Published private(set) var economicsPhase: EconomicsAnalysisPhase = .idle
     @Published private(set) var economicsProgress: EconomicsAnalysisProgress = .empty
 
-    private let catalog: SessionProviderCatalog
+    let catalog: SessionProviderCatalog
 
     /// Registry-ordered runtimes. This is the whole per-source surface the service needs:
     /// it reads sessions and launch phases through the type-erased `ProviderHandle` and

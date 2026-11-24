@@ -2738,20 +2738,21 @@ struct UnifiedSessionsView: View {
             return false
         }
 
-        let wasVisible = cachedRowByID[session.id]?.source == session.source
+        let wasVisible = cachedRows.contains(where: { $0.id == session.id })
         if !wasVisible {
             applyAutoRevealFiltersForCockpitNavigation(session)
             _ = updateCachedRows()
         }
 
-        guard cachedRowByID[session.id]?.source == session.source else {
+        guard cachedRows.contains(where: { $0.id == session.id }) else {
             if emitBeepOnFailure {
                 NSSound.beep()
             }
             return false
         }
 
-        setActiveSelection(session.id, source: session.source, userInitiated: true)
+        let selectedSource = cachedRows.first(where: { $0.id == session.id })?.source ?? session.source
+        setActiveSelection(session.id, source: selectedSource, userInitiated: true)
         focusCoordinator.perform(.selectSession(id: session.id))
         NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         updateFocusedSessionIfNeeded(session)
@@ -2828,9 +2829,6 @@ struct UnifiedSessionsView: View {
         if unified.showArchivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession {
             unified.showArchivedCodexDesktopOnly = false
         }
-        if unified.showArchivedClaudeDesktopOnly, session.source == .claude, !unified.isArchivedClaudeDesktop(session) {
-            unified.showArchivedClaudeDesktopOnly = false
-        }
 
         if !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !unified.query.isEmpty {
             unified.queryDraft = ""
@@ -2838,12 +2836,7 @@ struct UnifiedSessionsView: View {
             searchCoordinator.clear()
         }
 
-        if let project = session.rowProjectIdentity,
-           unified.hiddenProjectRoots.contains(project.canonicalRootPath) {
-            unified.projectSelection = ProjectSelection.makeSelection(for: session, among: cachedRows)
-        } else if unified.projectSelection != nil {
-            unified.projectSelection = nil
-        }
+        if unified.projectSelection != nil { unified.projectSelection = nil }
         if unified.dateFrom != nil { unified.dateFrom = nil }
         if unified.dateTo != nil { unified.dateTo = nil }
         if unified.selectedModel != nil { unified.selectedModel = nil }
