@@ -103,10 +103,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     /// here. See AgentSessions/Support/FilteredDefaultsObserver.swift.
     private var rootOverrideDefaultsObserver: FilteredDefaultsObserver?
 
-    init() {
+    init(discovery: ClaudeSessionDiscovery? = nil) {
         // Initialize discovery with current override (if any)
         let initialOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? ""
-        self.discovery = ClaudeSessionDiscovery(customRoot: initialOverride.isEmpty ? nil : initialOverride)
+        self.discovery = discovery ?? ClaudeSessionDiscovery(customRoot: initialOverride.isEmpty ? nil : initialOverride)
         self.lastSessionsRootOverride = initialOverride
 
         // Debounced filtering
@@ -294,8 +294,13 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 guard !Task.isCancelled else { return }
             }
             let fm = FileManager.default
-            let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
-            let existingSessions = indexed.filter(exists)
+            var missingPathCandidates = Set<String>()
+            let exists: (Session) -> Bool = { session in
+                if fm.fileExists(atPath: session.filePath) { return true }
+                missingPathCandidates.insert(session.filePath)
+                return false
+            }
+            let existingSessions = Self.fixupHydratedClaudeMetadataIfNeeded(indexed.filter(exists), titleRepairLimit: 200)
             self.bootstrapKnownFileStatsIfNeeded(from: existingSessions)
 
             // Publish hydrated sessions immediately so the UI is populated
@@ -419,6 +424,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             for removed in delta.removedPaths {
                 mergedByPath.removeValue(forKey: removed)
             }
+            missingPathCandidates.formUnion(delta.removedPaths)
             for session in changedSessions {
                 if let existing = mergedByPath[session.filePath],
                    !existing.events.isEmpty,
@@ -463,24 +469,22 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
             guard !Task.isCancelled, self.isRefreshTokenCurrent(token) else { return }
-            self.applyKnownFileStatsDelta(mode: effectiveMode, delta: delta)
-            await self.persistKnownFileStats()
-
             // Persist lightweight session_meta so subsequent hydration is complete.
             // Excludes probe sessions to match analytics policy.
-            if !sessionsForMeta.isEmpty {
-                do {
+            do {
+                if !sessionsForMeta.isEmpty || !missingPathCandidates.isEmpty {
                     let db = try IndexDB()
-                    try await db.begin()
-                    for session in sessionsForMeta {
-                        try? await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
-                    }
-                    try await db.commit()
+                    try await db.persistCoreSessionRefresh(source: .claude,
+                                                           metadata: sessionsForMeta.map(SessionIndexer.sessionMetaRow),
+                                                           missingPathCandidates: missingPathCandidates)
                     os_log("Claude: wrote %d session_meta rows", log: indexLog, type: .info, sessionsForMeta.count)
-                } catch {
-                    os_log("Claude: session_meta write failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
-                    // Non-fatal: hydration gap will persist until next successful write.
                 }
+                guard !Task.isCancelled, self.isRefreshTokenCurrent(token) else { return }
+                self.applyKnownFileStatsDelta(mode: effectiveMode, delta: delta)
+                await self.persistKnownFileStats()
+            } catch {
+                // Keep the discovery baseline so a failed deletion stays eligible for retry.
+                os_log("Claude: session_meta write failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
             }
 
             while !Task.isCancelled {
@@ -743,11 +747,12 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         let repo = SessionMetaRepository(db: db)
         let list = try await repo.fetchSessions(for: .claude)
         guard !list.isEmpty else { return nil }
-        let sorted = list.sorted { $0.modifiedAt > $1.modifiedAt }
-        return await Self.fixupHydratedClaudeMetadataIfNeeded(sorted, db: db, titleRepairLimit: 200)
+        return list.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    private static func fixupHydratedClaudeMetadataIfNeeded(_ sessions: [Session], db: IndexDB, titleRepairLimit: Int) async -> [Session] {
+    // The refresh transaction persists repaired metadata for surviving files.
+    // Writing from hydration could recreate a row removed by another refresh.
+    private static func fixupHydratedClaudeMetadataIfNeeded(_ sessions: [Session], titleRepairLimit: Int) -> [Session] {
         var out = sessions
         guard !out.isEmpty else { return out }
 
@@ -826,12 +831,6 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 originSource: repairedOriginSource,
                 surface: repairedSurface
             )
-
-            do {
-                try await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: out[i]))
-            } catch {
-                // Non-fatal: leave DB stale; in-memory list is still improved for this run.
-            }
         }
 
         return out

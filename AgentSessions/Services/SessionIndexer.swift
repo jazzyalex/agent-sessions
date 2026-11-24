@@ -1307,11 +1307,13 @@ final class SessionIndexer: ObservableObject {
                     mergedByPath[session.filePath] = session
                 }
             }
-            let fmExists: (Session) -> Bool = { s in
+            var missingPathCandidates = Set(removedPaths)
+            var allParsedSessions = mergedByPath.values.filter { session in
                 // A rollout Codex compressed to `.jsonl.zst` keeps its `.jsonl` path.
-                CodexRolloutStorage.exists(atPath: s.filePath)
+                if CodexRolloutStorage.exists(atPath: session.filePath) { return true }
+                missingPathCandidates.insert(session.filePath)
+                return false
             }
-            var allParsedSessions = Array(mergedByPath.values).filter(fmExists)
 
             // Reuse Codex state/thread_name lookups loaded earlier in this refresh cycle.
             Self.applyCodexStateMetadata(&allParsedSessions, from: stateThreads)
@@ -1324,25 +1326,24 @@ final class SessionIndexer: ObservableObject {
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .codex)
             guard !Task.isCancelled,
                   await MainActor.run(body: { self.refreshToken == token }) else { return }
-            self.applyKnownFileStatsDelta(scope: deltaScope, currentStatsByPath: currentStatsByPath, removedPaths: removedPaths)
-            await self.persistKnownFileStats()
-
             // Persist lightweight session_meta so subsequent hydration is complete.
             // Excludes probe sessions to match analytics policy.
             let sessionsForMeta = allParsedSessions.filter { !CodexProbeConfig.isProbeSession($0) && !$0.isSideChat }
-            if !sessionsForMeta.isEmpty {
-                do {
+            do {
+                if !sessionsForMeta.isEmpty || !missingPathCandidates.isEmpty {
                     let db = try IndexDB()
-                    try await db.begin()
-                    for session in sessionsForMeta {
-                        try? await db.upsertSessionMetaCore(Self.sessionMetaRow(from: session))
-                    }
-                    try await db.commit()
+                    try await db.persistCoreSessionRefresh(source: .codex,
+                                                           metadata: sessionsForMeta.map(Self.sessionMetaRow),
+                                                           missingPathCandidates: missingPathCandidates)
                     os_log("Codex: wrote %d session_meta rows", log: indexLog, type: .info, sessionsForMeta.count)
-                } catch {
-                    os_log("Codex: session_meta write failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
-                    // Non-fatal: hydration gap will persist until next successful write.
                 }
+                guard !Task.isCancelled,
+                      await MainActor.run(body: { self.refreshToken == token }) else { return }
+                self.applyKnownFileStatsDelta(scope: deltaScope, currentStatsByPath: currentStatsByPath, removedPaths: removedPaths)
+                await self.persistKnownFileStats()
+            } catch {
+                // Keep the discovery baseline so a failed deletion stays eligible for retry.
+                os_log("Codex: session_meta write failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
             }
             while !Task.isCancelled {
                 if trigger == .monitor {

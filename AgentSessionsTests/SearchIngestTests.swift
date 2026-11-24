@@ -224,6 +224,178 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertFalse(hasData, "search rows for deleted files must be removed")
     }
 
+    @MainActor
+    func testCodexRefreshRemovesLiveIndexRowsAfterArchiveMove() async throws {
+        try await withRefreshIndex(for: .codex) { db, root in
+            let archive = root.deletingLastPathComponent().appendingPathComponent("archived_sessions")
+            try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+            let live = try makeCodexFixture(named: "rollout-2026-01-01T00-00-00-\(UUID().uuidString).jsonl",
+                                            userText: "archive move", assistantText: "ack", in: root)
+            let indexer = SessionIndexer()
+            let session = try XCTUnwrap(indexer.parseFile(at: live))
+            try await seedRefreshRow(db, meta: SessionIndexer.sessionMetaRow(from: session))
+            let archived = archive.appendingPathComponent(live.lastPathComponent)
+            try FileManager.default.moveItem(at: live, to: archived)
+
+            indexer.refresh()
+            try await waitForRefresh { indexer.isIndexing }
+
+            let displayedPaths = indexer.allSessions.map(\.filePath)
+            XCTAssertEqual(displayedPaths.count, 1)
+            XCTAssertTrue(displayedPaths.first?.hasSuffix("/archived_sessions/\(archived.lastPathComponent)") == true)
+            let paths = try await db.fetchSessionMetaPaths(for: "codex")
+            XCTAssertEqual(paths, displayedPaths)
+            try await assertRefreshRowRemoved(db, source: "codex")
+            let analytics = AnalyticsIndexer(db: db, enabledSources: ["codex"])
+            let failures = await analytics.refresh()
+            XCTAssertTrue(failures.isEmpty)
+            let totals = try await db.sumRollups(sources: ["codex"], dayStart: nil, dayEnd: nil)
+            XCTAssertEqual(totals.0, session.eventCount, "the archived session contributes exactly once")
+        }
+    }
+
+    @MainActor
+    func testClaudeDeletionOnlyRefreshRemovesLegacyIndexRowsFromEmptyCorpus() async throws {
+        try await withRefreshIndex(for: .claude) { db, root in
+            // The file was removed before launch and its discovery baseline is already gone.
+            let missing = root.appendingPathComponent("gone.jsonl").path
+            try await seedRefreshRow(db, meta: makeMetaRow(sessionID: "deleted-claude", source: "claude",
+                                                         path: missing, mtime: 1))
+
+            let discovery = ClaudeSessionDiscovery(customRoot: root.path, includeDesktopRoots: false)
+            let indexer = ClaudeSessionIndexer(discovery: discovery)
+            indexer.refresh()
+            try await waitForRefresh { indexer.isIndexing }
+
+            XCTAssertTrue(indexer.allSessions.isEmpty)
+            let paths = try await db.fetchSessionMetaPaths(for: "claude")
+            XCTAssertFalse(paths.contains(missing))
+            try await assertRefreshRowRemoved(db, source: "claude")
+        }
+    }
+
+    func testCoreRefreshCleanupPreservesCompressedAndUnavailableRollouts() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let compressed = ingestTempDir.appendingPathComponent("rollout-compressed.jsonl")
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Resources/Fixtures/stage0/agents/codex/small.jsonl.zst")
+        try FileManager.default.copyItem(at: fixture, to: CodexRolloutStorage.compressedSibling(of: compressed))
+        let unavailable = ingestTempDir.appendingPathComponent("unavailable/rollout-x.jsonl")
+        let deleted = ingestTempDir.appendingPathComponent("rollout-deleted.jsonl")
+        for url in [compressed, unavailable, deleted] {
+            try await seedRefreshRow(db, meta: makeMetaRow(sessionID: url.lastPathComponent, source: "codex",
+                                                         path: url.path, mtime: 1))
+        }
+
+        try await db.persistCoreSessionRefresh(source: .codex, metadata: [],
+                                               missingPathCandidates: [compressed.path, unavailable.path, deleted.path])
+
+        let paths = try await db.fetchSessionMetaPaths(for: "codex")
+        let search = try await db.indexedSessionIDs(sources: ["codex"])
+        let totals = try await db.sumRollups(sources: ["codex"], dayStart: nil, dayEnd: nil)
+        XCTAssertEqual(Set(paths), [compressed.path, unavailable.path])
+        XCTAssertEqual(Set(search), [compressed.lastPathComponent, unavailable.lastPathComponent])
+        XCTAssertEqual(totals.0, 2, "recompute the day with both preserved sessions")
+    }
+
+    func testCoreRefreshCleanupRollsBackWhenAnalyticsUpdateFails() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let missing = ingestTempDir.appendingPathComponent("deleted.jsonl").path
+        try await seedRefreshRow(db, meta: makeMetaRow(sessionID: "deleted-claude", source: "claude",
+                                                     path: missing, mtime: 1))
+        try await db.exec("""
+            CREATE TRIGGER fail_rollup_update BEFORE DELETE ON rollups_daily
+            BEGIN SELECT RAISE(ABORT, 'rollup write failed'); END;
+            """)
+
+        do {
+            try await db.persistCoreSessionRefresh(source: .claude, metadata: [], missingPathCandidates: [missing])
+            XCTFail("expected the rollup update to fail")
+        } catch IndexDB.DBError.execFailed(let operation) {
+            XCTAssertEqual(operation, "delete rollups_daily")
+        }
+
+        let paths = try await db.fetchSessionMetaPaths(for: "claude")
+        let files = try await db.fetchIndexedFiles(for: "claude")
+        let search = try await db.indexedSessionIDs(sources: ["claude"])
+        let toolIO = try await db.fetchToolIOReadyPaths(for: "claude")
+        let sessions = try await db.distinctSessionsBySource(sources: ["claude"], dayStart: nil, dayEnd: nil)
+        XCTAssertEqual(paths, [missing])
+        XCTAssertEqual(files.map(\.path), [missing])
+        XCTAssertEqual(search, ["deleted-claude"])
+        XCTAssertEqual(toolIO, [missing])
+        XCTAssertEqual(sessions["claude"], 1)
+
+        try await db.exec("DROP TRIGGER fail_rollup_update;")
+        try await db.persistCoreSessionRefresh(source: .claude, metadata: [], missingPathCandidates: [missing])
+        try await assertRefreshRowRemoved(db, source: "claude")
+    }
+
+    @MainActor
+    private func withRefreshIndex(for source: SessionSource,
+                                  body: (IndexDB, URL) async throws -> Void) async throws {
+        let (db, cleanup, directory) = try makeTestIndexDBWithDirectory()
+        defer { cleanup() }
+        let root = directory.resolvingSymlinksInPath().appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        let defaults = UserDefaults.standard
+        let rootKey = PreferencesKey.Paths.codexSessionsRootOverride
+        let enabledKey = AgentEnablement.enablementKey(for: source)
+        let previousRoot = defaults.object(forKey: rootKey)
+        let previousEnabled = defaults.object(forKey: enabledKey)
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { directory }
+        if source == .codex { defaults.set(root.path, forKey: rootKey) }
+        defaults.set(true, forKey: enabledKey)
+        defer {
+            if source == .codex { defaults.set(previousRoot, forKey: rootKey) }
+            defaults.set(previousEnabled, forKey: enabledKey)
+            IndexDBTestHooks.applicationSupportDirectoryProvider = previousProvider
+        }
+        try await body(db, root)
+    }
+
+    @MainActor
+    private func waitForRefresh(isIndexing: () -> Bool) async throws {
+        XCTAssertTrue(isIndexing(), "the provider refresh must start synchronously")
+        let deadline = ContinuousClock.now + .seconds(10)
+        while isIndexing() && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(isIndexing(), "provider refresh timed out")
+    }
+
+    private func seedRefreshRow(_ db: IndexDB, meta: SessionMetaRow) async throws {
+        try await db.begin()
+        try await db.upsertFile(path: meta.path, mtime: meta.mtime, size: meta.size, source: meta.source)
+        try await db.upsertSessionMeta(meta)
+        try await db.upsertSessionSearch(sessionID: meta.sessionID, source: meta.source,
+                                         mtime: meta.mtime, size: meta.size, text: "stale needle")
+        try await db.upsertSessionToolIO(sessionID: meta.sessionID, source: meta.source,
+                                         mtime: meta.mtime, size: meta.size, refTS: meta.startTS, text: "stale tool")
+        _ = try await db.populateSessionDaysFromMeta(for: meta.source)
+        try await db.recomputeAllRollups(for: meta.source)
+        try await db.commit()
+        let totals = try await db.sumRollups(sources: [meta.source], dayStart: nil, dayEnd: nil)
+        XCTAssertGreaterThan(totals.0, 0, "the old path must have a rollup to remove")
+    }
+
+    private func assertRefreshRowRemoved(_ db: IndexDB, source: String,
+                                         file: StaticString = #filePath, line: UInt = #line) async throws {
+        let files = try await db.fetchIndexedFiles(for: source)
+        let search = try await db.indexedSessionIDs(sources: [source])
+        let toolIO = try await db.fetchToolIOReadyPaths(for: source)
+        let totals = try await db.sumRollups(sources: [source], dayStart: nil, dayEnd: nil)
+        let sessions = try await db.distinctSessionsBySource(sources: [source], dayStart: nil, dayEnd: nil)
+        XCTAssertTrue(files.isEmpty, "old files row", file: file, line: line)
+        XCTAssertTrue(search.isEmpty, "old search row", file: file, line: line)
+        XCTAssertTrue(toolIO.isEmpty, "old Tool I/O row", file: file, line: line)
+        XCTAssertEqual(totals.0, 0, "old messages in the daily rollup", file: file, line: line)
+        XCTAssertEqual(sessions[source, default: 0], 0, "old session-day rows", file: file, line: line)
+    }
+
     // MARK: - purgeOrphanedSessionMeta (the actual production reconciliation path)
 
     func testPurgeOrphanedSessionMetaAlsoRemovesSearchRows() async throws {

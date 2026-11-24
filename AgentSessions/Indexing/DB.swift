@@ -2260,6 +2260,54 @@ actor IndexDB {
     }
 #endif
 
+    /// Commit refreshed metadata and confirmed deletions as one actor-owned write.
+    func persistCoreSessionRefresh(source: SessionSource,
+                                   metadata: [SessionMetaRow],
+                                   missingPathCandidates: Set<String>) throws {
+        try Task.checkCancellation()
+        try begin()
+        do {
+            // A source can reuse a session ID after a move. Repoint that metadata
+            // before deleting the old path so its search and Analytics rows survive.
+            for row in metadata {
+                try upsertSessionMetaCore(row)
+            }
+            let missing = missingPathCandidates.filter { path in
+                let url = URL(fileURLWithPath: path)
+                let fm = FileManager.default
+                var isDirectory: ObjCBool = false
+                guard fm.fileExists(atPath: url.deletingLastPathComponent().path, isDirectory: &isDirectory),
+                      isDirectory.boolValue else { return false }
+                if source == .codex, CodexRolloutStorage.isRolloutFile(url) {
+                    return Self.isMissingFile(CodexRolloutStorage.canonicalURL(for: url), using: fm)
+                        && Self.isMissingFile(CodexRolloutStorage.compressedSibling(of: url), using: fm)
+                }
+                return Self.isMissingFile(url, using: fm)
+            }
+            let affectedDays = try deleteSessionsForPaths(source: source.rawValue, paths: missing.sorted())
+            try recomputeRollupsForDays(Set(affectedDays), source: source.rawValue)
+            try Task.checkCancellation()
+            try commit()
+        } catch {
+            rollbackSilently()
+            throw error
+        }
+    }
+
+    /// Permission failures and other inaccessible paths do not prove absence.
+    private static func isMissingFile(_ url: URL, using fileManager: FileManager) -> Bool {
+        do {
+            _ = try fileManager.attributesOfItem(atPath: url.path)
+            return false
+        } catch let error as CocoaError {
+            return error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile
+        } catch let error as POSIXError {
+            return error.code == .ENOENT
+        } catch {
+            return false
+        }
+    }
+
     /// Delete DB rows for sessions whose file paths were removed.
     /// Returns the distinct days affected (so callers can recompute rollups).
     func deleteSessionsForPaths(source: String, paths: [String]) throws -> [String] {
@@ -2301,10 +2349,15 @@ actor IndexDB {
                 sqlite3_bind_text(daysStmt, bindIdx, p, -1, SQLITE_TRANSIENT)
                 bindIdx += 1
             }
-            while sqlite3_step(daysStmt) == SQLITE_ROW {
+            var step = sqlite3_step(daysStmt)
+            while step == SQLITE_ROW {
                 if let c = sqlite3_column_text(daysStmt, 0) {
                     affectedDays.insert(String(cString: c))
                 }
+                step = sqlite3_step(daysStmt)
+            }
+            guard step == SQLITE_DONE else {
+                throw DBError.execFailed("read affected session days by path")
             }
 
             // Delete per-day contributions.

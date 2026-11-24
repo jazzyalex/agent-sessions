@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- Refresh removes stale search and Analytics entries for Codex and Claude transcripts that were moved or deleted. Disconnected folders keep their index entries. Reported by @nostitos in #98.
 - Codex transcripts stored in several rollouts show the retained history, including compressed pages. Screenshots appear with their original prompts. Based on #102 by @nostitos.
 - OpenCode 2.4.1 assistant replies and tool output appear in transcripts and search again. Existing OpenCode SQLite search entries rebuild automatically.
 - Older Codex prompts with turn-ID-only metadata appear in transcripts and exports. Recognized harness context stays out of user text. Reported by @nostitos in #97.
