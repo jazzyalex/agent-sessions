@@ -10,6 +10,12 @@ enum MessageOriginClassifier {
     }
     private static let scanLimit = 65_536
 
+    static func isCodexPreamble(_ text: String) -> Bool {
+        let body = text.drop(while: \.isWhitespace)
+        return ["<environment_context>", "<user_instructions>", "# AGENTS.md instructions for", "<INSTRUCTIONS>"]
+            .contains(where: body.hasPrefix)
+    }
+
     static func presentation(for block: SessionTranscriptBuilder.LogicalBlock, context: Context) -> MessagePresentation? {
         guard block.kind == .user || block.kind == .assistant || (block.kind == .meta && block.messageOrigin != nil) else { return nil }
         var body = block.messageDisplayText ?? block.text
@@ -95,7 +101,7 @@ enum MessageOriginClassifier {
             }
             switch context.source {
             case .codex:
-                if ["<environment_context>", "<user_instructions>", "# AGENTS.md instructions for", "<INSTRUCTIONS>"].contains(where: text.hasPrefix) { select(.context(kinds: ["codex.preamble"])) }
+                if isCodexPreamble(text) { select(.context(kinds: ["codex.preamble"])) }
             case .claude:
                 if ["<task-notification>", "[SYSTEM NOTIFICATION - NOT USER INPUT]", "<side-sessions-event>"].contains(where: text.hasPrefix) { select(.notification(kind: "task")) }
                 for (prefix, from) in [("Another Claude session sent a message:", "another session"), ("The coordinator sent a message while you were working:", "coordinator")] where text.hasPrefix(prefix) {

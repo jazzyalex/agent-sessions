@@ -3320,16 +3320,17 @@ final class SessionIndexer: ObservableObject {
                     let metadata = workingObj["internal_chat_message_metadata_passthrough"]
                         ?? obj["internal_chat_message_metadata_passthrough"]
                     if let metadata {
-                        let rawKinds = (metadata as? [String: Any])?["content_item_kinds"] as? [String]
+                        let provenance = metadata as? [String: Any]
+                        let rawKinds = provenance?["content_item_kinds"] as? [String]
                         let kinds = rawKinds?.map { $0.components(separatedBy: " | ")[0] }
+                        // Match the raw text join, leaving image payloads out of provenance.
+                        func itemText(_ item: Any) -> String? {
+                            if let string = item as? String { return string }
+                            guard let part = item as? [String: Any] else { return nil }
+                            if let partType = part["type"] as? String, partType.contains("image") { return nil }
+                            return part["text"] as? String ?? part["value"] as? String ?? part["data"] as? String
+                        }
                         if let kinds, !kinds.isEmpty, kinds.allSatisfy({ !$0.isEmpty }) {
-                            // An item's text, read like the raw text join above (images excepted).
-                            func itemText(_ item: Any) -> String? {
-                                if let string = item as? String { return string }
-                                guard let part = item as? [String: Any] else { return nil }
-                                if let partType = part["type"] as? String, partType.contains("image") { return nil }
-                                return part["text"] as? String ?? part["value"] as? String ?? part["data"] as? String
-                            }
                             if kinds.allSatisfy({ $0 == "user.text" }) {
                                 messageOrigin = .typed
                                 // Codex has labeled a whole environment block user.text. Next to a
@@ -3351,6 +3352,16 @@ final class SessionIndexer: ObservableObject {
                                     kind == "user.text" ? itemText(item) : nil
                                 }.joined()
                             } else {
+                                messageOrigin = .context(kinds: ["codex.mixed.unresolved"])
+                            }
+                        } else if provenance?.count == 1, let turnID = provenance?["turn_id"] as? String,
+                                  turnID.contains(where: { !$0.isWhitespace }) {
+                            // Older Codex Desktop records carried only a turn ID. Treat plain
+                            // prompts like untagged messages, but keep known context hidden
+                            // when there are no per-item labels to separate it from a prompt.
+                            let items = (workingObj["content"] as? [Any]) ?? []
+                            if text.map(MessageOriginClassifier.isCodexPreamble) == true
+                                || items.compactMap(itemText).contains(where: MessageOriginClassifier.isCodexPreamble) {
                                 messageOrigin = .context(kinds: ["codex.mixed.unresolved"])
                             }
                         } else {

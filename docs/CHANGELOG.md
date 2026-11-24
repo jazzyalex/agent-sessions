@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - OpenCode 2.4.1 assistant replies and tool output appear in transcripts and search again. Existing OpenCode SQLite search entries rebuild automatically.
+- Older Codex prompts with turn-ID-only metadata appear in transcripts and exports. Recognized harness context stays out of user text. Reported by @nostitos in #97.
 
 ### Improvements
 

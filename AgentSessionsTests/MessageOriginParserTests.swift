@@ -2,10 +2,12 @@ import XCTest
 @testable import AgentSessions
 
 final class MessageOriginParserTests: XCTestCase {
-    private func codex(_ text: [Any], kinds: Any? = nil, role: String = "user", type: String = "message", envelope: String = "response_item") throws -> SessionEvent {
+    private func codex(_ text: [Any], kinds: Any? = nil, role: String = "user", type: String = "message",
+                       envelope: String = "response_item", metadata: Any? = nil) throws -> SessionEvent {
         var payload: [String: Any] = ["type": type, "role": role, "content": text, "author": "/root/helper"]
         if type == "agent_message" { payload.removeValue(forKey: "role") }
         if let kinds { payload["internal_chat_message_metadata_passthrough"] = ["content_item_kinds": kinds] }
+        if let metadata { payload["internal_chat_message_metadata_passthrough"] = metadata }
         let data = try JSONSerialization.data(withJSONObject: ["type": envelope, "payload": payload])
         return SessionIndexer.parseLine(String(decoding: data, as: UTF8.self), eventID: UUID().uuidString).0
     }
@@ -32,6 +34,39 @@ final class MessageOriginParserTests: XCTestCase {
     func testCodexTypedUserText() throws {
         let event = try codex([text("hi")], kinds: ["user.text | x"])
         XCTAssertEqual(event.kind, .user); XCTAssertEqual(event.messageOrigin, .typed); XCTAssertEqual(event.text, "hi")
+    }
+    func testCodexTurnIDOnlyMetadataRestoresLegacyPrompt() throws {
+        let prompt = "Fix login redirect"
+        let event = try codex([text(prompt)], metadata: ["turn_id": "legacy-turn"])
+        XCTAssertEqual(event.kind, .user)
+        XCTAssertEqual(event.typedText, prompt)
+        XCTAssertEqual(session([event]).codexPreviewTitle, prompt)
+    }
+    func testCodexTurnIDFallbackKeepsUnknownMetadataAndHarnessContextHidden() throws {
+        let context = "private workspace instructions"
+        let malformed: [Any] = [
+            [:] as [String: Any], ["turn_id": " "], ["turn_id": 42],
+            ["turn_id": "legacy-turn", "other": true], ["turn_id": "legacy-turn", "content_item_kinds": NSNull()],
+            NSNull(), [], "legacy-turn",
+        ]
+        let untrusted = try malformed.map { try codex([text(context)], metadata: $0) }
+        let harness = try [
+            [text("  <user_instructions>\(context)</user_instructions>")],
+            [text("Open the project"), text("# AGENTS.md instructions for /repo\n\(context)")],
+        ].map { try codex($0, metadata: ["turn_id": "legacy-turn"]) }
+        for event in untrusted + harness {
+            XCTAssertEqual(event.messageOrigin, .context(kinds: ["codex.mixed.unresolved"]))
+            XCTAssertNil(event.typedText)
+        }
+        let model = session(untrusted + harness)
+        XCTAssertFalse(SessionTranscriptBuilder.buildPlainTerminalTranscript(
+            session: model, filters: .current(showTimestamps: false, showMeta: false)).contains(context))
+        let (_, _, userRanges) = SessionTranscriptBuilder.buildTerminalPlainWithRanges(
+            session: model, filters: .current(showTimestamps: false, showMeta: true))
+        XCTAssertTrue(userRanges.isEmpty, "Showing metadata must not present it as user text")
+        XCTAssertFalse(TranscriptMarkdownExporter.markdownContent(
+            session: model, renderedTranscript: "", viewMode: .blocks, showTimestamps: false,
+            decorate: { text, _ in text }, jsonBuilder: { _ in "" }).contains(context))
     }
     func testCodexOpenPageIsContext() throws {
         XCTAssertEqual(try codex([text("page")], kinds: ["additional_content.codex_apps_open_page | x"]).messageOrigin, .context(kinds: ["additional_content.codex_apps_open_page"]))
