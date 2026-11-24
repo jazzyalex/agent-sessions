@@ -172,9 +172,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 
 ### CLI follow-ons after the macOS history interface
-> **open** · sev: low · urg: low · verified 2026-10-24
+> **open** · sev: low · urg: low · verified 2026-11-23
 
-- **What:** no CLI work is approved. A TUI is dropped. Neither [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77) nor its [bounded-read companion](https://github.com/shurrman/agent-sessions/pull/1) is merged.
+- **What:** the experimental Linux port is closed. Its draft and bounded-read companion remain references for future parser reuse. The current candidate is [standalone Codex transcript export](#standalone-codex-transcript-export). [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77) · [Bounded-read companion](https://github.com/shurrman/agent-sessions/pull/1)
 - **Where:** planning and product evaluation notes are kept in the owner's private notes, not in this repository.
 - **Why deferred:** the only outside request (#80) is transcript export, and existing tools may already cover it. Validate that job before building any command.
 - **Risk if wrong:** scope or support claims could outrun actual lifecycle/platform qualification. **To close:** implement and qualify each follow-on under the plan, then collapse this entry when release history records the completed work. This entry authorizes no implementation or publication.
@@ -2838,16 +2838,7 @@ Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutR
 ## Session List
 
 ### Hide a project from the session list
-> **open** · sev: low · urg: low · verified 2026-10-31
-
-- **What:** [#87](https://github.com/jazzyalex/agent-sessions/issues/87) asks for a persistent way to hide a project. An hourly scheduled Claude Code job fills the top of the list with full sessions. The Project filter shows one chosen project only, and the housekeeping and message-count filters do not match these sessions.
-- **Where:** the list filters in [UnifiedSessionIndexer.swift:2669](../AgentSessions/Services/UnifiedSessionIndexer.swift:2669); the `repo:` and `path:` operators in `FilterEngine.parseOperators` have no exclude form.
-- **Fix shape:** a stored list of hidden projects, keyed by the same identity as `selectedProjectIdentity`. Add a Hide action in the project filter or the row menu, and a list in Settings to undo it.
-- **Why deferred:** owner decision 2026-10-31; one request so far.
-- **Risk if wrong:** hidden sessions can look lost, so the list must show that a project is hidden.
-- **To close:** a hidden project stays hidden across relaunch, and Settings can restore it.
-
----
+> **done** · 2026-11-23 · shipped in 7.0 via `70b35ab6` · `testHiddenProjectsPersistAndFilterExactRoots`
 
 ## Resume / Terminal Launch
 
@@ -2917,32 +2908,12 @@ Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutR
 
 ## CLI / Automation
 
-### No command-line interface for agents to drive archive or export
-> **open** · sev: low · urg: low · verified 2026-10-11
-- **Review 2026-10-11:** the reporter answered on 2026-10-02. The use case is one command, callable by an agent with no app running, that saves a readable transcript of one session: `--archive <session id> --format md|json|txt --location <path>`. No list command is needed. We replied on 2026-10-11 and pointed to [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77), whose `as-core read` command is the base for a Markdown export. No date was promised. The open question below is answered.
-- **Review 2026-10-01:** AgentSessions/ still has no CLI argument parser, URL handler, or App Intent; the local issue note leaves the requested commands and use case unanswered. Recommendation: keep open but clarification-first; confirm the reporter’s current answer before choosing a CLI shape.
-- **Evidence:** AgentSessions/Services/SessionArchiveManager.swift:145; `rg -n 'ArgumentParser|CommandLine\.arguments|agentsessions://|onOpenURL|AppIntent' AgentSessions/` returns no matches; issue #80.
+### Standalone Codex transcript export
+> **open** · sev: low · urg: low · verified 2026-11-23
 
-- **What:** [issue #80](https://github.com/jazzyalex/agent-sessions/issues/80) asks for a
-  CLI with flags, so a coding agent can use Agent Sessions as an archiving tool from
-  inside its own session. Today the app is GUI-only. The Swift sources have no argument
-  parsing, no URL scheme and no App Intents (grepped `AgentSessions/` for
-  `ArgumentParser`, `CommandLine.arguments`, `agentsessions://`, `onOpenURL`,
-  `AppIntent` — no hits).
-- **Where:** archive logic is in
-  [SessionArchiveManager.swift](../AgentSessions/Services/SessionArchiveManager.swift).
-  `index.db` is a plain SQLite file under `Application Support/AgentSessions/`. The app
-  has no sandbox, so an external tool can reach both.
-- **Open question:** "archiving" is not defined. It could mean copying raw session files,
-  exporting one session as Markdown or JSON, or protecting a session from the agent's own
-  cleanup. The reporter was asked on 2026-10-01 to describe the use case, the commands the
-  agent would run, which agents they use, and whether the app must be running.
-- **Fix shape (hypothesis, pending the answer):** a small command-line target that reuses
-  `SessionArchiveManager`, or a headless subcommand of the app binary. A full CLI may be
-  more than the use case needs.
-- **Why deferred:** the request has no concrete use case yet. Building before that risks
-  the wrong surface. A PR from the reporter is welcome.
-- **Risk if wrong:** low. Agents can copy the JSONL session files with shell commands in
-  the meantime.
-- **To close:** get the use case, then either scope a first version or close the issue as
-  `won't-do` with the shell workaround documented.
+- **What:** one command a coding agent can call to export a readable transcript of one Codex session to Markdown while Agent Sessions is closed. The reporter clarified this use case before the issue was closed. [Issue #80](https://github.com/jazzyalex/agent-sessions/issues/80)
+- **Where:** the app already formats Markdown in [TranscriptMarkdownExporter](../AgentSessions/Views/TranscriptPlainView.swift#L34). The closed Linux console draft shows how a standalone target could reuse the parser. [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77)
+- **Fix shape:** evaluate a single read-only export command with an explicit session ID or rollout path and an output destination. Reuse Codex parsing and the app's Markdown formatting.
+- **Why deferred:** validate the one-session workflow against existing export tools before committing to command syntax or platform support.
+- **Risk if wrong:** a partial export can look like a complete record of the session.
+- **To close:** compare output with app export on plain, compressed, and paginated fixtures, and verify clear errors for missing or ambiguous sessions while the app is closed.
