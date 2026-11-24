@@ -190,6 +190,108 @@ final class CodexRolloutStorageTests: XCTestCase {
                        "a stat-size bound must not truncate a compressed stream")
     }
 
+    private let paginatedID = "01a06900-af0b-7d53-a27e-64ee9619ca31"
+    private let secondPageID = "01a06a11-0c2d-7e4f-8a6b-1c2d3e4f5a6b"
+    private let thirdPageID = "01a06b22-1d3e-7f50-9b7c-2d3e4f5a6b7c"
+
+    private func compressedAncestor() throws -> (url: URL, cut: UInt64) {
+        let url = try dayDirectory().appendingPathComponent(rolloutName)
+        let sibling = CodexRolloutStorage.compressedSibling(of: url)
+        try fm.copyItem(at: fixture("paginated-ancestor.jsonl.zst"), to: sibling)
+        let data = try CodexRolloutStorage.readAllData(for: url)
+        let lines = data.split(separator: 0x0A, omittingEmptySubsequences: false)
+        XCTAssertTrue(String(decoding: lines[5], as: UTF8.self).contains("Abandoned prompt"))
+        let cut = UInt64(lines.prefix(5).reduce(0) { $0 + $1.count + 1 })
+        // A second invalid frame lies entirely outside the retained byte range.
+        let handle = try FileHandle(forWritingTo: sibling)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("invalid trailing frame".utf8))
+        return (url, cut)
+    }
+
+    private func pageHeader(continues id: String, cut: UInt64, ordinal: Int? = nil) -> String {
+        let ordinalField = ordinal.map { ",\"end_ordinal_exclusive\":\($0)" } ?? ""
+        return #"{"type":"session_meta","payload":{"id":"\#(paginatedID)","history_mode":"paginated","history_base":{"thread_id":"\#(id)","end_byte_offset":\#(cut)\#(ordinalField)}}}"#
+    }
+
+    private func prompt(_ text: String, image: String? = nil) -> String {
+        let picture = image.map { #",{"type":"input_image","image_url":"data:image/png;base64,\#($0)"}"# } ?? ""
+        return #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(text)"}\#(picture)]}}"#
+    }
+
+    func testPaginatedReloadKeepsCompressedPrefixAndAttributesImagesByPageAndLine() throws {
+        let (first, cut) = try compressedAncestor()
+        XCTAssertThrowsError(try CodexRolloutStorage.readAllData(for: first))
+        let dir = first.deletingLastPathComponent()
+        let middle = dir.appendingPathComponent("rollout-2026-09-03T14-00-00-\(paginatedID)_\(secondPageID).jsonl")
+        let middlePrefix = pageHeader(continues: paginatedID, cut: cut) + "\n" + prompt("Middle retained prompt") + "\n"
+        try (middlePrefix + prompt("Abandoned middle prompt") + "\n").write(to: middle, atomically: true, encoding: .utf8)
+        let latest = dir.appendingPathComponent("rollout-2026-09-03T14-01-00-\(paginatedID)_\(thirdPageID).jsonl")
+        let latestText = pageHeader(continues: secondPageID, cut: UInt64(middlePrefix.utf8.count), ordinal: 9000)
+            + "\n\n" + prompt("Latest prompt", image: "BQYHCA==") + "\n"
+        try latestText.write(to: latest, atomically: true, encoding: .utf8)
+
+        let indexer = SessionIndexer()
+        let alone = try XCTUnwrap(indexer.parseFileFull(at: latest))
+        indexer.installSessionsForReloadTesting([alone])
+        // Search already hydrated the page. Ordinary selection still joins history.
+        indexer.reloadSession(id: alone.id)
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: alone.id, timeout: 10))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let row = try XCTUnwrap(indexer.allSessions.first)
+        XCTAssertEqual(row.events, alone.events)
+        XCTAssertEqual(row.eventCount, alone.eventCount)
+        XCTAssertEqual(row.messageCount, alone.messageCount)
+        let transcript = row.transcriptPresentation
+        let users = transcript.events.filter { $0.kind == .user }
+        XCTAssertEqual(users.compactMap(\.text), ["First retained prompt", "Middle retained prompt", "Latest prompt"])
+        XCTAssertEqual(Set(transcript.events.map(\.id)).count, transcript.events.count)
+        XCTAssertEqual(try XCTUnwrap(indexer.parseFileFull(at: latest)).transcriptPresentation.events, alone.events)
+
+        let images = SessionInlineImageMapper.imagesByUserBlockIndex(for: transcript).values.flatMap { $0 }
+        let ordered = images.sorted { $0.sessionImageIndex < $1.sessionImageIndex }
+        XCTAssertEqual(ordered.map(\.imageEventID), [users.first?.id, users.last?.id].compactMap { $0 })
+        XCTAssertEqual(ordered.map(\.userPromptIndex), [0, 2])
+        XCTAssertEqual(try ordered.map { try CodexSessionImagePayload.decodeImageData(payload: $0.payload, maxDecodedBytes: 32) },
+                       [Data([1, 2, 3, 4]), Data([5, 6, 7, 8])])
+
+        let handle = try FileHandle(forWritingTo: latest)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(("\n" + prompt("Appended prompt", image: "DQ4PEA==") + "\n").utf8))
+        let oldSnapshotImages = SessionInlineImageMapper.imagesByUserBlockIndex(for: transcript).values.flatMap { $0 }
+        XCTAssertEqual(oldSnapshotImages.count, 2, "an image outside the parsed snapshot has no prompt yet")
+        let previousCounts = indexer.reloadParseInvocationCountsForTesting()
+        indexer.reloadSession(id: alone.id, force: true, reason: .focusedSessionMonitor)
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: alone.id, timeout: 10))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let appended = try XCTUnwrap(indexer.allSessions.first)
+        XCTAssertEqual(indexer.reloadParseInvocationCountsForTesting().append, previousCounts.append + 1)
+        XCTAssertEqual(appended.events.filter { $0.kind == .user }.compactMap(\.text), ["Latest prompt", "Appended prompt"])
+        let joined = appended.transcriptPresentation
+        let finalPrompt = try XCTUnwrap(joined.events.last { $0.kind == .user })
+        let finalImages = SessionInlineImageMapper.imagesByUserBlockIndex(for: joined).values.flatMap { $0 }
+        XCTAssertEqual(finalImages.first { $0.sessionImageIndex == 3 }?.imageEventID, finalPrompt.id)
+    }
+
+    func testPaginatedReloadRejectsCutInsideARecord() throws {
+        let (ancestor, cut) = try compressedAncestor()
+        let latest = ancestor.deletingLastPathComponent()
+            .appendingPathComponent("rollout-2026-09-03T14-00-00-\(paginatedID)_\(secondPageID).jsonl")
+        try (pageHeader(continues: paginatedID, cut: cut - 1) + "\n" + prompt("Current prompt") + "\n")
+            .write(to: latest, atomically: true, encoding: .utf8)
+        let indexer = SessionIndexer()
+        let alone = try XCTUnwrap(indexer.parseFileFull(at: latest))
+        indexer.installSessionsForReloadTesting([alone])
+        indexer.reloadSession(id: alone.id)
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: alone.id, timeout: 10))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let row = try XCTUnwrap(indexer.allSessions.first)
+        XCTAssertNil(row.codexTranscriptHistory)
+        XCTAssertEqual(row.transcriptPresentation.events, alone.events)
+    }
+
     func testSideChatParentLookupFindsACompressedRollout() throws {
         let home = root.appendingPathComponent("codex-home", isDirectory: true)
         let day = home.appendingPathComponent("sessions/2026/09/03", isDirectory: true)
@@ -303,7 +405,7 @@ final class CodexRolloutStorageTests: XCTestCase {
         let session = try XCTUnwrap(SessionIndexer().parseFileFull(at: canonical))
         let images = SessionInlineImageMapper.imagesByUserBlockIndex(for: session).values.flatMap { $0 }
         let image = try XCTUnwrap(images.first)
-        guard case .base64(let sourceURL, _) = image.payload else { return XCTFail("expected a base64 payload") }
+        guard case .base64(let sourceURL, _, _) = image.payload else { return XCTFail("expected a base64 payload") }
         XCTAssertEqual(sourceURL.path, canonical.path, "the payload names the session, not the cache copy")
 
         // Evict the decoded copy, as the 1 GB cap would; reading must rebuild it.

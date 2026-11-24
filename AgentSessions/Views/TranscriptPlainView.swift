@@ -821,7 +821,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func resolvedSessionForRender(id: String) -> Session? {
-        let live = indexer.allSessions.first(where: { $0.id == id })
+        let live = indexer.allSessions.first(where: { $0.id == id })?.transcriptPresentation
         let preferred = TranscriptSessionResolutionPolicy.preferredSession(
             live: live,
             cached: lastResolvedSession,
@@ -2231,7 +2231,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             // Try external indexer transcript caches (Codex/Claude/Gemini) without generation
             if FeatureFlags.offloadTranscriptBuildInView {
-                if let t = externalCachedTranscript(for: session.id) {
+                if session.codexTranscriptHistory == nil, let t = externalCachedTranscript(for: session.id) {
                     let decorated = decorateTranscriptIfNeeded(t, session: session)
                     setRenderedTranscript(decorated,
                                           session: session,

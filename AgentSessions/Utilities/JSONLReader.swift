@@ -1,6 +1,7 @@
 import Foundation
 
 final class JSONLReader {
+    private enum ReadError: Error { case incompletePrefix }
     private let url: URL
     private let chunkSize: Int
     private let maximumBytes: UInt64?
@@ -32,6 +33,19 @@ final class JSONLReader {
             handleLine(line)
             return true
         }, reportBytesRead: nil)
+    }
+
+    /// Also reports 0-based physical line indexes, including gaps for blank
+    /// or invalid UTF-8 records, without changing the regular event numbering.
+    func forEachLocatedLine(requireCompletePrefix: Bool,
+                            reportLineCount: @escaping (Int) -> Void,
+                            _ handleLine: (String, Int) -> Void) throws {
+        var index = 0
+        _ = try forEachLineCore({ line in
+            handleLine(line, index)
+            return true
+        }, reportBytesRead: nil, reportSourceLine: { index = $0 },
+           reportLineCount: reportLineCount, requireCompletePrefix: requireCompletePrefix)
     }
 
     /// Read from a caller-owned descriptor. The descriptor stays open and is
@@ -94,6 +108,9 @@ final class JSONLReader {
     private func forEachLineCore(_ shouldContinue: (String) -> Bool,
                                  reportBytesRead: ((UInt64) -> Void)?,
                                  reportMalformedLine: (() -> Void)? = nil,
+                                 reportSourceLine: ((Int) -> Void)? = nil,
+                                 reportLineCount: ((Int) -> Void)? = nil,
+                                 requireCompletePrefix: Bool = false,
                                  fileHandle: FileHandle? = nil) throws -> Bool {
         let fh: FileHandle
         let ownsFileHandle: Bool
@@ -117,7 +134,16 @@ final class JSONLReader {
         var skippingOversizeLine = false
         var didEmitSkipStub = false
         var bytesRead: UInt64 = 0
-        defer { reportBytesRead?(bytesRead) }
+        var sourceLine = 0
+        var lastByte: UInt8?
+        defer {
+            reportBytesRead?(bytesRead)
+            reportLineCount?(sourceLine)
+        }
+        func emit(_ line: String, at index: Int) -> Bool {
+            reportSourceLine?(index)
+            return shouldContinue(line)
+        }
         var readError: Error?
         while autoreleasepool(invoking: {
             let requestedCount: Int
@@ -140,6 +166,7 @@ final class JSONLReader {
             }
             if !data.isEmpty {
                 bytesRead += UInt64(data.count)
+                lastByte = data.last
                 // The buffered prefix was already searched for a newline on
                 // the previous read. Long records only need to scan new bytes.
                 var searchStart = buffer.endIndex
@@ -148,12 +175,13 @@ final class JSONLReader {
                 if skippingOversizeLine {
                     if let nlRange = buffer.range(of: nl, in: searchStart..<buffer.endIndex) {
                         if !didEmitSkipStub {
-                            if !shouldContinue("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}") {
+                            if !emit("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}", at: sourceLine) {
                                 stoppedEarly = true
                                 return false
                             }
                             didEmitSkipStub = true
                         }
+                        sourceLine += 1
                         buffer = Data(buffer[nlRange.upperBound..<buffer.endIndex])
                         searchStart = buffer.startIndex
                         skippingOversizeLine = false
@@ -166,10 +194,11 @@ final class JSONLReader {
                 // Skip records that exceed the line-size limit.
                 if !skippingOversizeLine && buffer.count > maxLineBytes {
                     if let nlRange = buffer.range(of: nl, in: searchStart..<buffer.endIndex) {
-                        if !shouldContinue("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}") {
+                        if !emit("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}", at: sourceLine) {
                             stoppedEarly = true
                             return false
                         }
+                        sourceLine += 1
                         buffer = Data(buffer[nlRange.upperBound..<buffer.endIndex])
                         searchStart = buffer.startIndex
                     } else {
@@ -182,13 +211,15 @@ final class JSONLReader {
 
                 var lineStart = buffer.startIndex
                 while let nlRange = buffer.range(of: nl, in: searchStart..<buffer.endIndex) {
+                    let index = sourceLine
+                    sourceLine += 1
                     let lineData = buffer.subdata(in: lineStart..<nlRange.lowerBound)
                     lineStart = nlRange.upperBound
                     searchStart = lineStart
 
                     if let line = String(data: lineData, encoding: .utf8) {
                         let trimmed = line.trimmingCharacters(in: .newlines)
-                        if !trimmed.isEmpty, !shouldContinue(trimmed) {
+                        if !trimmed.isEmpty, !emit(trimmed, at: index) {
                             stoppedEarly = true
                             return false
                         }
@@ -206,16 +237,19 @@ final class JSONLReader {
         }) {}
         if let readError { throw readError }
         if stoppedEarly { return false }
+        if requireCompletePrefix, bytesRead != maximumBytes || lastByte != 0x0A {
+            throw ReadError.incompletePrefix
+        }
         if skippingOversizeLine {
             if !didEmitSkipStub {
-                _ = shouldContinue("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}")
+                _ = emit("{\"type\":\"omitted\",\"text\":\"[Oversize line omitted]\"}", at: sourceLine)
             }
             buffer.removeAll()
         } else if !buffer.isEmpty {
             if let line = String(data: buffer, encoding: .utf8) {
                 let trimmed = line.trimmingCharacters(in: .newlines)
                 if !trimmed.isEmpty {
-                    _ = shouldContinue(trimmed)
+                    _ = emit(trimmed, at: sourceLine)
                 }
             } else {
                 reportMalformedLine?()

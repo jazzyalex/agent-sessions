@@ -39,7 +39,7 @@ final class ImageBrowserViewModel: ObservableObject {
         var imageKey: ImageBrowserImageKey {
             let offsets: (UInt64, Int) = {
                 switch payload {
-                case .base64(_, let span):
+                case .base64(_, let span, _):
                     return (span.base64PayloadOffset, span.base64PayloadLength)
                 case .file:
                     return (0, 0)
@@ -56,7 +56,7 @@ final class ImageBrowserViewModel: ObservableObject {
 
         var sortOffset: UInt64 {
             switch payload {
-            case .base64(_, let span):
+            case .base64(_, let span, _):
                 return span.base64PayloadOffset
             case .file:
                 return 0

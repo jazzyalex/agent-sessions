@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import CryptoKit
 import libzstd
 
@@ -93,32 +94,119 @@ enum CodexRolloutStorage {
     ///
     /// `maximumBytes` bounds a plain read to a stat snapshot. A compressed file is
     /// never appended in place (Codex restores it to plain first), so the bound does
-    /// not apply and the whole stream is read.
+    /// not apply and the whole stream is read. `maximumDecodedBytes`
+    /// instead caps either form at a logical history offset.
     ///
     /// `onDecodedBytes` receives the size of each decoded chunk of a compressed
     /// rollout, before line splitting, so a caller can count the exact decoded size.
     static func lineReader(for url: URL,
                            chunkSize: Int = 64 * 1024,
                            maximumBytes: UInt64? = nil,
+                           maximumDecodedBytes: UInt64? = nil,
                            propagatesReadErrors: Bool = false,
                            onDecodedBytes: ((Int) -> Void)? = nil) -> JSONLReader? {
         guard let storage = storageURL(for: url) else { return nil }
         guard isCompressedRollout(storage) else {
             return JSONLReader(url: storage,
                                chunkSize: chunkSize,
-                               maximumBytes: maximumBytes,
+                               maximumBytes: maximumDecodedBytes ?? maximumBytes,
                                propagatesReadErrors: propagatesReadErrors)
         }
         let decoder = ZstdStreamDecoder()
         return JSONLReader(url: storage,
                            chunkSize: chunkSize,
-                           maximumBytes: nil,
+                           maximumBytes: maximumDecodedBytes,
                            propagatesReadErrors: propagatesReadErrors,
                            readChunk: { handle, count in
-                               let chunk = try decoder.read(from: handle, upTo: count)
+                               let chunk = try decoder.read(from: handle, upTo: count,
+                                                            stopAtFrameBoundary: maximumDecodedBytes != nil)
                                onDecodedBytes?(chunk.count)
                                return chunk
                            })
+    }
+
+    /// The retained prefix of one earlier file in a paginated Codex rollout.
+    struct HistoryPage: Equatable, Sendable {
+        let url: URL
+        let decodedBytes: UInt64
+    }
+
+    private struct HistoryBase {
+        let pageID: String
+        let decodedBytes: UInt64
+    }
+
+    private static func historyBase(in url: URL) -> HistoryBase? {
+        guard let reader = lineReader(for: url, maximumDecodedBytes: 1_048_576) else { return nil }
+        var head: String?
+        _ = try? reader.forEachLineWhile { line in
+            head = line
+            return false
+        }
+        guard let head, let record = (try? JSONSerialization.jsonObject(with: Data(head.utf8))) as? [String: Any],
+              record["type"] as? String == "session_meta",
+              let payload = record["payload"] as? [String: Any],
+              payload["history_mode"] as? String == "paginated",
+              let base = payload["history_base"] as? [String: Any],
+              let pageID = base["thread_id"] as? String, UUID(uuidString: pageID) != nil,
+              // The byte cut belongs to the decoded file, even after Codex compresses it.
+              let bytes = base["end_byte_offset"] as? NSNumber,
+              CFGetTypeID(bytes) != CFBooleanGetTypeID(),
+              let offset = UInt64(bytes.stringValue), offset > 0 else { return nil }
+        return HistoryBase(pageID: pageID, decodedBytes: offset)
+    }
+
+    /// A contiguous chain, newest ancestor first. The caller stops at an
+    /// unreadable prefix, so it never joins across a missing page.
+    static func precedingHistoryPages(of url: URL, knownPaths: @autoclosure () -> [String]) -> [HistoryPage] {
+        let canonical = canonicalURL(for: url)
+        let name = canonical.lastPathComponent
+        guard isRolloutFile(canonical),
+              let range = name.range(of: "[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", options: .regularExpression),
+              var base = historyBase(in: canonical) else { return [] }
+        let sessionID = String(name[range])
+        var known = canonicalRolloutURLs(knownPaths().filter { $0.contains(sessionID) }.map { URL(fileURLWithPath: $0) })
+        var searched = false
+        var seen: Set<URL> = [canonical]
+        var pages: [HistoryPage] = []
+        while pages.count < 64 {
+            let suffix = base.pageID.caseInsensitiveCompare(sessionID) == .orderedSame
+                ? "-\(sessionID).jsonl" : "-\(sessionID)_\(base.pageID).jsonl"
+            func findPage() -> URL? {
+                known.first { path in
+                    path.lastPathComponent.lowercased().hasSuffix(suffix.lowercased()) && storageURL(for: path) != nil
+                }
+            }
+            if findPage() == nil, !searched {
+                searched = true
+                known += nearbyHistoryRollouts(to: canonical, sessionID: sessionID)
+            }
+            guard let page = findPage(), seen.insert(page).inserted else { break }
+            pages.append(HistoryPage(url: page, decodedBytes: base.decodedBytes))
+            guard let next = historyBase(in: page) else { break }
+            base = next
+        }
+        return pages
+    }
+
+    private static func nearbyHistoryRollouts(to url: URL, sessionID: String) -> [URL] {
+        let manager = FileManager.default
+        let day = url.deletingLastPathComponent()
+        let month = day.deletingLastPathComponent()
+        let year = month.deletingLastPathComponent()
+        func children(of folder: URL) -> [URL] {
+            (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        }
+        func numberedChildren(of folder: URL) -> [URL] {
+            children(of: folder).filter { $0.lastPathComponent.allSatisfy(\.isNumber) }
+        }
+        let isDayTree = [year, month, day].allSatisfy { $0.lastPathComponent.allSatisfy(\.isNumber) }
+        let folders = isDayTree
+            ? numberedChildren(of: year.deletingLastPathComponent()).flatMap(numberedChildren).flatMap(numberedChildren)
+            : [day]
+        return canonicalRolloutURLs(folders.flatMap(children).filter {
+            isRolloutFile($0) && $0.lastPathComponent.contains(sessionID)
+        })
     }
 
     /// The decoded size a compressed rollout's first frame header records. Codex
@@ -200,7 +288,8 @@ enum CodexRolloutStorage {
 
     /// True when the decoded rollout contains `needle`. Streams the bytes and keeps
     /// nothing on disk. A decode error ends the search with what was read so far.
-    static func decodedStreamContains(_ needle: String, for url: URL) -> Bool {
+    static func decodedStreamContains(_ needle: String, for url: URL,
+                                      maximumDecodedBytes: UInt64? = nil) -> Bool {
         let pattern = Data(needle.utf8)
         guard !pattern.isEmpty,
               let storage = storageURL(for: url),
@@ -217,7 +306,12 @@ enum CodexRolloutStorage {
         }
         let decoder = ZstdStreamDecoder()
         var carry = Data()
-        while let chunk = try? decoder.read(from: handle, upTo: 1024 * 1024), !chunk.isEmpty {
+        var read: UInt64 = 0
+        while maximumDecodedBytes.map({ read < $0 }) ?? true {
+            let count = maximumDecodedBytes.map { Int(min(1024 * 1024, $0 - read)) } ?? 1024 * 1024
+            guard let chunk = try? decoder.read(from: handle, upTo: count, stopAtFrameBoundary: maximumDecodedBytes != nil),
+                  !chunk.isEmpty else { break }
+            read += UInt64(chunk.count)
             carry.append(chunk)
             if carry.range(of: pattern) != nil { return true }
             carry = carry.suffix(pattern.count - 1)
@@ -234,7 +328,8 @@ enum CodexRolloutStorage {
     /// `materializedCacheByteLimit` throws `limitExceeded`. Copies are evicted
     /// oldest first past the limit, except copies used in the last minute, so a
     /// caller that was just handed a URL can still open it.
-    static func randomAccessURL(for url: URL, fileManager: FileManager = .default) throws -> URL {
+    static func randomAccessURL(for url: URL, decodedPrefixBytes: UInt64? = nil,
+                                fileManager: FileManager = .default) throws -> URL {
         guard let storage = storageURL(for: url, fileManager: fileManager) else {
             throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: url.path])
         }
@@ -243,7 +338,8 @@ enum CodexRolloutStorage {
         let attrs = try fileManager.attributesOfItem(atPath: storage.path)
         let size = (attrs[.size] as? NSNumber)?.uint64Value ?? 0
         let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let key = sha256(canonicalURL(for: storage).path) + "-\(size)-\(Int64(mtime * 1000))"
+        let prefixKey = decodedPrefixBytes.map { "-prefix-\($0)" } ?? ""
+        let key = sha256(canonicalURL(for: storage).path) + "-\(size)-\(Int64(mtime * 1000))" + prefixKey
         let directory = try materializedCacheDirectory(fileManager: fileManager)
         let target = directory.appendingPathComponent(key + ".jsonl")
 
@@ -252,13 +348,14 @@ enum CodexRolloutStorage {
                 try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: target.path)
                 return
             }
-            if let known = frameContentSize(of: storage), known > materializedCacheByteLimit {
+            if let expected = decodedPrefixBytes ?? frameContentSize(of: storage), expected > materializedCacheByteLimit {
                 throw ZstdStreamDecoder.DecodeError.limitExceeded
             }
             let temp = directory.appendingPathComponent(key + ".\(UUID().uuidString).tmp")
             // After a successful move the temp path is gone and this is a no-op.
             defer { try? fileManager.removeItem(at: temp) }
-            try decodeCompressed(storage, to: temp, limit: materializedCacheByteLimit, fileManager: fileManager)
+            try decodeCompressed(storage, to: temp, limit: materializedCacheByteLimit,
+                                 decodedPrefixBytes: decodedPrefixBytes, fileManager: fileManager)
             do {
                 try fileManager.moveItem(at: temp, to: target)
             } catch {
@@ -286,11 +383,11 @@ enum CodexRolloutStorage {
     /// rollout that holds no `data:image` payload, so sessions without images are
     /// never decoded to disk. The prefix is the one `Base64ImageDataURLScanner`
     /// starts from, which also accepts a JSON-escaped `data:image\/png`.
-    static func seekableURLForImageScan(forPath path: String) -> URL? {
+    static func seekableURLForImageScan(forPath path: String, decodedPrefixBytes: UInt64? = nil) -> URL? {
         let url = URL(fileURLWithPath: path)
         guard isStoredCompressed(url) else { return url }
-        guard decodedStreamContains("data:image", for: url) else { return nil }
-        return try? randomAccessURL(for: url)
+        guard decodedStreamContains("data:image", for: url, maximumDecodedBytes: decodedPrefixBytes) else { return nil }
+        return try? randomAccessURL(for: url, decodedPrefixBytes: decodedPrefixBytes)
     }
 
     /// Decodes a compressed rollout into a new temporary file that the caller owns
@@ -339,15 +436,18 @@ enum CodexRolloutStorage {
     private static func decodeCompressed(_ storage: URL,
                                          to destination: URL,
                                          limit: UInt64?,
+                                         decodedPrefixBytes: UInt64? = nil,
                                          fileManager: FileManager) throws {
         let input = try FileHandle(forReadingFrom: storage)
         defer { try? input.close() }
-        try decodeCompressed(from: input, to: destination, limit: limit, fileManager: fileManager)
+        try decodeCompressed(from: input, to: destination, limit: limit,
+                             decodedPrefixBytes: decodedPrefixBytes, fileManager: fileManager)
     }
 
     private static func decodeCompressed(from input: FileHandle,
                                          to destination: URL,
                                          limit: UInt64?,
+                                         decodedPrefixBytes: UInt64? = nil,
                                          fileManager: FileManager) throws {
         guard fileManager.createFile(atPath: destination.path, contents: nil) else {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: destination.path])
@@ -356,13 +456,15 @@ enum CodexRolloutStorage {
         defer { try? output.close() }
         let decoder = ZstdStreamDecoder()
         var written: UInt64 = 0
-        while true {
-            let chunk = try decoder.read(from: input, upTo: 1024 * 1024)
+        while decodedPrefixBytes.map({ written < $0 }) ?? true {
+            let count = decodedPrefixBytes.map { Int(min(1024 * 1024, $0 - written)) } ?? 1024 * 1024
+            let chunk = try decoder.read(from: input, upTo: count, stopAtFrameBoundary: decodedPrefixBytes != nil)
             if chunk.isEmpty { break }
             written += UInt64(chunk.count)
             if let limit, written > limit { throw ZstdStreamDecoder.DecodeError.limitExceeded }
             try output.write(contentsOf: chunk)
         }
+        if let decodedPrefixBytes, written != decodedPrefixBytes { throw ZstdStreamDecoder.DecodeError.truncated }
     }
 
     // MARK: - Materialized cache
@@ -467,7 +569,7 @@ final class ZstdStreamDecoder {
         if let stream { _ = ZSTD_freeDStream(stream) }
     }
 
-    func read(from handle: FileHandle, upTo count: Int) throws -> Data {
+    func read(from handle: FileHandle, upTo count: Int, stopAtFrameBoundary: Bool = false) throws -> Data {
         guard count > 0, !finished else { return Data() }
         if stream == nil {
             guard let created = ZSTD_createDStream() else { throw DecodeError.allocationFailed }
@@ -520,6 +622,7 @@ final class ZstdStreamDecoder {
             if inputPosition > inputBefore || produced > outputBefore {
                 frameComplete = (result == 0)
             }
+            if stopAtFrameBoundary, frameComplete, produced > 0 { break }
 
             let madeProgress = inputPosition > inputBefore || produced > outputBefore
             if !madeProgress && inputPosition >= input.count && reachedEndOfInput {

@@ -57,8 +57,9 @@ enum Base64ImageDataURLScanner {
     /// Line indexes are computed by streaming over bytes and counting newline (0x0A) bytes.
     static func scanFileWithLineIndexes(at url: URL,
                                         maxMatches: Int = 200,
+                                        maximumBytes: UInt64? = nil,
                                         shouldCancel: () -> Bool = { false }) throws -> [LocatedSpan] {
-        try scanInternalWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
+        try scanInternalWithLineIndexes(at: url, maxMatches: maxMatches, maximumBytes: maximumBytes, shouldCancel: shouldCancel)
     }
 
     /// Best-effort filter to ensure a span is inside a JSON `image_url` field.
@@ -273,6 +274,7 @@ enum Base64ImageDataURLScanner {
 
     private static func scanInternalWithLineIndexes(at url: URL,
                                                     maxMatches: Int,
+                                                    maximumBytes: UInt64?,
                                                     shouldCancel: () -> Bool) throws -> [LocatedSpan] {
         let chunkSize = 64 * 1024
         let fh = try FileHandle(forReadingFrom: url)
@@ -305,7 +307,14 @@ enum Base64ImageDataURLScanner {
 
         while true {
             if shouldCancel() { break }
-            let chunk = try fh.read(upToCount: chunkSize) ?? Data()
+            let count: Int
+            if let maximumBytes {
+                guard fileOffset < maximumBytes else { break }
+                count = Int(min(UInt64(chunkSize), maximumBytes - fileOffset))
+            } else {
+                count = chunkSize
+            }
+            let chunk = try fh.read(upToCount: count) ?? Data()
             if chunk.isEmpty { break }
 
             for (i, byte) in chunk.enumerated() {

@@ -4,12 +4,12 @@ import ImageIO
 import UniformTypeIdentifiers
 
 enum SessionImagePayload: Hashable, Sendable {
-    case base64(sourceURL: URL, span: Base64ImageDataURLScanner.Span)
+    case base64(sourceURL: URL, span: Base64ImageDataURLScanner.Span, decodedPrefixBytes: UInt64? = nil)
     case file(fileURL: URL, mediaType: String, fileSizeBytes: Int64)
 
     var mediaType: String {
         switch self {
-        case .base64(_, let span):
+        case .base64(_, let span, _):
             return span.mediaType
         case .file(_, let mediaType, _):
             return mediaType
@@ -18,7 +18,7 @@ enum SessionImagePayload: Hashable, Sendable {
 
     var approxBytes: Int {
         switch self {
-        case .base64(_, let span):
+        case .base64(_, let span, _):
             return span.approxBytes
         case .file(_, _, let sizeBytes):
             if sizeBytes > Int64(Int.max) { return Int.max }
@@ -28,7 +28,7 @@ enum SessionImagePayload: Hashable, Sendable {
 
     var stableID: String {
         switch self {
-        case .base64(let sourceURL, let span):
+        case .base64(let sourceURL, let span, _):
             return sha256Hex(sourceURL.path) + "-" + span.id
         case .file(let fileURL, let mediaType, let sizeBytes):
             var s = "file|"
@@ -261,6 +261,11 @@ enum SessionInlineImageMapper {
                                        maxMatches: Int = 400,
                                        includeMessageContext: Bool = false,
                                        shouldCancel: () -> Bool = { false }) -> [Int: [InlineSessionImage]] {
+        if let history = session.codexTranscriptHistory {
+            return paginatedCodexImages(for: session.transcriptPresentation, pages: history.imagePages,
+                                        maxMatches: maxMatches, includeMessageContext: includeMessageContext,
+                                        shouldCancel: shouldCancel)
+        }
         // Image spans are byte offsets, so a compressed Codex rollout is scanned in its
         // decoded copy. Payloads keep the canonical path: the copy can be evicted, and
         // `decodeImageData` resolves the path again when it reads.
@@ -384,7 +389,7 @@ enum SessionInlineImageMapper {
             switch session.source {
             case .codex, .kimi, .pi, .hermes, .cursor:
                 return located.filter { item in
-                    guard case .base64(_, let span) = item.payload else { return false }
+                    guard case .base64(_, let span, _) = item.payload else { return false }
                     return Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: span.startOffset)
                 }
             case .claude, .opencode, .copilot, .openclaw, .antigravity, .grok:
@@ -503,6 +508,63 @@ enum SessionInlineImageMapper {
 
         return out
     }
+
+    private static func paginatedCodexImages(for session: Session, pages: [CodexTranscriptHistory.ImagePage],
+                                            maxMatches: Int, includeMessageContext: Bool,
+                                            shouldCancel: () -> Bool) -> [Int: [InlineSessionImage]] {
+        struct Prompt {
+            let id: String
+            let page: Int
+            let line: Int
+            let ordinal: Int
+            let preamble: Bool
+        }
+        let resolver = ImageUserTurnResolver(session: session, antigravityFallsBackToFirstEvent: false)
+        var coordinates: [String: (page: Int, line: Int)] = [:]
+        for (pageIndex, page) in pages.enumerated() {
+            for (eventID, line) in page.userLines { coordinates[eventID] = (pageIndex, line) }
+        }
+        let prompts = resolver.userEventIndices.enumerated().compactMap { ordinal, index -> Prompt? in
+            let id = session.events[index].id
+            guard let coordinate = coordinates[id] else { return nil }
+            return Prompt(id: id, page: coordinate.page, line: coordinate.line,
+                          ordinal: ordinal, preamble: resolver.isPreambleUserEventIndex(index))
+        }
+        guard !prompts.isEmpty, maxMatches > 0, !shouldCancel() else { return [:] }
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false,
+                                                             includeMessageContext: includeMessageContext)
+        let blockKeys = userEventIDToBlockKey(blocks: blocks)
+        var images: [Int: [InlineSessionImage]] = [:]
+        var imageIndex = 1
+        for (pageIndex, page) in pages.enumerated() {
+            if imageIndex > maxMatches || shouldCancel() { break }
+            guard let scanURL = CodexRolloutStorage.seekableURLForImageScan(forPath: page.url.path,
+                                                                           decodedPrefixBytes: page.decodedLimit),
+                  let spans = try? Base64ImageDataURLScanner.scanFileWithLineIndexes(
+                      at: scanURL, maxMatches: maxMatches - imageIndex + 1,
+                      maximumBytes: page.decodedLimit, shouldCancel: shouldCancel) else { continue }
+            for image in spans {
+                if shouldCancel() { return images }
+                guard Base64ImageDataURLScanner.isLikelyImageURLContext(at: scanURL, startOffset: image.span.startOffset) else { continue }
+                // A line number by itself is only meaningful within its rollout.
+                // Compare the page first so an image at the start of a continuation
+                // can still belong to the immediately preceding prompt.
+                let isBefore = { (prompt: Prompt) in
+                    (prompt.page, prompt.line) <= (pageIndex, image.lineIndex)
+                }
+                let prior = prompts.last { isBefore($0) && !$0.preamble } ?? prompts.last(where: isBefore)
+                let target = prior ?? prompts.first { !$0.preamble } ?? prompts.first
+                guard let target, let block = blockKeys[target.id] else { continue }
+                let payload = SessionImagePayload.base64(sourceURL: page.url, span: image.span,
+                                                         decodedPrefixBytes: page.decodedLimit)
+                images[block, default: []].append(InlineSessionImage(
+                    sessionID: session.id, imageEventID: target.id, userPromptIndex: target.ordinal,
+                    sessionImageIndex: imageIndex, payload: payload))
+                imageIndex += 1
+            }
+        }
+        return images
+    }
 }
 
 enum CodexSessionImagePayload {
@@ -515,8 +577,9 @@ enum CodexSessionImagePayload {
                                 maxDecodedBytes: Int,
                                 shouldCancel: () -> Bool = { false }) throws -> Data {
         switch payload {
-        case .base64(let sourceURL, let span):
-            return try decodeImageData(url: sourceURL, span: span, maxDecodedBytes: maxDecodedBytes, shouldCancel: shouldCancel)
+        case .base64(let sourceURL, let span, let decodedPrefixBytes):
+            return try decodeImageData(url: sourceURL, span: span, maxDecodedBytes: maxDecodedBytes,
+                                       decodedPrefixBytes: decodedPrefixBytes, shouldCancel: shouldCancel)
         case .file(let fileURL, _, let sizeBytes):
             if shouldCancel() { throw CancellationError() }
             if sizeBytes > Int64(maxDecodedBytes) { throw DecodeError.tooLarge }
@@ -530,6 +593,7 @@ enum CodexSessionImagePayload {
     static func decodeImageData(url: URL,
                                 span: Base64ImageDataURLScanner.Span,
                                 maxDecodedBytes: Int,
+                                decodedPrefixBytes: UInt64? = nil,
                                 shouldCancel: () -> Bool = { false }) throws -> Data {
         if shouldCancel() { throw CancellationError() }
         if span.approxBytes > maxDecodedBytes {
@@ -539,6 +603,7 @@ enum CodexSessionImagePayload {
         let payload = try readFileSlice(url: url,
                                         offset: span.base64PayloadOffset,
                                         length: span.base64PayloadLength,
+                                        decodedPrefixBytes: decodedPrefixBytes,
                                         shouldCancel: shouldCancel)
         if shouldCancel() { throw CancellationError() }
         guard let decoded = Data(base64Encoded: payload, options: [.ignoreUnknownCharacters]) else {
@@ -595,17 +660,24 @@ enum CodexSessionImagePayload {
     private static func readFileSlice(url: URL,
                                       offset: UInt64,
                                       length: Int,
+                                      decodedPrefixBytes: UInt64?,
                                       shouldCancel: () -> Bool = { false }) throws -> Data {
         // A payload names a Codex rollout by its canonical `.jsonl` path. When Codex
         // holds it as `.jsonl.zst`, the offsets point into the decoded copy, which is
         // resolved (and rebuilt if it was evicted) here, at read time.
+        func seekableURL() throws -> URL {
+            if let decodedPrefixBytes {
+                return try CodexRolloutStorage.randomAccessURL(for: url, decodedPrefixBytes: decodedPrefixBytes)
+            }
+            return CodexRolloutStorage.seekableURL(forPath: url.path)
+        }
         let fh: FileHandle
         do {
-            fh = try FileHandle(forReadingFrom: CodexRolloutStorage.seekableURL(forPath: url.path))
+            fh = try FileHandle(forReadingFrom: seekableURL())
         } catch {
             // Eviction can remove a copy between resolution and open; resolve once more.
             guard CodexRolloutStorage.isStoredCompressed(url) else { throw error }
-            fh = try FileHandle(forReadingFrom: CodexRolloutStorage.seekableURL(forPath: url.path))
+            fh = try FileHandle(forReadingFrom: seekableURL())
         }
         defer { try? fh.close() }
         try fh.seek(toOffset: offset)

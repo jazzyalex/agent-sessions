@@ -419,6 +419,7 @@ final class SessionIndexer: ObservableObject {
         let fileNumber: UInt64
         let byteOffset: UInt64
         let lastLineIndex: Int
+        let physicalLineCount: Int?
         let modifiedAt: Date
     }
 
@@ -432,6 +433,7 @@ final class SessionIndexer: ObservableObject {
     private struct FullParseResult {
         let session: Session
         let lastLineIndex: Int
+        let physicalLineCount: Int
         let snapshotByteCount: UInt64?
         let snapshotSystemNumber: UInt64?
         let snapshotFileNumber: UInt64?
@@ -477,6 +479,8 @@ final class SessionIndexer: ObservableObject {
         )
         merged.isFavorite = current.isFavorite
         merged.isPartiallyHydrated = isTail
+        merged.codexUserFileLines = parsed.codexUserFileLines
+        merged.codexTranscriptHistory = parsed.codexTranscriptHistory
         return merged
     }
 
@@ -538,15 +542,23 @@ final class SessionIndexer: ObservableObject {
             // A tail-only provisional session (Task 9e stage 0) must never look
             // "already loaded" here — the full parse must always follow it.
             let hasLoadedEvents = !existing.events.isEmpty && !existing.isPartiallyHydrated
+            let url = URL(fileURLWithPath: existing.filePath)
+            var historyPages: [CodexRolloutStorage.HistoryPage]?
             if hasLoadedEvents && !force {
-                DBG("⏭️ Skip reload: session already loaded")
-                DispatchQueue.main.async {
-                    self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
+                if existing.codexTranscriptHistory == nil, reason == .selection {
+                    // Search may have already hydrated the file-local events.
+                    // Selection still needs to assemble its transcript history.
+                    historyPages = self.transcriptHistoryPages(of: url)
                 }
-                return
+                guard let historyPages, !historyPages.isEmpty else {
+                    DBG("⏭️ Skip reload: session already loaded")
+                    DispatchQueue.main.async {
+                        self.clearLoadingStateIfOwned(id: id, generation: reloadGeneration)
+                    }
+                    return
+                }
             }
 
-            let url = URL(fileURLWithPath: existing.filePath)
             let preParseStat = Self.fileStat(for: url)
             var lastReloadStat: SessionFileStat? = nil
             self.reloadLock.lock()
@@ -683,15 +695,22 @@ final class SessionIndexer: ObservableObject {
                 // Force full parse by calling parseFile directly (skip lightweight check).
                 // JSONLReader is bounded to the size captured inside this call, so growth
                 // after the snapshot is left for the next append pass.
-                if let fullResult = self.parseFileFullResult(at: url, forcedID: id),
+                let ancestors = self.loadTranscriptAncestors(historyPages ?? self.transcriptHistoryPages(of: url))
+                if let fullResult = self.parseFileFullResult(at: url, forcedID: id,
+                                                             locatePrompts: !ancestors.isEmpty),
                    fullResult.readSucceeded || !hasLoadedEvents {
-                    parsedSession = fullResult.session
+                    var page = fullResult.session
+                    if fullResult.readSucceeded, !ancestors.isEmpty {
+                        page.codexTranscriptHistory = CodexTranscriptHistory(ancestors: ancestors, current: page)
+                    }
+                    parsedSession = page
                     if fullResult.readSucceeded,
                        let snapshotByteCount = fullResult.snapshotByteCount,
                        let verifiedCursor = self.makeAppendCursor(
                             at: url,
                             lastLineIndex: fullResult.lastLineIndex,
-                            byteOffset: snapshotByteCount
+                            byteOffset: snapshotByteCount,
+                            physicalLineCount: fullResult.physicalLineCount
                        ),
                        verifiedCursor.systemNumber == fullResult.snapshotSystemNumber,
                        verifiedCursor.fileNumber == fullResult.snapshotFileNumber {
@@ -2470,11 +2489,29 @@ final class SessionIndexer: ObservableObject {
         parseFileFullResult(at: url, forcedID: forcedID)?.session
     }
 
-    private func parseFileFullResult(at url: URL, forcedID: String? = nil) -> FullParseResult? {
+    private func transcriptHistoryPages(of url: URL) -> [CodexRolloutStorage.HistoryPage] {
+        CodexRolloutStorage.precedingHistoryPages(of: url, knownPaths: allSessions.map(\.filePath))
+    }
+
+    private func loadTranscriptAncestors(_ pages: [CodexRolloutStorage.HistoryPage]) -> [CodexTranscriptHistory.Ancestor] {
+        var ancestors: [CodexTranscriptHistory.Ancestor] = []
+        for page in pages {
+            guard let result = parseFileFullResultMeasuredBody(at: page.url, forcedID: nil,
+                                                               decodedPrefix: page.decodedBytes, locatePrompts: true),
+                  result.readSucceeded else { break }
+            ancestors.append(.init(events: result.session.events,
+                                   imagePage: .init(url: page.url, decodedLimit: page.decodedBytes,
+                                                    userLines: result.session.codexUserFileLines ?? [:])))
+        }
+        return ancestors.reversed()
+    }
+
+    private func parseFileFullResult(at url: URL, forcedID: String? = nil,
+                                     locatePrompts: Bool = false) -> FullParseResult? {
         let metrics = SearchResponsivenessMetrics.shared
         let span = metrics.beginSpan(.fullReadDecode,
             operationID: metrics.operation(source: SessionSource.codex.rawValue, sessionID: forcedID ?? Self.hash(path: url.path)))
-        let result = parseFileFullResultMeasuredBody(at: url, forcedID: forcedID)
+        let result = parseFileFullResultMeasuredBody(at: url, forcedID: forcedID, locatePrompts: locatePrompts)
         if let span {
             if let result { metrics.end(span, status: result.readSucceeded ? .succeeded : .partial) }
             else { metrics.fail(span, code: .readError) }
@@ -2482,7 +2519,9 @@ final class SessionIndexer: ObservableObject {
         return result
     }
 
-    private func parseFileFullResultMeasuredBody(at url: URL, forcedID: String?) -> FullParseResult? {
+    private func parseFileFullResultMeasuredBody(at url: URL, forcedID: String?,
+                                                 decodedPrefix: UInt64? = nil,
+                                                 locatePrompts: Bool = false) -> FullParseResult? {
         SessionInfoMetrics.shared.beginTranscript(path: url.path)
         defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
 #if DEBUG
@@ -2511,10 +2550,11 @@ final class SessionIndexer: ObservableObject {
         var decodedByteCount: UInt64 = 0
         let reader = CodexRolloutStorage.lineReader(for: url,
                                                     maximumBytes: snapshotSize,
+                                                    maximumDecodedBytes: decodedPrefix,
                                                     propagatesReadErrors: true,
                                                     onDecodedBytes: { decodedByteCount += UInt64($0) })
             ?? JSONLReader(url: url,
-                           maximumBytes: snapshotSize,
+                           maximumBytes: decodedPrefix ?? snapshotSize,
                            propagatesReadErrors: true)
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
@@ -2523,11 +2563,14 @@ final class SessionIndexer: ObservableObject {
         var codexSurfaceMetadata: CodexSurfaceMetadata? = nil
         var reasoningEffort: String? = nil
         var idx = 0
+        var physicalLineCount = 0
+        var userLines: [String: Int] = [:]
         var readSucceeded = true
         let eventIDBase = Self.hash(path: url.path)
         DBG("    📖 parseFileFull: Starting forEachLine...")
         do {
-            try reader.forEachLine { rawLine in
+            try reader.forEachLocatedLine(requireCompletePrefix: decodedPrefix != nil,
+                                          reportLineCount: { physicalLineCount = $0 }) { rawLine, sourceLine in
                 idx += 1
                 // Only sanitize very large lines (>100KB) - sanitizeLargeLine has its own guards for smaller lines
                 let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
@@ -2584,6 +2627,7 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
 
+                if locatePrompts, event.kind == .user { userLines[event.id] = sourceLine }
                 events.append(event)
             }
         } catch {
@@ -2607,7 +2651,7 @@ final class SessionIndexer: ObservableObject {
         let isHousekeeping = Session.computeIsHousekeeping(source: .codex, events: events)
         let internalSessionIDHint = Session.deriveCodexInternalSessionID(from: events)
         let subagentReasoningEffort = (parentSessionID != nil || subagentType != nil) ? reasoningEffort : nil
-        let session = Session(id: id,
+        var session = Session(id: id,
                               source: .codex,
                               startTime: start,
                               endTime: end,
@@ -2626,6 +2670,7 @@ final class SessionIndexer: ObservableObject {
                               codexSource: codexSurfaceMetadata?.source,
                               codexSurface: codexSurfaceMetadata?.surface ?? .unknown,
                               reasoningEffort: subagentReasoningEffort)
+        if locatePrompts { session.codexUserFileLines = userLines }
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -2633,6 +2678,7 @@ final class SessionIndexer: ObservableObject {
 
         return FullParseResult(session: session,
                                lastLineIndex: idx,
+                               physicalLineCount: physicalLineCount,
                                snapshotByteCount: snapshotSize,
                                snapshotSystemNumber: snapshotSystemNumber,
                                snapshotFileNumber: snapshotFileNumber,
@@ -2641,7 +2687,8 @@ final class SessionIndexer: ObservableObject {
 
     func makeAppendCursor(at url: URL,
                           lastLineIndex: Int,
-                          byteOffset requestedByteOffset: UInt64? = nil) -> CodexAppendCursor? {
+                          byteOffset requestedByteOffset: UInt64? = nil,
+                          physicalLineCount: Int? = nil) -> CodexAppendCursor? {
         guard lastLineIndex >= 0,
               let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = (attrs[.size] as? NSNumber)?.uint64Value,
@@ -2666,6 +2713,7 @@ final class SessionIndexer: ObservableObject {
                                      fileNumber: fileNumber,
                                      byteOffset: byteOffset,
                                      lastLineIndex: lastLineIndex,
+                                     physicalLineCount: physicalLineCount,
                                      modifiedAt: modifiedAt)
         } catch {
             return nil
@@ -2743,9 +2791,11 @@ final class SessionIndexer: ObservableObject {
         var model = existing.model
         var reasoningEffort = existing.reasoningEffort
         var lineIndex = cursor.lastLineIndex
+        var userLines = existing.codexUserFileLines
+        if userLines != nil, cursor.physicalLineCount == nil { return .fallbackToFullParse }
         let eventIDBase = Self.hash(path: url.path)
         let pieces = appendedData.split(separator: 0x0A, omittingEmptySubsequences: false)
-        for piece in pieces.dropLast() {
+        for (offset, piece) in pieces.dropLast().enumerated() {
             guard !piece.isEmpty else { continue }
             guard piece.count <= 8_388_608,
                   let rawLine = String(data: Data(piece), encoding: .utf8) else {
@@ -2770,6 +2820,9 @@ final class SessionIndexer: ObservableObject {
                     reasoningEffort = effort
                 }
             }
+            if event.kind == .user, let firstLine = cursor.physicalLineCount {
+                userLines?[event.id] = firstLine + offset
+            }
             events.append(event)
         }
 
@@ -2777,7 +2830,7 @@ final class SessionIndexer: ObservableObject {
         let startTime = eventTimes.min() ?? existing.startTime
         let endTime = eventTimes.max() ?? existing.endTime
         let nonMetaCount = events.lazy.filter { $0.kind != .meta }.count
-        let parsed = Session(
+        var parsed = Session(
             id: existing.id,
             source: .codex,
             startTime: startTime,
@@ -2809,11 +2862,16 @@ final class SessionIndexer: ObservableObject {
                 : nil,
             deletedAt: existing.deletedAt
         )
+        parsed.codexUserFileLines = userLines
+        if let history = existing.codexTranscriptHistory {
+            parsed.codexTranscriptHistory = CodexTranscriptHistory(ancestors: history.ancestors, current: parsed)
+        }
         let nextCursor = CodexAppendCursor(path: cursor.path,
                                            systemNumber: cursor.systemNumber,
                                            fileNumber: cursor.fileNumber,
                                            byteOffset: size,
                                            lastLineIndex: lineIndex,
+                                           physicalLineCount: cursor.physicalLineCount.map { $0 + pieces.count - 1 },
                                            modifiedAt: modifiedAt)
         return .appended(parsed, nextCursor)
     }

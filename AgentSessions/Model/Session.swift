@@ -195,6 +195,38 @@ private enum SessionRowFormatters {
     }
 }
 
+/// A view-only projection of paginated Codex history. Index and search callers
+/// continue to get the selected rollout's file-local events and metadata.
+struct CodexTranscriptHistory: Sendable {
+    struct Ancestor: Sendable {
+        let events: [SessionEvent]
+        let imagePage: ImagePage
+    }
+
+    struct ImagePage: Sendable {
+        let url: URL
+        let decodedLimit: UInt64?
+        let userLines: [String: Int]
+    }
+
+    let ancestors: [Ancestor]
+    let events: [SessionEvent]
+    let imagePages: [ImagePage]
+    let hasToolCallEvent: Bool
+
+    init(ancestors: [Ancestor], current: Session) {
+        self.ancestors = ancestors
+        events = ancestors.flatMap(\.events) + current.events
+        // The active rollout can grow while its images are scanned. Use the
+        // transcript's byte count so newer images can't land on an older prompt.
+        imagePages = ancestors.map(\.imagePage)
+            + [ImagePage(url: URL(fileURLWithPath: current.filePath),
+                         decodedLimit: current.fileSizeBytes.flatMap(UInt64.init(exactly:)),
+                         userLines: current.codexUserFileLines ?? [:])]
+        hasToolCallEvent = events.contains { $0.kind == .tool_call }
+    }
+}
+
 public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let id: String
     public let source: SessionSource
@@ -204,7 +236,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let filePath: String
     public let fileSizeBytes: Int?
     public let eventCount: Int
-    public let events: [SessionEvent]
+    public private(set) var events: [SessionEvent]
     /// Immutable event storage gets a new process-local revision at construction/decode.
     /// Copies preserve it; it is deliberately excluded from CodingKeys.
     public let contentRevision = UUID()
@@ -276,6 +308,17 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // File proof captured by a full JSONL parser. It is deliberately runtime
     // only: a caller must not manufacture a proof from a later stat sample.
     internal var sourceFileStat: SessionFileStat? = nil
+    // Runtime-only physical lines and joined events. Neither is serialized.
+    internal var codexUserFileLines: [String: Int]? = nil
+    internal var codexTranscriptHistory: CodexTranscriptHistory? = nil
+
+    internal var transcriptPresentation: Session {
+        guard let codexTranscriptHistory else { return self }
+        var presented = self
+        presented.events = codexTranscriptHistory.events
+        presented.hasToolCallEvent = codexTranscriptHistory.hasToolCallEvent
+        return presented
+    }
 
     // Task 9e stage 0: true for a disposable tail-only provisional session
     // (ReverseJSONLTailReader + SessionIndexer.parseFileTail) published to
