@@ -4423,6 +4423,7 @@ struct TranscriptHostView: View {
     /// indexer class, so the downcasts stay, but they are now resolved in one place from the
     /// same objects `coveredSources` is tested against.
     let catalog: SessionProviderCatalog
+    var keepsInactiveProvidersMounted = true
     private var codexIndexer: SessionIndexer { catalog.indexer(.codex, as: SessionIndexer.self) }
     private var claudeIndexer: ClaudeSessionIndexer { catalog.indexer(.claude, as: ClaudeSessionIndexer.self) }
     private var antigravityIndexer: AntigravitySessionIndexer { catalog.indexer(.antigravity, as: AntigravitySessionIndexer.self) }
@@ -4444,26 +4445,44 @@ struct TranscriptHostView: View {
     }
 
     var body: some View {
-        ZStack { // keep one stable container to avoid split reset
+        ZStack {
+            if keepsInactiveProvidersMounted {
+                // Preserve provider view identity across source changes in the Sessions split.
+                ForEach(SessionSource.allCases, id: \.self) { source in
+                    transcript(for: source)
+                        .opacity(kind == source ? 1 : 0)
+                }
+            } else {
+                transcript(for: kind)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    @ViewBuilder
+    private func transcript(for source: SessionSource) -> some View {
+        switch source {
+        case .codex:
             TranscriptPlainView(sessionID: selection)
                 .environmentObject(codexIndexer)
-                .opacity(kind == .codex ? 1 : 0)
+        case .claude:
             ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
-                .opacity(kind == .claude ? 1 : 0)
+        case .antigravity:
             AntigravityTranscriptView(indexer: antigravityIndexer, sessionID: selection)
-                .opacity(kind == .antigravity ? 1 : 0)
+        case .opencode:
             OpenCodeTranscriptView(indexer: opencodeIndexer, sessionID: selection)
-                .opacity(kind == .opencode ? 1 : 0)
+        case .hermes:
             HermesTranscriptView(indexer: hermesIndexer, sessionID: selection)
-                .opacity(kind == .hermes ? 1 : 0)
+        case .copilot:
             CopilotTranscriptView(indexer: copilotIndexer, sessionID: selection)
-                .opacity(kind == .copilot ? 1 : 0)
+        case .droid:
             DroidTranscriptView(indexer: droidIndexer, sessionID: selection)
-                .opacity(kind == .droid ? 1 : 0)
+        case .openclaw:
             OpenClawTranscriptView(indexer: openclawIndexer, sessionID: selection)
-                .opacity(kind == .openclaw ? 1 : 0)
+        case .cursor:
             CursorTranscriptView(indexer: cursorIndexer, sessionID: selection)
-                .opacity(kind == .cursor ? 1 : 0)
+        case .pi:
             UnifiedTranscriptView(
                 indexer: piIndexer,
                 sessionID: selection,
@@ -4471,7 +4490,7 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "Pi",
                 enableCaching: false
             )
-            .opacity(kind == .pi ? 1 : 0)
+        case .kimi:
             UnifiedTranscriptView(
                 indexer: kimiIndexer,
                 sessionID: selection,
@@ -4479,7 +4498,7 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "Kimi Code",
                 enableCaching: false
             )
-            .opacity(kind == .kimi ? 1 : 0)
+        case .grok:
             UnifiedTranscriptView(
                 indexer: grokIndexer,
                 sessionID: selection,
@@ -4487,7 +4506,7 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "Grok CLI",
                 enableCaching: false
             )
-            .opacity(kind == .grok ? 1 : 0)
+        case .qwen:
             UnifiedTranscriptView(
                 indexer: qwenIndexer,
                 sessionID: selection,
@@ -4495,7 +4514,7 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "Qwen Code",
                 enableCaching: false
             )
-            .opacity(kind == .qwen ? 1 : 0)
+        case .devin:
             UnifiedTranscriptView(
                 indexer: devinIndexer,
                 sessionID: selection,
@@ -4503,7 +4522,7 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "Devin CLI",
                 enableCaching: false
             )
-            .opacity(kind == .devin ? 1 : 0)
+        case .fx:
             UnifiedTranscriptView(
                 indexer: fxIndexer,
                 sessionID: selection,
@@ -4511,7 +4530,7 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "fx",
                 enableCaching: false
             )
-            .opacity(kind == .fx ? 1 : 0)
+        case .cline:
             UnifiedTranscriptView(
                 indexer: clineIndexer,
                 sessionID: selection,
@@ -4519,7 +4538,7 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "Cline",
                 enableCaching: false
             )
-            .opacity(kind == .cline ? 1 : 0)
+        case .deepseekHarness:
             UnifiedTranscriptView(
                 indexer: deepSeekHarnessIndexer,
                 sessionID: selection,
@@ -4527,23 +4546,11 @@ struct TranscriptHostView: View {
                 sessionIDLabel: "DeepSeek",
                 enableCaching: false
             )
-            .opacity(kind == .deepseekHarness ? 1 : 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
     }
 
-    /// Every source that has a layer in the `ZStack` above.
-    ///
-    /// The layers are selected by `opacity`, not by a `switch`, so a source with no
-    /// layer is not a compile error — it silently renders an empty transcript with
-    /// every layer at zero opacity. Grok shipped exactly that way: its indexer was
-    /// declared, passed in, and never used. `testTranscriptHostCoversEverySource`
-    /// compares this set against `SessionSource.allCases`.
-    static let coveredSources: Set<SessionSource> = [
-        .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
-        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline, .deepseekHarness
-    ]
+    // The exhaustive switch above requires a renderer for each provider.
+    static let coveredSources = Set(SessionSource.allCases)
 }
 
 // Session title cell with inline Antigravity refresh affordance (hover-only)

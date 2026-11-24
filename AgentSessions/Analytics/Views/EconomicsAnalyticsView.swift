@@ -94,7 +94,7 @@ struct EconomicsAnalyticsView: View {
         HStack(spacing: AnalyticsDesign.metricsCardSpacing) {
             summaryCard(
                 title: "API-equivalent value",
-                value: Self.currency(snapshot.totalAPIEquivalentUSD),
+                value: snapshot.pricedAPIEquivalentUSD.map(Self.currency),
                 detail: "Published API rates"
             )
             quotaSummaryCard
@@ -113,14 +113,14 @@ struct EconomicsAnalyticsView: View {
 
     private func summaryCard(
         title: LocalizedStringKey,
-        value: String,
+        value: String?,
         detail: LocalizedStringKey
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(value)
+            (value.map { Text(verbatim: $0) } ?? Text("Unavailable"))
                 .font(.system(size: 25, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -742,27 +742,39 @@ private struct EconomicsContributingSessionsView: View {
     let catalog: SessionProviderCatalog
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedSession: Session?
+    @State private var selection: (session: Session, hasStorage: Bool)?
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
     @StateObject private var searchState = UnifiedSearchState()
 
     var body: some View {
         VStack(alignment: .leading, spacing: AnalyticsDesign.metricsCardSpacing) {
-            if let session = selectedSession {
+            if let selection {
+                let session = selection.session
                 Button {
                     focusCoordinator.perform(.closeAllSearch)
-                    selectedSession = nil
+                    self.selection = nil
                 } label: {
                     Label("Contributing sessions", systemImage: "chevron.left")
                 }
                 Text(session.listTitle)
                     .font(.headline)
                     .lineLimit(2)
-                TranscriptHostView(kind: session.source, selection: session.id, catalog: catalog)
+                if selection.hasStorage {
+                    TranscriptHostView(
+                        kind: session.source,
+                        selection: session.id,
+                        catalog: catalog,
+                        keepsInactiveProvidersMounted: false
+                    )
                     .environmentObject(focusCoordinator)
                     .environmentObject(searchState)
                     .environmentObject(SessionArchiveManager.shared)
                     .id(session.id)
+                } else {
+                    Label("Session file not found", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 Text("Contributing sessions")
                     .font(.headline)
@@ -787,11 +799,14 @@ private struct EconomicsContributingSessionsView: View {
         } else {
             List(sessions) { session in
                 Button {
-                    if session.events.isEmpty || session.isPartiallyHydrated {
+                    let hasStorage = EconomicsTranscriptAvailability.hasStorage(for: session)
+                    if hasStorage, session.events.isEmpty || session.isPartiallyHydrated {
                         catalog[session.source].handle.reloadFocusedSession(session.id, false, .selection)
                     }
-                    focusCoordinator.perform(.selectSession(id: session.id))
-                    selectedSession = session
+                    if hasStorage {
+                        focusCoordinator.perform(.selectSession(id: session.id))
+                    }
+                    selection = (session, hasStorage)
                 } label: {
                     VStack(alignment: .leading) {
                         Text(session.listTitle).lineLimit(2)

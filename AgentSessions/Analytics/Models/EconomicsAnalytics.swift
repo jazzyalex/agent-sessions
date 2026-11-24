@@ -247,7 +247,10 @@ enum EconomicsRowOrdering {
         for row: EconomicsConfigurationRow,
         in rows: [EconomicsConfigurationRow]
     ) -> [EconomicsConfigurationRow] {
-        rows.filter {
+        guard !row.configuration.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return []
+        }
+        return rows.filter {
             $0.configuration.source == row.configuration.source
                 && $0.configuration.model == row.configuration.model
                 && $0.configuration.effort != row.configuration.effort
@@ -301,6 +304,10 @@ struct EconomicsSnapshot: Equatable, Sendable {
     let coverage: EconomicsCoverage
     let lastUpdated: Date
 
+    var pricedAPIEquivalentUSD: Double? {
+        coverage.pricedObservations > 0 ? totalAPIEquivalentUSD : nil
+    }
+
     static let empty = EconomicsSnapshot(
         rows: [],
         trendByConfiguration: [:],
@@ -316,6 +323,15 @@ struct EconomicsSnapshot: Equatable, Sendable {
         ),
         lastUpdated: Date()
     )
+}
+
+enum EconomicsTranscriptAvailability {
+    static func hasStorage(for session: Session, fileManager: FileManager = .default) -> Bool {
+        // Recovered side chats can have usable in-memory events without a rollout.
+        if session.isSideChat && !session.events.isEmpty { return true }
+        guard !session.filePath.isEmpty else { return false }
+        return CodexRolloutStorage.exists(atPath: session.filePath, fileManager: fileManager)
+    }
 }
 
 struct EconomicsAnalysisProgress: Equatable, Sendable {

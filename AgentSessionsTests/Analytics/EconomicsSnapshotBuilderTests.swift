@@ -15,6 +15,61 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(EconomicsAnalyticsView.coverageCount(count: 0, total: 100, locale: locale), "0 of 100 (0%)")
         XCTAssertEqual(EconomicsAnalyticsView.coverageCount(count: 0, total: 0, locale: locale), "No records")
     }
+
+    func testHeadlineDistinguishesUnpricedUsageFromPricedZero() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let key = EconomicsConfigurationKey(source: .claude, model: "opus", effort: "medium")
+        func snapshot(price: Double?) -> EconomicsSnapshot {
+            EconomicsSnapshotBuilder.build(
+                observations: [observation("a", key, now, api: price, quota: nil, active: nil)],
+                current: EconomicsPeriod(start: nil, end: now.addingTimeInterval(1)),
+                previous: nil,
+                now: now,
+                calendar: calendar,
+                eligibleSessions: 1,
+                analyzedSessions: 1
+            )
+        }
+        let unpriced = snapshot(price: nil)
+        XCTAssertEqual(unpriced.coverage.totalObservations, 1)
+        XCTAssertNil(unpriced.pricedAPIEquivalentUSD)
+        XCTAssertEqual(snapshot(price: 0).pricedAPIEquivalentUSD, 0)
+    }
+
+    func testUnknownModelsDoNotOfferEffortComparison() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let rows = EconomicsSnapshotBuilder.build(
+            observations: ["", " "].flatMap { model in
+                ["medium", "high"].map { effort in
+                    let key = EconomicsConfigurationKey(source: .claude, model: model, effort: effort)
+                    return observation(key.id, key, now, api: nil, quota: nil, active: nil)
+                }
+            },
+            current: EconomicsPeriod(start: nil, end: now.addingTimeInterval(1)),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 4,
+            analyzedSessions: 4
+        ).rows
+        XCTAssertEqual(rows.count, 4)
+        for row in rows {
+            XCTAssertTrue(EconomicsRowOrdering.otherEfforts(for: row, in: rows).isEmpty)
+        }
+    }
+
+    func testTranscriptAvailabilityRecognizesCompressedRolloutsAndMissingPaths() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        addTeardownBlock { try FileManager.default.removeItem(at: folder) }
+        let rollout = folder.appendingPathComponent("rollout-test.jsonl")
+        let session = Session(id: "a", startTime: nil, endTime: nil, model: nil,
+                              filePath: rollout.path, eventCount: 0, events: [])
+        XCTAssertFalse(EconomicsTranscriptAvailability.hasStorage(for: session))
+        try Data().write(to: CodexRolloutStorage.compressedSibling(of: rollout))
+        XCTAssertTrue(EconomicsTranscriptAvailability.hasStorage(for: session))
+    }
+
     private let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
