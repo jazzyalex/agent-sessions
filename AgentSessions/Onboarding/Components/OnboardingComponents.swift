@@ -31,19 +31,22 @@ struct FeatureRow: View {
     let iconColor: Color
     let title: OnboardingText
     let description: OnboardingText
+    let imageAssetName: String?
 
     init(
         palette: OnboardingPalette,
         icon: String,
         iconColor: Color,
         title: LocalizedStringResource,
-        description: LocalizedStringResource
+        description: LocalizedStringResource,
+        imageAssetName: String? = nil
     ) {
         self.palette = palette
         self.icon = icon
         self.iconColor = iconColor
         self.title = .localized(title)
         self.description = .localized(description)
+        self.imageAssetName = imageAssetName
     }
 
     /// Legacy What's New content is deliberately rendered verbatim. It is not
@@ -60,6 +63,7 @@ struct FeatureRow: View {
         self.iconColor = iconColor
         self.title = .verbatim(verbatimTitle)
         self.description = .verbatim(verbatimDescription)
+        self.imageAssetName = nil
     }
 
     var body: some View {
@@ -80,6 +84,19 @@ struct FeatureRow: View {
                 description.makeView()
                     .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(.secondary)
+
+                if let imageAssetName {
+                    Image(imageAssetName)
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(palette.rowStroke, lineWidth: 1)
+                        )
+                        .padding(.top, 6)
+                        .accessibilityLabel("Economics dashboard with model rates and evidence coverage")
+                }
             }
 
             Spacer()

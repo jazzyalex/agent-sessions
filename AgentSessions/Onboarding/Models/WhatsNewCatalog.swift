@@ -16,6 +16,8 @@ struct WhatsNewItem: Identifiable, Equatable {
     let iconSystemName: String
     let title: LocalizedStringResource
     let body: LocalizedStringResource
+    /// Optional bundled screenshot shown below this release highlight.
+    let imageAssetName: String?
     /// Optional external link (used by promo / support rows).
     let linkTitle: LocalizedStringResource?
     let linkURL: URL?
@@ -25,6 +27,7 @@ struct WhatsNewItem: Identifiable, Equatable {
         iconSystemName: String,
         title: LocalizedStringResource,
         body: LocalizedStringResource,
+        imageAssetName: String? = nil,
         linkTitle: LocalizedStringResource? = nil,
         linkURL: URL? = nil
     ) {
@@ -33,6 +36,7 @@ struct WhatsNewItem: Identifiable, Equatable {
         self.iconSystemName = iconSystemName
         self.title = title
         self.body = body
+        self.imageAssetName = imageAssetName
         self.linkTitle = linkTitle
         self.linkURL = linkURL
     }
@@ -144,7 +148,8 @@ enum WhatsNewCatalog {
                 kind: .highlight,
                 iconSystemName: "chart.bar.xaxis",
                 title: "Economics in Analytics",
-                body: "Compare API-equivalent value and attributed quota by agent, model, and thinking effort. Coverage limits and unavailable evidence stay explicit."
+                body: "Compare API-equivalent value and attributed quota by agent, model, and thinking effort. Coverage limits and unavailable evidence stay explicit.",
+                imageAssetName: "WhatsNewEconomics70"
             ),
             WhatsNewItem(
                 kind: .support,

@@ -236,6 +236,7 @@ final class WhatsNewCatalogTests: XCTestCase {
             "Support the project"
         ])
         XCTAssertEqual(items.map(\.kind), [.highlight, .highlight, .highlight, .support])
+        XCTAssertEqual(items[2].imageAssetName, "WhatsNewEconomics70")
     }
 
     func testAssembleForCurrentReleaseHasHighlights() {

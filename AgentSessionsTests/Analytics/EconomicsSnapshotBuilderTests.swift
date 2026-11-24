@@ -8,6 +8,13 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(EconomicsAnalyticsView.shortDuration(30), "<1m")
         XCTAssertEqual(EconomicsAnalyticsView.shortDuration(60), "1m")
     }
+
+    func testCoverageCountShowsTheDenominatorAndPercentage() {
+        let locale = Locale(identifier: "en_US")
+        XCTAssertEqual(EconomicsAnalyticsView.coverageCount(count: 22, total: 100, locale: locale), "22 of 100 (22%)")
+        XCTAssertEqual(EconomicsAnalyticsView.coverageCount(count: 0, total: 100, locale: locale), "0 of 100 (0%)")
+        XCTAssertEqual(EconomicsAnalyticsView.coverageCount(count: 0, total: 0, locale: locale), "No records")
+    }
     private let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

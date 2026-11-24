@@ -1,6 +1,377 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Weekly rate history needs at least two weeks with enough covered activity for the selected metric.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly rate history needs at least two weeks with enough covered activity for the selected metric."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选指标至少需要两周有足够覆盖时长的数据，才能显示每周费率。"
+          }
+        }
+      }
+    },
+    "Selected period": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected period"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选时段"
+          }
+        }
+      }
+    },
+    "Published model prices": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published model prices"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "公开的模型定价"
+          }
+        }
+      }
+    },
+    "Estimated share of the weekly allowance": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated share of the weekly allowance"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "估算占每周额度的比例"
+          }
+        }
+      }
+    },
+    "Using this model and effort": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Using this model and effort"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用此模型和推理强度"
+          }
+        }
+      }
+    },
+    "Usage records": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用量记录"
+          }
+        }
+      }
+    },
+    "Transcript-derived evidence": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript-derived evidence"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自对话记录"
+          }
+        }
+      }
+    },
+    "Rates from timed activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rates from timed activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按计时活动计算的费率"
+          }
+        }
+      }
+    },
+    "A rate appears only after 15 minutes of covered activity for that metric. Untimed value remains in the selected-period total.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A rate appears only after 15 minutes of covered activity for that metric. Untimed value remains in the selected-period total."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该指标的覆盖时长达到 15 分钟后才显示费率。未计时的价值仍计入所选时段的总值。"
+          }
+        }
+      }
+    },
+    "Attributed quota per hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attributed quota per hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每小时归因配额"
+          }
+        }
+      }
+    },
+    "%@ quota-calibrated": {
+      "comment": "The formatted length of activity covered by quota calibration.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ quota-calibrated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已校准配额的时长：%@"
+          }
+        }
+      }
+    },
+    "API-equivalent cost per hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-equivalent cost per hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每小时 API 等价成本"
+          }
+        }
+      }
+    },
+    "%@ priced": {
+      "comment": "The formatted length of activity covered by API prices.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ priced"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已定价时长：%@"
+          }
+        }
+      }
+    },
+    "Weekly rates": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly rates"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每周费率"
+          }
+        }
+      }
+    },
+    "Evidence behind these numbers": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evidence behind these numbers"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "数据依据"
+          }
+        }
+      }
+    },
+    "Coverage counts usage records. Hourly rates use only the timestamped activity shown above.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coverage counts usage records. Hourly rates use only the timestamped activity shown above."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "覆盖率按用量记录数计算。小时费率仅使用上方所示的带时间戳活动。"
+          }
+        }
+      }
+    },
+    "Priced usage records": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Priced usage records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已定价的用量记录"
+          }
+        }
+      }
+    },
+    "Timed priced records": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timed priced records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已计时且已定价的记录"
+          }
+        }
+      }
+    },
+    "Quota-attributed priced records": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota-attributed priced records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已归因配额的定价记录"
+          }
+        }
+      }
+    },
+    "Timed quota records": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timed quota records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已计时的配额归因记录"
+          }
+        }
+      }
+    },
+    "%@ of %@ (%@)": {
+      "comment": "Economics coverage: covered record count, eligible record count, and formatted coverage percentage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ of %@ (%@)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ / %@（%@）"
+          }
+        }
+      }
+    },
+    "No records": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无记录"
+          }
+        }
+      }
+    },
+    "Economics dashboard with model rates and evidence coverage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Economics dashboard with model rates and evidence coverage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示模型费率和数据覆盖情况的经济性面板"
+          }
+        }
+      }
+    },
     "Search every local session with verified coverage, keep large transcripts smoother, and compare agent economics.": {
       "comment": "One-line teaser for the Agent Sessions 7.0 What's New card.",
       "localizations": {
@@ -28838,22 +29209,6 @@
         }
       }
     },
-    "Selected-period trend": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Selected-period trend"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "所选周期趋势"
-          }
-        }
-      }
-    },
     "Finding sessions with price and quota evidence": {
       "localizations": {
         "en": {
@@ -28918,22 +29273,6 @@
         }
       }
     },
-    "No priced history for this configuration.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No priced history for this configuration."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此配置没有定价历史记录。"
-          }
-        }
-      }
-    },
     "Overview": {
       "localizations": {
         "en": {
@@ -28962,38 +29301,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "价格覆盖率"
-          }
-        }
-      }
-    },
-    "Quota coverage": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quota coverage"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "配额覆盖率"
-          }
-        }
-      }
-    },
-    "Quota history begins with observed provider windows.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quota history begins with observed provider windows."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "配额历史从已观测到的提供商窗口开始。"
           }
         }
       }
@@ -29176,22 +29483,6 @@
         }
       }
     },
-    "API timed activity": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API timed activity"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API 计时活动"
-          }
-        }
-      }
-    },
     "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Attributed quota converts local model usage with Quota Meter's provider-wide calibration; it is not the provider-reported account total. Work on other devices may affect the estimate.": {
       "localizations": {
         "en": {
@@ -29204,22 +29495,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "API 等值使用已发布的模型价格。小时费率会优先汇总精确的请求时段；若无精确时段，则只采用所选筛选范围内、不超过 30 分钟且配置相同的相邻用量间隔。每项指标都需要至少 15 分钟的独立覆盖时间；未计时的费用仍计入总价值，但不计入费率。归因配额使用配额仪表的提供商级校准来换算本地模型用量；它不是提供商报告的账户总量。其他设备上的工作也可能影响估算。"
-          }
-        }
-      }
-    },
-    "Each hourly rate needs its own 15-minute covered sample. Total value is still included above.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Each hourly rate needs its own 15-minute covered sample. Total value is still included above."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每项小时费率都需要各自至少 15 分钟的覆盖样本。总价值仍计入上方。"
           }
         }
       }
@@ -29256,22 +29531,6 @@
         }
       }
     },
-    "Quota timed activity": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quota timed activity"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "配额计时活动"
-          }
-        }
-      }
-    },
     "Selected filter · observed windows": {
       "localizations": {
         "en": {
@@ -29300,22 +29559,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "计时活动"
-          }
-        }
-      }
-    },
-    "Timed price coverage": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Timed price coverage"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "计时价格覆盖率"
           }
         }
       }

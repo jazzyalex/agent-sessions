@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- Economics model details now show selected-period totals, hourly rate inputs, and exact evidence counts. Weekly rates appear when at least two weeks have enough covered activity. The 7.0 What's New highlight includes an Economics dashboard screenshot in builds from this update.
+
 ## [7.0] - 2026-11-23
 
 ### Highlights

@@ -114,7 +114,8 @@ struct WhatsNewPanelView: View {
                 icon: item.iconSystemName,
                 iconColor: palette.accentBlue,
                 title: item.title,
-                description: item.body
+                description: item.body,
+                imageAssetName: item.imageAssetName
             )
         case .promo:
             promoRow(item)
