@@ -5585,7 +5585,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         out.reserveCapacity(4)
         var search = NSRange(location: 0, length: text.length)
         while search.length > 0 {
-            let found = text.range(of: q, options: [.caseInsensitive], range: search)
+            let found = text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive], range: search)
             if found.location == NSNotFound { break }
             out.append(NSRange(location: base.location + found.location, length: found.length))
             let nextLoc = found.location + max(1, found.length)

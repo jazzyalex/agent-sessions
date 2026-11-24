@@ -144,6 +144,20 @@ enum SearchTextMatcher {
         let valueLower: String
     }
 
+    /// Match FTS's default accent handling for a word while retaining the
+    /// matcher's existing token boundaries and ranges in the original text.
+    private struct TokenNormalizer {
+        private lazy var tokenizer = try? SearchTokenizer()
+
+        mutating func normalize(_ token: String) -> String {
+            let lower = token.lowercased()
+            guard lower.utf8.contains(where: { $0 >= 128 }),
+                  lower.decomposedStringWithCanonicalMapping.unicodeScalars.contains(where: CharacterSet.nonBaseCharacters.contains),
+                  let tokenizer, let tokens = try? tokenizer.tokens(lower), tokens.count == 1 else { return lower }
+            return tokens[0]
+        }
+    }
+
     private struct BooleanClause {
         var required: [[QueryTokenSpec]] = []
         var forbidden: [[QueryTokenSpec]] = []
@@ -271,6 +285,7 @@ enum SearchTextMatcher {
     private static func tokenizeText(_ text: String) -> [TextToken] {
         guard !text.isEmpty else { return [] }
         var out: [TextToken] = []
+        var normalizer = TokenNormalizer()
         out.reserveCapacity(max(8, text.count / 12))
 
         var start: String.Index? = nil
@@ -284,7 +299,7 @@ enum SearchTextMatcher {
             } else if let s = start {
                 let tokenRange = s..<idx
                 let token = String(text[tokenRange])
-                let lower = token.lowercased()
+                let lower = normalizer.normalize(token)
                 let range = NSRange(tokenRange, in: text)
                 out.append(TextToken(range: range, valueLower: lower))
                 start = nil
@@ -295,7 +310,7 @@ enum SearchTextMatcher {
         if let s = start {
             let tokenRange = s..<end
             let token = String(text[tokenRange])
-            let lower = token.lowercased()
+            let lower = normalizer.normalize(token)
             let range = NSRange(tokenRange, in: text)
             out.append(TextToken(range: range, valueLower: lower))
         }
@@ -306,6 +321,7 @@ enum SearchTextMatcher {
     private static func tokenizeQueryTerm(_ term: String, allowAutoPrefix: Bool) -> [QueryTokenSpec] {
         guard !term.isEmpty else { return [] }
         var out: [QueryTokenSpec] = []
+        var normalizer = TokenNormalizer()
         out.reserveCapacity(max(4, term.count / 12))
 
         var start: String.Index? = nil
@@ -319,7 +335,7 @@ enum SearchTextMatcher {
             } else if let s = start {
                 let tokenRange = s..<idx
                 let token = String(term[tokenRange])
-                let lower = token.lowercased()
+                let lower = normalizer.normalize(token)
                 let isPrefix = scalar == "*"
                 out.append(QueryTokenSpec(text: lower, isPrefix: isPrefix))
                 start = nil
@@ -330,7 +346,7 @@ enum SearchTextMatcher {
         if let s = start {
             let tokenRange = s..<end
             let token = String(term[tokenRange])
-            let lower = token.lowercased()
+            let lower = normalizer.normalize(token)
             out.append(QueryTokenSpec(text: lower, isPrefix: false))
         }
 
@@ -465,6 +481,7 @@ enum SearchTextMatcher {
 
         var ranges: [NSRange] = []
         let normalizedPrefix = prefix.lowercased()
+        var normalizer = TokenNormalizer()
         let prefixBytes = Array(normalizedPrefix.utf8)
         let bytes = text.utf8
         var cursor = bytes.startIndex
@@ -508,10 +525,8 @@ enum SearchTextMatcher {
 
             let matches: Bool
             if needsUnicodeFallback {
-                // Preserve the original Unicode lowercase semantics, including
-                // characters such as Kelvin sign, while allocating only for the
-                // rare token whose candidate prefix actually contains Unicode.
-                matches = text[tokenStart..<tokenEnd].lowercased().hasPrefix(normalizedPrefix)
+                // Normalize only a token whose candidate prefix contains Unicode.
+                matches = normalizer.normalize(String(text[tokenStart..<tokenEnd])).hasPrefix(normalizedPrefix)
             } else {
                 matches = asciiPrefixIndex >= prefixBytes.count && !asciiMismatch
             }

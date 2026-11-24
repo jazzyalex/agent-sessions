@@ -2719,7 +2719,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
         var matches: [Range<String.Index>] = []
         var searchStart = transcript.startIndex
-        while let r = transcript.range(of: q, options: [.caseInsensitive], range: searchStart..<transcript.endIndex) {
+        while let r = transcript.range(of: q, options: [.caseInsensitive, .diacriticInsensitive],
+                                       range: searchStart..<transcript.endIndex) {
             matches.append(r)
             searchStart = r.upperBound
         }

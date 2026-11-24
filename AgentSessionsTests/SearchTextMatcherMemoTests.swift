@@ -62,6 +62,18 @@ final class SearchTextMatcherMemoTests: XCTestCase {
                        "Unicode characters that lowercase to ASCII must retain their old match")
     }
 
+    func testAccentMatchingReturnsOriginalRangesForPrecomposedAndDecomposedText() {
+        let text = "🙂 Québec and Que\u{301}bec"
+        for query in ["quebec", "\"quebec\"", "que*"] {
+            let original = SearchTextMatcher.matchRanges(in: text, query: query)
+                .map { (text as NSString).substring(with: $0) }
+            XCTAssertEqual(original.map { Array($0.utf16) },
+                           ["Québec", "Que\u{301}bec"].map { Array($0.utf16) }, query)
+        }
+        XCTAssertFalse(SearchTextMatcher.hasMatch(in: "ά", query: "\"α\""))
+        XCTAssertFalse(SearchTextMatcher.hasMatch(in: "ộ", query: "\"o\""))
+    }
+
     func testSimplePrefixFastPathDoesNotTokenizeLargeTranscript() {
         let filler = String(repeating: "alpha beta gamma delta ", count: 220_000)
         let text = filler + "profiled"
