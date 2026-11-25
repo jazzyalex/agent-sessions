@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [7.0.1] - 2026-11-24
+
 ### Bug Fixes
 
 - Refresh removes stale search and Analytics entries for Codex and Claude transcripts that were moved or deleted. Disconnected folders keep their index entries. Reported by @nostitos in #98.
