@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>7.0</title>
-            <pubDate>Mon, 23 Nov 2026 11:53:55 -0800</pubDate>
+            <title>7.0.1</title>
+            <pubDate>Tue, 24 Nov 2026 21:32:56 -0800</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,20 +27,43 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 7.0</h2>
+<h2>What&#x27;s New in 7.0.1</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
+<li><strong>OpenCode 2.4.1 transcripts are complete again.</strong> Assistant replies and tool output return to transcripts and search. Existing OpenCode SQLite search entries rebuild automatically.</li>
+<li><strong>Search shows why a session matched.</strong> Strong matches rank higher, and excerpts show the matching passage. Press Return to verify against the transcripts.</li>
+<li><strong>Economics makes effort comparisons easier to judge.</strong> Compare hourly rates, covered time, and session counts under the same filters, then open the transcripts behind the numbers.</li>
+</ul>
+<h3>Improvements</h3>
+<ul>
+<li>Click a column header to sort the current search results by that column. Ranked results and excerpts are based on the proposal by @nostitos in #95.</li>
+<li>Codex transcript parsing scans oversized image records faster when looking for tool call IDs. Contributed by @nostitos in #100.</li>
+<li>Economics model details now show selected-period totals, hourly rate inputs, and exact evidence counts. Weekly rates appear when at least two weeks have enough covered activity. The 7.0 What&#x27;s New highlight includes an Economics dashboard screenshot in builds from this update.</li>
+<li>Economics can compare two effort settings for the same model under the active filters. The quota estimate shows record coverage alongside it, and each configuration links to its contributing sessions.</li>
+<li>Economics reports unavailable pricing and missing transcripts, and only offers effort comparisons for known models. Opening a contributing transcript loads only its provider&#x27;s viewer.</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li>Refresh removes stale search and Analytics entries for Codex and Claude transcripts that were moved or deleted. Disconnected folders keep their index entries. Reported by @nostitos in #98.</li>
+<li>Codex transcripts stored in several rollouts show the retained history, including compressed pages. Screenshots appear with their original prompts. Based on #102 by @nostitos.</li>
+<li>Older Codex prompts with turn-ID-only metadata appear in transcripts and exports. Recognized harness context stays out of user text. Reported by @nostitos in #97.</li>
+<li>Opening a search result waits for the full transcript before jumping to a match. Reported by @nostitos in #99.</li>
+<li>Find highlights accent variants such as <code>quebec</code> and <code>Québec</code>. Reported by @nostitos in #96.</li>
+</ul>
+<h3>Reminder: What You Got in 7.0</h3>
+<ul>
 <li><strong>Search every local session with explicit coverage.</strong> Search supports terms, phrases, prefixes, Boolean queries, and complete session IDs across enabled agents. Results appear as they are found; Return verifies eligible source sessions and reports complete, incomplete, and unresolved coverage without discarding partial results.</li>
 <li><strong>Compare agent economics.</strong> Analytics adds API-equivalent value and attributed quota by agent, model, and thinking effort. It states timing and coverage limits, excludes untimed spend from hourly rates, and keeps provider-wide quota left separate from quota attributable to the selected sessions.</li>
 <li><strong>Smoother large transcripts.</strong> Transcript presentation shares message grouping, timing, navigation, and syntax work off the main thread. Fast scrolling defers directory and Presence scans until input settles, reduces repeated row layout, and reliably replaces a large Codex session&#x27;s provisional tail with the full transcript.</li>
+<li>Search and filters stay inside the session-list pane, with active scopes, progress, and detailed coverage kept next to the results. Resume uses one readable button and destination menu; Saved, Archived, and group folding take less toolbar space.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>92</sparkle:version>
-            <sparkle:shortVersionString>7.0</sparkle:shortVersionString>
+            <sparkle:version>93</sparkle:version>
+            <sparkle:shortVersionString>7.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v7.0/AgentSessions-7.0.dmg" length="35013910" type="application/octet-stream" sparkle:edSignature="SiLcU0QEhF2NkmK7PokbSby2/TnW6EKTdRZ6eY+ReaMPTl35p/T3lkVQY9aMXTlIdyo6KrZLZ44Ufd5kt2euAw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v7.0.1/AgentSessions-7.0.1.dmg" length="34566909" type="application/octet-stream" sparkle:edSignature="8BfU46BGWnpKCRat2vhPruxIqLiCV74TB+8hMLZ0KBbEbS2Kp/Cy/wHDTj6ViLSNzhlCQmwZtdgymX+KDBARDw=="/>
         </item>
     </channel>
 </rss>
