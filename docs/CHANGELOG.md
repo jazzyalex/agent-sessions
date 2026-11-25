@@ -6,18 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ## [7.0.1] - 2026-11-24
 
+### Highlights
+
+- **OpenCode 2.4.1 transcripts are complete again.** Assistant replies and tool output return to transcripts and search. Existing OpenCode SQLite search entries rebuild automatically.
+- **Search shows why a session matched.** Strong matches rank higher, and excerpts show the matching passage. Press Return to verify against the transcripts.
+- **Economics makes effort comparisons easier to judge.** Compare hourly rates, covered time, and session counts under the same filters, then open the transcripts behind the numbers.
+
 ### Bug Fixes
 
 - Refresh removes stale search and Analytics entries for Codex and Claude transcripts that were moved or deleted. Disconnected folders keep their index entries. Reported by @nostitos in #98.
 - Codex transcripts stored in several rollouts show the retained history, including compressed pages. Screenshots appear with their original prompts. Based on #102 by @nostitos.
-- OpenCode 2.4.1 assistant replies and tool output appear in transcripts and search again. Existing OpenCode SQLite search entries rebuild automatically.
 - Older Codex prompts with turn-ID-only metadata appear in transcripts and exports. Recognized harness context stays out of user text. Reported by @nostitos in #97.
 - Opening a search result waits for the full transcript before jumping to a match. Reported by @nostitos in #99.
 - Find highlights accent variants such as `quebec` and `Québec`. Reported by @nostitos in #96.
 
 ### Improvements
 
-- Text search ranks strong matches and shows a short excerpt from the matching passage. Return updates excerpts as it verifies transcripts. Click a column header to sort the current results by that column. Based on the proposal by @nostitos in #95.
+- Click a column header to sort the current search results by that column. Ranked results and excerpts are based on the proposal by @nostitos in #95.
 - Codex transcript parsing scans oversized image records faster when looking for tool call IDs. Contributed by @nostitos in #100.
 - Economics model details now show selected-period totals, hourly rate inputs, and exact evidence counts. Weekly rates appear when at least two weeks have enough covered activity. The 7.0 What's New highlight includes an Economics dashboard screenshot in builds from this update.
 - Economics can compare two effort settings for the same model under the active filters. The quota estimate shows record coverage alongside it, and each configuration links to its contributing sessions.

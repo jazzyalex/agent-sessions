@@ -47,9 +47,9 @@ Updates are signed, notarized, and delivered through Sparkle.
 
 ## What's new
 
+- [7.0.1](https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0.1) restores OpenCode 2.4.1 replies, ranks search results with excerpts, and lets you compare effort settings and open their transcripts in Economics.
 - [7.0](https://github.com/jazzyalex/agent-sessions/releases/tag/v7.0) verifies search coverage across local agent history, keeps large transcripts smoother, and adds Economics to Analytics.
 - [6.6](https://github.com/jazzyalex/agent-sessions/releases/tag/v6.6) adds Claude Code resume in VS Code, Macterm support, and updated model pricing.
-- [6.5](https://github.com/jazzyalex/agent-sessions/releases/tag/v6.5) puts prompts and answers first, with tool activity available through the Tools chip.
 
 Browse [all release notes](https://github.com/jazzyalex/agent-sessions/releases) or read the [changelog](docs/CHANGELOG.md).
 
