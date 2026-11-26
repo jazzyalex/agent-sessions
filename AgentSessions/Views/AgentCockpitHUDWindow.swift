@@ -135,7 +135,7 @@ final class QuotaMeterWindowController: NSObject, NSWindowDelegate {
         // The hosting view sits inside a plain container: as the window's content view it
         // resizes the window itself (`updateAnimatedWindowSize`), even with `sizingOptions`
         // empty, and that is the loop above.
-        let host = NSHostingView(rootView: makeRootView())
+        let host = NSHostingView(rootView: draggableContent(makeRootView()))
         host.sizingOptions = []
         let container = NSView(frame: NSRect(origin: .zero, size: window.contentLayoutRect.size))
         host.frame = container.bounds
@@ -162,6 +162,43 @@ final class QuotaMeterWindowController: NSObject, NSWindowDelegate {
         // Removing the content runs SwiftUI's onDisappear, as closing the scene window did.
         closing.contentView = nil
         window = nil
+    }
+
+    @ViewBuilder
+    private func draggableContent(_ content: AnyView) -> some View {
+        // The titleless window's background is covered by the hosting view.
+        if #available(macOS 15.0, *) {
+            content
+                .contentShape(Rectangle())
+                .gesture(WindowDragGesture())
+                .allowsWindowActivationEvents()
+        } else {
+            content.overlay(alignment: .leading) {
+                // Use the meter's existing left padding so controls keep their clicks.
+                QuotaMeterDragMargin().frame(width: 10)
+            }
+        }
+    }
+}
+
+private struct QuotaMeterDragMargin: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragView { DragView() }
+    func updateNSView(_ nsView: DragView, context: Context) {}
+
+    final class DragView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            // Let the meter's right-click catcher receive secondary clicks.
+            guard let event = NSApp.currentEvent,
+                  event.type == .leftMouseDown,
+                  !event.modifierFlags.contains(.control) else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
     }
 }
 
@@ -354,7 +391,6 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 window.identifier = NSUserInterfaceItemIdentifier("AgentCockpit")
             }
 
-            window.isMovableByWindowBackground = true
             window.isRestorable = true
             window.resizeIncrements = NSSize(width: 1, height: 1)
             window.contentResizeIncrements = NSSize(width: 1, height: 1)
