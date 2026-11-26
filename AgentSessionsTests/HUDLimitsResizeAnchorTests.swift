@@ -89,3 +89,41 @@ final class HUDLimitsResizeAnchorTests: XCTestCase {
         XCTAssertEqual(HUDLimitsContentHeight.clamped(10), 30, "the 30 pt minimum is unchanged")
     }
 }
+
+/// A runaway Quota Meter frame was autosaved, and restoring it crashed the app every time the
+/// window opened. Only the saved corner may come back; the size is the content's.
+final class HUDLimitsSavedFrameTests: XCTestCase {
+    /// A MacBook display (1800 x 1169, notch) under a 3200 x 1800 monitor placed above and left.
+    private let screens = [
+        CGRect(x: 0, y: 0, width: 1800, height: 1132),
+        CGRect(x: -1025, y: 1169, width: 3200, height: 1770)
+    ]
+
+    func testRunawayFrameRestoresOnlyItsCorner() throws {
+        let saved = try XCTUnwrap(HUDLimitsSavedFrame.parse("-1025 -659 4503 2991 -1025 1169 3200 1770 "))
+        XCTAssertEqual(saved, CGRect(x: -1025, y: -659, width: 4503, height: 2991))
+
+        let restored = HUDLimitsSavedFrame.restoredFrame(
+            saved: saved, size: CGSize(width: 417, height: 90), visibleFrames: screens
+        )
+        XCTAssertEqual(restored, CGRect(x: -1025, y: 2242, width: 417, height: 90),
+                       "same top-left corner as before the runaway, at the content's size")
+    }
+
+    func testCornerOffEveryScreenFallsBackToTheDefault() {
+        let saved = CGRect(x: 5000, y: 5000, width: 417, height: 90)
+        XCTAssertNil(HUDLimitsSavedFrame.restoredFrame(
+            saved: saved, size: CGSize(width: 417, height: 90), visibleFrames: screens
+        ))
+        XCTAssertNil(HUDLimitsSavedFrame.parse("not a frame"))
+    }
+
+    func testRestoredWindowStaysOnItsScreen() {
+        // Parked at the right edge of the monitor; the window must not hang off it.
+        let saved = CGRect(x: 2100, y: 1200, width: 417, height: 90)
+        let restored = HUDLimitsSavedFrame.restoredFrame(
+            saved: saved, size: CGSize(width: 417, height: 300), visibleFrames: screens
+        )
+        XCTAssertEqual(restored, CGRect(x: 2175 - 417, y: 1169, width: 417, height: 300))
+    }
+}
