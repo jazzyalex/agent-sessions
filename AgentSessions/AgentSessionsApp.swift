@@ -479,46 +479,8 @@ struct AgentSessionsApp: App {
                 }
             }
         }
-
-        Window("Quota Meter", id: AppWindowRouter.cockpitWindowIdentifier) {
-            if AppRuntime.isRunningTests {
-                EmptyView()
-            } else {
-                AgentCockpitHUDView(
-                    codexIndexer: indexer,
-                    claudeIndexer: claudeIndexer,
-                    opencodeIndexer: opencodeIndexer
-                )
-                .environment(activeCodexSessions)
-                .environmentObject(codexUsageModel)
-                .environmentObject(claudeUsageModel)
-                .background(WindowOpenRegistrationView(windowIdentifier: AppWindowRouter.cockpitWindowIdentifier))
-                .onAppear {
-                    runSharedLaunchBootstrap(windowLabel: "Agent Cockpit window")
-                    // Retires the Quota Meter card's audience test: usage
-                    // tracking being on is not the same as having ever seen the
-                    // window, and this is the only place that difference is known.
-                    onboardingCoordinator.noteCockpitOpened()
-                    CockpitWindowVisibility.shared.refresh()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                    handleAppDidBecomeActive()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-                    handleAppDidResignActive()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .showPreferencesTab)) { note in
-                    let raw = note.userInfo?["tab"] as? String
-                    let tab = raw.flatMap(PreferencesTab.init(rawValue:)) ?? .general
-                    PreferencesWindowController.shared.show(
-                        indexer: indexer,
-                        updaterController: updaterController,
-                        initialTab: tab
-                    )
-                }
-            }
-        }
-        .defaultSize(width: 644, height: 320)
+        // The floating Quota Meter is an AppKit window (`QuotaMeterWindowController`), not a
+        // scene: see there.
     }
 }
 
@@ -1067,6 +1029,9 @@ extension AgentSessionsApp {
         guard !AppRuntime.isRunningTests else { return }
         let coordinator = QuotaMeterPresentationCoordinator.shared
         guard !coordinator.isStarted else { return }
+        let meterWindow = QuotaMeterWindowController.shared
+        meterWindow.configure { AnyView(self.quotaMeterWindowRoot()) }
+        AppWindowRouter.openAgentCockpitWindow = { meterWindow.show() }
         let strip = QuotaStripController(codexIndexer: indexer,
                                          claudeIndexer: claudeIndexer,
                                          opencodeIndexer: opencodeIndexer,
@@ -1098,6 +1063,47 @@ extension AgentSessionsApp {
         coordinator.start(stripController: strip, openWindow: {
             AppWindowRouter.openAgentCockpitWindow?()
         })
+        // Window restoration used to reopen the meter; the app does it now.
+        AppWindowRouter.maybeRestorePinnedCockpitOnLaunch(openWindow: { meterWindow.show() })
+        if UserDefaults.standard.bool(forKey: QuotaMeterWindowController.openAtQuitKey),
+           !coordinator.resolvesToStrip() {
+            meterWindow.show()
+        }
+    }
+
+    /// The floating Quota Meter's content (`QuotaMeterWindowController` hosts it).
+    private func quotaMeterWindowRoot() -> some View {
+        AgentCockpitHUDView(
+            codexIndexer: indexer,
+            claudeIndexer: claudeIndexer,
+            opencodeIndexer: opencodeIndexer
+        )
+        .environment(activeCodexSessions)
+        .environmentObject(codexUsageModel)
+        .environmentObject(claudeUsageModel)
+        .onAppear {
+            runSharedLaunchBootstrap(windowLabel: "Agent Cockpit window")
+            // Retires the Quota Meter card's audience test: usage
+            // tracking being on is not the same as having ever seen the
+            // window, and this is the only place that difference is known.
+            onboardingCoordinator.noteCockpitOpened()
+            CockpitWindowVisibility.shared.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            handleAppDidBecomeActive()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            handleAppDidResignActive()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showPreferencesTab)) { note in
+            let raw = note.userInfo?["tab"] as? String
+            let tab = raw.flatMap(PreferencesTab.init(rawValue:)) ?? .general
+            PreferencesWindowController.shared.show(
+                indexer: indexer,
+                updaterController: updaterController,
+                initialTab: tab
+            )
+        }
     }
 
     private func setupAnalytics() {
@@ -1343,13 +1349,6 @@ private struct WindowOpenRegistrationView: View {
                 AppWindowRouter.openAgentSessionsWindow = {
                     openWindow(id: AppWindowRouter.mainWindowSceneIdentifier)
                 }
-                let openCockpitWindow = {
-                    openWindow(id: AppWindowRouter.cockpitWindowIdentifier)
-                }
-                AppWindowRouter.openAgentCockpitWindow = {
-                    openCockpitWindow()
-                }
-                AppWindowRouter.maybeRestorePinnedCockpitOnLaunch(openWindow: openCockpitWindow)
             }
     }
 }

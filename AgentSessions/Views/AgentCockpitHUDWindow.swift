@@ -35,6 +35,142 @@ enum HUDLimitsContentHeight {
     }
 }
 
+/// Where a reopened Quota Meter window goes.
+///
+/// AppKit's frame autosave keeps whatever frame the window last had. A window that ran away
+/// in size (it reached 4730 x 3150 pt across two displays) was saved that way, and restoring
+/// that frame restarted the same resize loop, so the app crashed every time the Quota Meter
+/// window opened. The window's size always comes from its content: only the saved top-left
+/// corner is reused, and only when it is on a screen.
+enum HUDLimitsSavedFrame {
+    /// AppKit autosave name of the Quota Meter window's frame.
+    static let autosaveName = "AgentCockpitHUDWindow.limits"
+
+    /// The frame AppKit saved for the Quota Meter window, if any.
+    static func saved(in defaults: UserDefaults = .standard) -> CGRect? {
+        parse(defaults.string(forKey: "NSWindow Frame \(autosaveName)"))
+    }
+
+    /// Reads AppKit's saved frame string: "x y width height", then the screen's frame.
+    static func parse(_ saved: String?) -> CGRect? {
+        guard let saved else { return nil }
+        let numbers = saved.split(separator: " ").compactMap { Double($0) }
+        guard numbers.count >= 4, numbers[2] > 0, numbers[3] > 0 else { return nil }
+        return CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+    }
+
+    /// The saved top-left corner with the given size, kept inside the visible frame that
+    /// holds the corner. Nil when the corner is on no screen.
+    static func restoredFrame(saved: CGRect, size: CGSize, visibleFrames: [CGRect]) -> CGRect? {
+        let left = saved.minX
+        let top = saved.maxY
+        guard let screen = visibleFrames.first(where: {
+            left >= $0.minX && left <= $0.maxX && top >= $0.minY && top <= $0.maxY
+        }) else { return nil }
+        let x = max(screen.minX, min(left, screen.maxX - size.width))
+        let clampedTop = min(screen.maxY, max(top, screen.minY + size.height))
+        return CGRect(x: x, y: clampedTop - size.height, width: size.width, height: size.height)
+    }
+}
+
+/// The configurator's view; reports when SwiftUI puts it in (or takes it out of) a window.
+private final class HUDWindowAttachmentView: NSView {
+    var onMoveToWindow: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onMoveToWindow?()
+    }
+}
+
+/// The floating Quota Meter window. AppKit owns it, as `QuotaStripController` owns the strip,
+/// so SwiftUI never sizes it; `AgentCockpitHUDWindowConfigurator` does.
+///
+/// It used to be a SwiftUI `Window` scene. The scene kept switching its hosting view's sizing
+/// options back on and, on every layout pass, resized the window by the gap between the
+/// scene's default size (644 x 320) and the meter's own size. The window grew from its top-left
+/// corner (to 4730 x 3150 pt on 2026-11-25) within one display cycle until AppKit threw "more
+/// Update Constraints in Window passes than there are views in the window". Switching the
+/// Quota Meter back to Desktop, opening it at launch and restoring it after a relaunch all
+/// crashed that way.
+@MainActor
+final class QuotaMeterWindowController: NSObject, NSWindowDelegate {
+    static let shared = QuotaMeterWindowController()
+    /// Whether the window was open when the app last quit, so launch can reopen it (window
+    /// restoration reopened the scene).
+    static let openAtQuitKey = "QuotaMeterWindowOpenAtQuit"
+
+    private var makeRootView: (() -> AnyView)?
+    private var window: NSWindow?
+    private var terminationObserver: NSObjectProtocol?
+
+    func configure(rootView: @escaping () -> AnyView) {
+        makeRootView = rootView
+        guard terminationObserver == nil else { return }
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                UserDefaults.standard.set(self?.window?.isVisible ?? false, forKey: Self.openAtQuitKey)
+            }
+        }
+    }
+
+    func show() {
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        guard let makeRootView else { return }
+        let window = QuotaMeterWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 120),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.identifier = NSUserInterfaceItemIdentifier(AppWindowRouter.cockpitWindowIdentifier)
+        window.title = "Quota Meter"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        // The hosting view sits inside a plain container: as the window's content view it
+        // resizes the window itself (`updateAnimatedWindowSize`), even with `sizingOptions`
+        // empty, and that is the loop above.
+        let host = NSHostingView(rootView: makeRootView())
+        host.sizingOptions = []
+        let container = NSView(frame: NSRect(origin: .zero, size: window.contentLayoutRect.size))
+        host.frame = container.bounds
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        window.contentView = container
+        // Start at the saved corner; the configurator sets the size once the content is laid out.
+        if let saved = HUDLimitsSavedFrame.saved(),
+           let frame = HUDLimitsSavedFrame.restoredFrame(
+               saved: saved,
+               size: window.frame.size,
+               visibleFrames: NSScreen.screens.map(\.visibleFrame)
+           ) {
+            window.setFrame(frame, display: false)
+        } else {
+            window.center()
+        }
+        self.window = window
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? NSWindow, closing === window else { return }
+        // Removing the content runs SwiftUI's onDisappear, as closing the scene window did.
+        closing.contentView = nil
+        window = nil
+    }
+}
+
+/// Keeps taking key once the configurator removes the title bar (the toolbar's popovers need it).
+private final class QuotaMeterWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isPinned: Bool
     let limitsContentHeight: CGFloat
@@ -53,19 +189,15 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { [weak view] in
-            guard let window = view?.window else { return }
-            context.coordinator.attach(to: window)
-            context.coordinator.applyStyleIfNeeded(styleInputs)
-        }
+        let view = HUDWindowAttachmentView()
+        let coordinator = context.coordinator
+        view.onMoveToWindow = { [weak coordinator] in coordinator?.scheduleStyleApply() }
+        context.coordinator.scheduleStyle(styleInputs, hostView: view)
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        guard let window = nsView.window else { return }
-        context.coordinator.attach(to: window)
-        context.coordinator.applyStyleIfNeeded(styleInputs)
+        context.coordinator.scheduleStyle(styleInputs, hostView: nsView)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -130,7 +262,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private static let pinnedWindowLevel: NSWindow.Level = .statusBar
         private static let pinnedCollectionBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        private let limitsAutosaveName = "AgentCockpitHUDWindow.limits"
+        private let limitsAutosaveName = HUDLimitsSavedFrame.autosaveName
         private let limitsMinimumWidth: CGFloat = 220
         private let limitsDefaultFrameWidth: CGFloat = 380
         private let compactHeaderHeight: CGFloat = 44.5
@@ -140,6 +272,34 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private var lastLimitsGrowAnchoredTop: Bool = true
         private var lastAppliedCompactToolbarVisibility: Bool?
         private var lastAppliedStyleInputs: StyleInputs?
+        private var pendingStyleInputs: StyleInputs?
+        private weak var pendingHostView: NSView?
+        private var styleApplyScheduled = false
+
+        /// SwiftUI calls make/update while it renders the Quota Meter. Restyling, resizing or
+        /// restoring the window inside that pass makes the hosting view lay out reentrantly
+        /// (SwiftUI logs it), and the resize loop that crashed the app began right after those
+        /// warnings. The window changes run on the next main-queue turn, with the latest inputs.
+        func scheduleStyle(_ inputs: StyleInputs, hostView: NSView) {
+            pendingStyleInputs = inputs
+            pendingHostView = hostView
+            scheduleStyleApply()
+        }
+
+        /// Also called when the configurator's view lands in a window: the first update can
+        /// run before SwiftUI has put the view in the window it creates.
+        func scheduleStyleApply() {
+            guard !styleApplyScheduled else { return }
+            styleApplyScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.styleApplyScheduled = false
+                guard let inputs = self.pendingStyleInputs,
+                      let window = self.pendingHostView?.window else { return }
+                self.attach(to: window)
+                self.applyStyleIfNeeded(inputs)
+            }
+        }
 
         func attach(to newWindow: NSWindow) {
             guard window !== newWindow else { return }
@@ -313,23 +473,35 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
 
         /// Restores the Quota Meter's saved position once per attach, falling back
-        /// to a default size when nothing was saved.
+        /// to a default size when nothing usable was saved.
         ///
         /// This replaced a three-mode transition system when Compact and Full were
         /// retired. With one mode there is nothing to transition *between*, so the
         /// per-mode frame cache and the save-the-outgoing-mode step are gone; AppKit's
         /// own autosave (enabled by `setFrameAutosaveName`) persists moves and resizes.
+        /// The saved size is never restored (see `HUDLimitsSavedFrame`): the size is the
+        /// one `applyStyle` has just fixed as `minSize == maxSize`.
         private func restoreLimitsFrameOnFirstAttach(window: NSWindow,
                                                      activeEnabled: Bool,
                                                      compactToolbarVisible: Bool,
                                                      limitsContentHeight: CGFloat) {
             guard !hasRestoredLimitsFrame else { return }
+            hasRestoredLimitsFrame = true
 
+            let saved = HUDLimitsSavedFrame.saved()
             if window.frameAutosaveName != limitsAutosaveName {
                 window.setFrameAutosaveName(limitsAutosaveName)
             }
 
-            if !window.setFrameUsingName(limitsAutosaveName) {
+            if let saved,
+               let frame = HUDLimitsSavedFrame.restoredFrame(
+                   saved: saved,
+                   size: window.minSize,
+                   visibleFrames: NSScreen.screens.map(\.visibleFrame)
+               ) {
+                pendingFrameWorkItem?.cancel()
+                window.setFrame(frame, display: true)
+            } else {
                 applyLimitsDefaultSize(
                     to: window,
                     contentHeight: limitsContentHeight,
@@ -339,8 +511,6 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                     animated: false
                 )
             }
-
-            hasRestoredLimitsFrame = true
         }
 
 
